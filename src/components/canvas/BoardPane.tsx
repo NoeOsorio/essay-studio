@@ -136,26 +136,20 @@ function BoardPaneInner() {
               scope: "session",
             });
 
-            // After a user creates a note, switch back to the select
-            // tool. Otherwise the note tool stays "sticky" and every
-            // subsequent click drops another empty note — surprising
-            // when the user's intent was to write into the one they
-            // just made.
-            const unlistenAfterCreate =
-              editor.sideEffects.registerAfterCreateHandler(
-                "shape",
-                (shape, source) => {
-                  if (shape.type === "note" && source === "user") {
-                    editor.setCurrentTool("select");
-                  }
-                },
-              );
+            // Don't lock tools — tldraw default is "sticky": after
+            // creating a note the tool stays active and every
+            // subsequent click drops another empty note. Unlocking
+            // means the note tool reverts to select after one
+            // creation, while preserving the edit-in-place that
+            // tldraw sets up internally (which our previous attempt
+            // with `setCurrentTool('select')` accidentally cancelled,
+            // breaking typing into the new note).
+            editor.updateInstanceState({ isToolLocked: false });
 
             return () => {
               unlistenStore();
               unlistenCamera();
               unlistenTool();
-              unlistenAfterCreate();
             };
           }}
         />

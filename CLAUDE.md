@@ -124,9 +124,13 @@ Las carpetas `src/lib/{agents,claude,storage}` contienen un `index.ts` stub para
 npm run dev          # Next.js dev server (localhost:3000)
 npm run build        # build estático → ./out
 npm run lint         # ESLint
+npm run test:e2e     # Playwright E2E (keyboard shortcuts, autosave, etc.)
+npm run test:e2e:ui  # mismo, con la UI interactiva
 npm run tauri:dev    # arranca Next dev + ventana Tauri
 npm run tauri:build  # build Tauri (.app / .dmg / .msi según OS)
 ```
+
+**Antes de tocar atajos / handlers de teclado:** correr `npm run test:e2e`. Ya nos mordió dos veces (el `N` que disparaba dos notes; el `select` tool que cancelaba edit-in-place). El suite en `tests/e2e/` cubre el flow real con un `__TAURI_INTERNALS__` stub que mantiene los essays en memoria.
 
 La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~140 crates — puede tardar 5-10 minutos. Siguientes corridas son segundos.
 
