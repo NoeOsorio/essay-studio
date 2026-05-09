@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import {
   getSnapshot,
   loadSnapshot,
+  toRichText,
   type Editor,
   type TLComponents,
   type TLStoreSnapshot,
@@ -98,7 +99,8 @@ function BoardPaneInner() {
 
             if (initialSnapshot) {
               try {
-                loadSnapshot(editor.store, initialSnapshot);
+                const migrated = migrateLegacyPostits(initialSnapshot);
+                loadSnapshot(editor.store, migrated);
               } catch (err) {
                 console.warn("loadSnapshot failed; starting empty", err);
               }
@@ -182,4 +184,65 @@ function recomputeCounts(
     else if (shape.type === "arrow") arrows += 1;
   }
   setCounts({ postits, arrows });
+}
+
+/**
+ * Convert any leftover `type: "postit"` shapes (from the previous
+ * custom-shape implementation) into the current `type: "note"` form,
+ * preserving author / kind / text in `meta` + `richText`.
+ *
+ * Idempotent: snapshots without legacy postits pass through unchanged.
+ * Any unexpected shape is left as-is and let through to tldraw's own
+ * validation, which will throw and trigger our load-empty fallback.
+ */
+function migrateLegacyPostits(snapshot: unknown): TLStoreSnapshot {
+  const cloned = JSON.parse(JSON.stringify(snapshot)) as TLStoreSnapshot;
+  const store = (cloned as { store?: Record<string, unknown> }).store;
+  if (!store || typeof store !== "object") return cloned;
+
+  for (const key of Object.keys(store)) {
+    const record = store[key] as
+      | {
+          typeName?: string;
+          type?: string;
+          props?: Record<string, unknown>;
+          meta?: Record<string, unknown>;
+        }
+      | undefined;
+    if (!record || record.typeName !== "shape" || record.type !== "postit") {
+      continue;
+    }
+
+    const oldProps = record.props ?? {};
+    const oldMeta = record.meta ?? {};
+    const text = typeof oldProps.text === "string" ? oldProps.text : "";
+
+    store[key] = {
+      ...record,
+      type: "note",
+      props: {
+        color: "yellow",
+        labelColor: "black",
+        size: "s",
+        font: "draw",
+        fontSizeAdjustment: 1,
+        align: "start",
+        verticalAlign: "start",
+        growY: 0,
+        url: "",
+        richText: toRichText(text),
+        scale: 1,
+        textFirstEditedBy: null,
+      },
+      meta: {
+        ...oldMeta,
+        ...(oldProps.author !== undefined ? { author: oldProps.author } : {}),
+        ...(oldProps.kind !== undefined ? { kind: oldProps.kind } : {}),
+        ...(oldProps.createdAt !== undefined
+          ? { createdAt: oldProps.createdAt }
+          : {}),
+      },
+    };
+  }
+  return cloned;
 }
