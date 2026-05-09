@@ -14,6 +14,9 @@ pub struct Essay {
     /// TipTap JSON document. We accept any valid JSON so the editor
     /// can evolve without Rust having to know the schema.
     pub content: serde_json::Value,
+    /// Optional tldraw snapshot for the canvas pane. Opaque JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<serde_json::Value>,
     pub mode: String,
     #[serde(rename = "wordCount", default)]
     pub word_count: u32,
@@ -159,6 +162,7 @@ mod tests {
                     "content": [{ "type": "text", "text": "Edmondson definió…" }]
                 }]
             }),
+            board: None,
             mode: "academico".to_string(),
             word_count: 3,
             created_at: "2026-05-09T20:00:00Z".to_string(),
@@ -248,6 +252,16 @@ mod tests {
             assert!(read_in(&dir, bad).is_err(), "should reject id {bad:?}");
             assert!(delete_in(&dir, bad).is_err(), "should reject id {bad:?}");
         }
+    }
+
+    #[test]
+    fn round_trip_preserves_optional_board_snapshot() {
+        let dir = make_dir();
+        let mut essay = sample_essay("with-board", "2026-05-09T20:30:00Z");
+        essay.board = Some(json!({ "store": { "shape:abc": { "type": "postit" } } }));
+        write_in(&dir, &essay).unwrap();
+        let read = read_in(&dir, "with-board").unwrap();
+        assert_eq!(read.board, essay.board);
     }
 
     #[test]

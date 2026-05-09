@@ -1,307 +1,283 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createShapeId,
+  getSnapshot,
+  loadSnapshot,
+  type Editor,
+  type TLComponents,
+  type TLStoreSnapshot,
+} from "tldraw";
+import "tldraw/tldraw.css";
+
+// Tldraw uses DOM APIs, so we only mount it on the client. Doing it
+// via next/dynamic keeps the SSR pass clean without resorting to a
+// useEffect-driven mounted flag.
+const Tldraw = dynamic(
+  () => import("tldraw").then((m) => ({ default: m.Tldraw })),
+  { ssr: false },
+);
+
 import { Badge } from "@/components/ui/Badge";
 import { IconButton } from "@/components/ui/IconButton";
+import { GroupIcon } from "@/components/ui/icons";
+import { useStore } from "@/lib/store";
 import {
-  ArrowIcon,
-  CursorIcon,
-  GroupDashedIcon,
-  GroupIcon,
-  MicIcon,
-  StickyIcon,
-  ZoomFit,
-  ZoomMinus,
-  ZoomPlus,
-} from "@/components/ui/icons";
-import { Postit, type PostitProps } from "@/components/canvas/Postit";
+  PostItShapeUtil,
+  POSTIT_INITIAL_W,
+  POSTIT_INITIAL_H,
+  type PostItShape,
+} from "./postit-shape";
+import { PostItModal, type PostItDraft } from "./PostItModal";
+import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
 
-type BoardColumn = {
-  title: string;
-  count: number;
-  dotColor: string;
-  postits: PostitProps[];
+const SHAPE_UTILS = [PostItShapeUtil];
+
+/**
+ * Hide tldraw's default chrome — we render our own toolbar, zoom and
+ * header to fit the Pergamino paper-tone palette.
+ */
+const HIDDEN_COMPONENTS: TLComponents = {
+  Toolbar: null,
+  MainMenu: null,
+  PageMenu: null,
+  StylePanel: null,
+  ZoomMenu: null,
+  NavigationPanel: null,
+  ActionsMenu: null,
+  QuickActions: null,
+  HelpMenu: null,
+  DebugMenu: null,
+  KeyboardShortcutsDialog: null,
+  HelperButtons: null,
+  TopPanel: null,
+  SharePanel: null,
 };
 
-const COLUMNS: BoardColumn[] = [
-  {
-    title: "Conceptos",
-    count: 6,
-    dotColor: "bg-rule-3",
-    postits: [
-      {
-        variant: "you",
-        initials: "TÚ",
-        tag: "DEFINICIÓN",
-        time: "8m",
-        body: "Seguridad psicológica = riesgo interpersonal sin castigo social.",
-      },
-      {
-        variant: "sis",
-        initials: "SI",
-        tag: "PATRÓN",
-        time: "5m",
-        body: "Loop: voz → silencio → más silencio. Cuesta el doble retomarlo.",
-      },
-    ],
-  },
-  {
-    title: "Preguntas",
-    count: 5,
-    dotColor: "bg-pra",
-    postits: [
-      {
-        variant: "pra",
-        initials: "PR",
-        tag: "CASO",
-        time: "just now",
-        body: "Equipo de 8 ingenieros remotos, retro semanal: ¿cómo lo medirías sin encuesta?",
-      },
-      {
-        variant: "you",
-        initials: "TÚ",
-        tag: "PREGUNTA",
-        time: "9m",
-        body: "¿La seguridad escala con el tamaño del equipo o se rompe en los nodos?",
-      },
-    ],
-  },
-  {
-    title: "Conexiones",
-    count: 4,
-    dotColor: "bg-sis",
-    postits: [
-      {
-        variant: "sis",
-        initials: "SI",
-        tag: "VINCULA",
-        time: "4s",
-        body: "Edmondson 1999 ↔ Schein nivel 3 (supuestos). El nivel 1 es ruido si el 3 está cerrado.",
-        lifted: true,
-      },
-      {
-        variant: "you",
-        initials: "TÚ",
-        tag: "PUENTE",
-        time: "11m",
-        body: "Servicial vs transformacional: el primero baja el costo de hablar; el segundo sube el techo.",
-      },
-    ],
-  },
-  {
-    title: "Citas",
-    count: 5,
-    dotColor: "bg-seal",
-    postits: [
-      {
-        variant: "em",
-        initials: "EM",
-        tag: "EVIDENCIA",
-        time: "2m",
-        body: "Edmondson (1999), N=51 cirugía, r=.41 entre seguridad psicológica y aprendizaje.",
-      },
-      {
-        variant: "you",
-        initials: "TÚ",
-        tag: "CITA",
-        time: "17m",
-        body: "«Cultura es lo que hace el equipo cuando nadie está mirando.» — Schein, 2010.",
-      },
-    ],
-  },
-  {
-    title: "Críticas",
-    count: 3,
-    dotColor: "bg-cri",
-    postits: [
-      {
-        variant: "cri",
-        initials: "CR",
-        tag: "OBJECIÓN",
-        time: "12m",
-        body: "Tu argumento se cae si cambio la muestra a equipos >20. Demuéstrame que no es coincidencia.",
-      },
-      {
-        variant: "cri",
-        initials: "CR",
-        tag: "CONTRA",
-        time: "18m",
-        body: "«Práctica deliberada» suena bonito; ¿quién la ejecuta cuando el manager está en pánico?",
-      },
-    ],
-  },
-];
-
 export function BoardPane() {
+  const current = useStore((s) => s.current);
+  // Mount + hydrate fresh on each essay switch. Tldraw's store is
+  // local; when the user opens a different essay we re-mount the
+  // whole canvas with the new snapshot.
+  const essayId = current?.id ?? "none";
+  return <BoardPaneInner key={essayId} />;
+}
+
+function BoardPaneInner() {
+  const updateBoard = useStore((s) => s.updateBoard);
+  const initialSnapshot = useStore(
+    (s) => s.current?.board as TLStoreSnapshot | null | undefined,
+  );
+
+  const [tool, setTool] = useState<BoardTool>("select");
+  const [zoom, setZoom] = useState(1);
+  const [counts, setCounts] = useState({ postits: 0, arrows: 0 });
+  const [modalOpen, setModalOpen] = useState(false);
+  // Where to drop the next post-it (in tldraw page coords).
+  const dropPointRef = useRef<{ x: number; y: number } | null>(null);
+  const editorRef = useRef<Editor | null>(null);
+
+  // Open the modal; uses the center of the current viewport as the
+  // drop point if no explicit one is set.
+  const openModal = useMemo(
+    () => () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      if (!dropPointRef.current) {
+        const { x, y } = editor.getViewportPageBounds().center;
+        dropPointRef.current = { x: x - POSTIT_INITIAL_W / 2, y: y - POSTIT_INITIAL_H / 2 };
+      }
+      setModalOpen(true);
+    },
+    [],
+  );
+
+  // Global N key opens the modal. Skip when the user is typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "n" && e.key !== "N") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=true]")) return;
+      // Don't trigger while a modifier is held (so Cmd+N etc. pass through).
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      dropPointRef.current = null;
+      openModal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openModal]);
+
   return (
-    <div className="board-grid relative overflow-hidden board-fade">
-      {/* Head */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-paper-2 border-b border-rule-1">
-        <div className="font-serif italic text-[16px] text-ink-1">
-          Tablero ·{" "}
-          <em className="italic">paradoja-seguridad-remota</em>
+    <div className="board-grid relative h-full overflow-hidden">
+      {/* Header */}
+      <div className="absolute left-0 right-0 top-0 z-[2] flex items-center justify-between px-4 py-2.5 bg-paper-2 border-b border-rule-1">
+        <div className="font-serif italic text-[16px] text-ink-1 truncate max-w-[60%]">
+          Tablero
         </div>
         <div className="flex items-center gap-2">
-          <Badge dotColor="bg-sis">23 notas</Badge>
-          <Badge dotColor="bg-ink-3">4 conexiones</Badge>
-          <IconButton title="Agrupar">
+          <Badge dotColor="bg-sis">{counts.postits} {counts.postits === 1 ? "nota" : "notas"}</Badge>
+          <Badge dotColor="bg-ink-3">{counts.arrows} {counts.arrows === 1 ? "conexión" : "conexiones"}</Badge>
+          <IconButton title="Agrupar (futuro)">
             <GroupIcon />
           </IconButton>
         </div>
       </div>
 
-      {/* Toolbar (left) */}
-      <div className="absolute left-3.5 top-[60px] z-[3] flex flex-col gap-1 bg-paper-2 border border-rule-1 rounded-[8px] p-1 shadow-(--shadow-soft)">
-        <ToolButton active title="seleccionar">
-          <CursorIcon />
-        </ToolButton>
-        <ToolButton title="post-it">
-          <StickyIcon />
-        </ToolButton>
-        <ToolButton title="flecha / conexión">
-          <ArrowIcon />
-        </ToolButton>
-        <ToolButton title="grupo">
-          <GroupDashedIcon />
-        </ToolButton>
-        <hr className="border-0 border-t border-rule-1 my-1 w-[80%]" />
-        <ToolButton title="micro · dictar">
-          <MicIcon />
-        </ToolButton>
+      {/* The canvas */}
+      <div className="absolute inset-0 pt-[44px]">
+        <Tldraw
+          shapeUtils={SHAPE_UTILS}
+          components={HIDDEN_COMPONENTS}
+          hideUi={false}
+          onMount={(editor) => {
+            editorRef.current = editor;
+
+            // Hydrate from the saved snapshot exactly once on mount.
+            if (initialSnapshot) {
+              try {
+                loadSnapshot(editor.store, initialSnapshot);
+              } catch (err) {
+                console.warn("loadSnapshot failed; starting empty", err);
+              }
+            }
+
+            // Initial counts + zoom.
+            recomputeCounts(editor, setCounts);
+            setZoom(editor.getZoomLevel());
+
+            // Subscribe to document-level changes for autosave.
+            const unlistenStore = editor.store.listen(
+              () => {
+                const snap = getSnapshot(editor.store);
+                updateBoard(snap);
+                recomputeCounts(editor, setCounts);
+              },
+              { source: "user", scope: "document" },
+            );
+
+            // Camera changes update the zoom indicator.
+            const unlistenCamera = editor.store.listen(
+              () => setZoom(editor.getZoomLevel()),
+              { scope: "session" },
+            );
+
+            // Double-click on empty space → create post-it modal at that point.
+            const onPointerDown = (e: PointerEvent) => {
+              if (e.detail < 2) return;
+              const target = e.target as HTMLElement | null;
+              if (target?.closest(".tl-shape")) return; // click on shape, not empty
+              const pt = editor.screenToPage({ x: e.clientX, y: e.clientY });
+              dropPointRef.current = {
+                x: pt.x - POSTIT_INITIAL_W / 2,
+                y: pt.y - POSTIT_INITIAL_H / 2,
+              };
+              openModal();
+            };
+            const container = editor.getContainer();
+            container.addEventListener("pointerdown", onPointerDown);
+
+            return () => {
+              unlistenStore();
+              unlistenCamera();
+              container.removeEventListener("pointerdown", onPointerDown);
+            };
+          }}
+        />
       </div>
 
-      {/* Zoom (right) */}
-      <div className="absolute right-3.5 top-[60px] z-[3] inline-flex items-center gap-0 bg-paper-2 border border-rule-1 rounded-[8px] shadow-(--shadow-soft) p-0.5">
-        <button
-          type="button"
-          title="zoom-out"
-          className="w-[26px] h-[26px] rounded grid place-items-center bg-transparent text-ink-2 hover:bg-paper-3 cursor-pointer"
-        >
-          <ZoomMinus />
-        </button>
-        <span className="font-mono text-[11px] font-medium text-ink-2 px-2 tracking-[0.04em]">86%</span>
-        <button
-          type="button"
-          title="zoom-in"
-          className="w-[26px] h-[26px] rounded grid place-items-center bg-transparent text-ink-2 hover:bg-paper-3 cursor-pointer"
-        >
-          <ZoomPlus />
-        </button>
-        <button
-          type="button"
-          title="ajustar"
-          className="w-[26px] h-[26px] rounded grid place-items-center bg-transparent text-ink-2 hover:bg-paper-3 cursor-pointer"
-        >
-          <ZoomFit />
-        </button>
-      </div>
-
-      {/* Toast */}
-      <Toast />
-
-      {/* Columns (horizontal scroll) */}
-      <div
-        className="absolute thin-scroll grid grid-flow-col gap-[18px] overflow-x-auto overflow-y-hidden pr-[60px]"
-        style={{
-          left: 60,
-          right: 24,
-          top: 96,
-          bottom: 24,
-          gridAutoColumns: "240px",
-          scrollSnapType: "x proximity",
+      {/* Custom toolbar / zoom overlays */}
+      <BoardToolbar
+        active={tool}
+        onTool={(t) => {
+          setTool(t);
+          const editor = editorRef.current;
+          if (!editor) return;
+          if (t === "postit") {
+            dropPointRef.current = null;
+            openModal();
+          } else if (t === "arrow") {
+            editor.setCurrentTool("arrow");
+          } else if (t === "select") {
+            editor.setCurrentTool("select");
+          } else if (t === "group") {
+            // Group = select tool with marquee — we just switch back.
+            editor.setCurrentTool("select");
+          }
         }}
-      >
-        {COLUMNS.map((col) => (
-          <div
-            key={col.title}
-            className="flex flex-col gap-[18px] min-w-0"
-            style={{ scrollSnapAlign: "start" }}
-          >
-            <div className="flex items-center gap-2 px-3 py-2 bg-paper-2 border border-rule-1 rounded-full font-mono text-[11px] font-medium tracking-[0.1em] uppercase text-ink-3 shadow-(--shadow-soft)">
-              <span className={`w-1.5 h-1.5 rounded-full ${col.dotColor}`} />
-              {col.title}
-              <span className="ml-auto font-mono text-[11px] font-medium text-ink-3 bg-paper-3 rounded-full px-[7px] py-px">
-                {col.count}
-              </span>
-            </div>
-            {col.postits.map((p, i) => (
-              <Postit key={i} {...p} />
-            ))}
-          </div>
-        ))}
-      </div>
+        onMicTeaser={() => {
+          // Hint until voice arrives in a future session.
+          alert("Dictado · próximamente.");
+        }}
+      />
 
-      {/* Connection arrow (visual demo) */}
-      <svg
-        className="absolute pointer-events-none"
-        style={{ left: 60, top: 190, width: "calc(100% - 120px)", height: 60 }}
-        viewBox="0 0 600 60"
-        preserveAspectRatio="none"
-      >
-        <path
-          d="M5 30 C 120 5, 280 55, 410 22"
-          fill="none"
-          stroke="var(--color-rule-3)"
-          strokeWidth={1.5}
-          strokeDasharray="4 3"
-        />
-        <text x="180" y="22" className="font-mono" fill="var(--color-ink-3)" fontSize="10" letterSpacing=".06em">
-          supuesto base
-        </text>
-        <path
-          d="M403 17 L 411 22 L 405 28"
-          fill="none"
-          stroke="var(--color-rule-3)"
-          strokeWidth={1.5}
-        />
-      </svg>
+      <BoardZoom
+        zoom={zoom}
+        onZoomIn={() => editorRef.current?.zoomIn()}
+        onZoomOut={() => editorRef.current?.zoomOut()}
+        onZoomFit={() => editorRef.current?.zoomToFit()}
+      />
+
+      {/* Modal */}
+      <PostItModal
+        open={modalOpen}
+        onCancel={() => {
+          setModalOpen(false);
+          setTool("select");
+        }}
+        onConfirm={(draft) => {
+          createPostIt(editorRef.current, dropPointRef.current, draft);
+          dropPointRef.current = null;
+          setModalOpen(false);
+          setTool("select");
+        }}
+      />
     </div>
   );
 }
 
-function ToolButton({
-  children,
-  active = false,
-  title,
-}: {
-  children: React.ReactNode;
-  active?: boolean;
-  title: string;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      className={`w-[30px] h-[30px] rounded-[5px] border-0 cursor-pointer grid place-items-center ${
-        active
-          ? "bg-ink-1 text-paper"
-          : "bg-transparent text-ink-2 hover:bg-paper-3 hover:text-ink-1"
-      }`}
-    >
-      {children}
-    </button>
-  );
+function recomputeCounts(
+  editor: Editor,
+  setCounts: (c: { postits: number; arrows: number }) => void,
+) {
+  let postits = 0;
+  let arrows = 0;
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (shape.type === "postit") postits += 1;
+    else if (shape.type === "arrow") arrows += 1;
+  }
+  setCounts({ postits, arrows });
 }
 
-function Toast() {
-  return (
-    <div
-      className="absolute z-[4] flex items-center gap-2.5 bg-paper-2 border border-rule-2 rounded-full pl-1.5 pr-3.5 py-1.5 shadow-(--shadow-pop) font-serif italic text-[13px] text-ink-2"
-      style={{ right: 18, top: 18 }}
-    >
-      <div
-        className="w-6 h-6 rounded-full grid place-items-center font-mono text-[9px] font-medium text-sis bg-sis-bg"
-        style={{ border: "1.5px solid currentColor" }}
-      >
-        SI
-      </div>
-      El{" "}
-      <b className="font-serif font-medium not-italic text-ink-1">Sistémico</b>{" "}
-      movió <em className="italic">«Edmondson 1999»</em> a Conexiones · 4s
-      <button
-        type="button"
-        title="cerrar"
-        className="ml-1.5 text-ink-3 bg-transparent border-0 text-[14px] cursor-pointer leading-none px-1 py-0.5"
-      >
-        ×
-      </button>
-    </div>
-  );
+function createPostIt(
+  editor: Editor | null,
+  point: { x: number; y: number } | null,
+  draft: PostItDraft,
+) {
+  if (!editor) return;
+  const center = editor.getViewportPageBounds().center;
+  const pos =
+    point ?? {
+      x: center.x - POSTIT_INITIAL_W / 2,
+      y: center.y - POSTIT_INITIAL_H / 2,
+    };
+  const id = createShapeId();
+  editor.createShape({
+    id,
+    type: "postit",
+    x: pos.x,
+    y: pos.y,
+    props: {
+      w: POSTIT_INITIAL_W,
+      h: POSTIT_INITIAL_H,
+      text: draft.text,
+      author: draft.author,
+      kind: draft.kind,
+      createdAt: Date.now(),
+    },
+  } satisfies Partial<PostItShape> & { id: PostItShape["id"]; type: "postit" });
+  editor.setCurrentTool("select");
+  editor.select(id);
 }

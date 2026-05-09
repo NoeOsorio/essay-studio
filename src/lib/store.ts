@@ -8,7 +8,12 @@ import {
   readEssay,
   writeEssay,
 } from "@/lib/storage";
-import type { Essay, EssayMeta, EssayMode } from "@/lib/storage/types";
+import type {
+  BoardSnapshot,
+  Essay,
+  EssayMeta,
+  EssayMode,
+} from "@/lib/storage/types";
 
 const AUTOSAVE_MS = 800;
 
@@ -44,6 +49,8 @@ type State = {
   updateContent: (content: JSONContent, wordCount: number) => void;
   updateTitle: (title: string) => void;
   updateMode: (mode: EssayMode) => void;
+  /** Update the tldraw board snapshot for the open essay. */
+  updateBoard: (snapshot: BoardSnapshot | null) => void;
 
   /** Force-flush any pending save. */
   flush: () => Promise<void>;
@@ -210,6 +217,22 @@ export const useStore = create<State>((set, get) => ({
     const updated = { ...cur, mode, updatedAt: nowIso() };
     set({ current: updated, saveStatus: { kind: "dirty" } });
     void get().flush();
+  },
+
+  updateBoard(snapshot) {
+    const cur = get().current;
+    if (!cur) return;
+    const updated: Essay = { ...cur, board: snapshot, updatedAt: nowIso() };
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      void get().flush();
+    }, AUTOSAVE_MS);
+    set({
+      current: updated,
+      saveStatus: { kind: "dirty" },
+      _autosaveTimer: timer,
+    });
   },
 
   async flush() {

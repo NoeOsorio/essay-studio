@@ -353,3 +353,42 @@ body::before {
   font-style: italic;
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------
+   tldraw overrides — make the canvas inherit the Pergamino
+   paper-tone palette and hide chrome we don't want.
+   --------------------------------------------------------- */
+.board-grid .tl-container,
+.board-grid .tl-canvas {
+  background-color: transparent !important;
+}
+.board-grid .tl-background,
+.board-grid .tl-background__static,
+.board-grid .tl-background__dynamic {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+/* The dotted grid is provided by .board-grid itself; tldraw's
+   built-in grid would double up. */
+.board-grid .tl-grid {
+  display: none;
+}
+/* Watermark / brand */
+.board-grid .tl-watermark_SEE-LICENSE,
+.board-grid .tl-watermark {
+  display: none !important;
+}
+/* Selection / hover indicators tinted to the seal red so they
+   read on the warm paper background. */
+.board-grid .tl-svg-container .tl-selection__fg__outline,
+.board-grid .tl-overlays__item .tl-selection__fg__outline {
+  stroke: var(--color-seal) !important;
+}
+.board-grid .tl-collaborator__cursor {
+  display: none;
+}
+/* Cursor stays default browser cursors; tldraw's blueprint cursors
+   look out of place against paper. */
+.board-grid {
+  cursor: default;
+}

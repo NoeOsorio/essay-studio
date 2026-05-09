@@ -21,9 +21,9 @@ Noé la usa para aprender psicología organizacional mientras escribe ensayos.
 | React | 19.2.x | |
 | TypeScript | 5.x **strict** | prohibido `any` |
 | Tailwind | 4.x | tokens en CSS via `@theme` (sin `tailwind.config.ts`) |
-| Zustand | 5.0.13 | state global del documento abierto + saveStatus |
+| Zustand | 5.0.13 | state global del documento abierto + saveStatus + tablero |
 | TipTap | 3.23.x | editor real con StarterKit + Placeholder + CharacterCount + slash commands custom |
-| tldraw | _futuro_ (sesión 3) | canvas |
+| tldraw | 5.0.x | canvas con custom shape `postit` (tape vintage, headers de sabio, 5 tipos) |
 | Anthropic SDK | _futuro_ (sesión 4+) | `claude-sonnet-4-5` o más reciente |
 
 Persistencia: JSON files en app data dir para v1; migrar a SQLite cuando haya volumen.
@@ -71,9 +71,11 @@ essay-studio/
 │   │   │   ├── SlashMenu.tsx    # menú flotante del slash command
 │   │   │   └── extensions/
 │   │   │       └── SlashCommand.ts  # extensión TipTap + items (h1/h2/quote/...)
-│   │   ├── canvas/              # tldraw (sesión 3)
-│   │   │   ├── BoardPane.tsx    # mock visual todavía
-│   │   │   └── Postit.tsx
+│   │   ├── canvas/              # tldraw integrado
+│   │   │   ├── BoardPane.tsx        # wrapper Tldraw + state + persistencia
+│   │   │   ├── BoardToolbar.tsx     # toolbar lateral + zoom
+│   │   │   ├── PostItModal.tsx      # modal de crear post-it
+│   │   │   └── postit-shape.tsx     # ShapeUtil + renderer del post-it
 │   │   ├── council/
 │   │   │   └── CouncilAvatars.tsx
 │   │   └── ui/                  # primitivos compartidos
@@ -177,18 +179,49 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 | **Autosave 800ms** | Suficiente para sentirse "real-time" sin escribir cada keystroke. |
 | **Mode toggle dispara flush inmediato** | Cambio de modo es deliberado, no se debounce. |
 
-## Sesión 3 (próxima) — Tablero real (tldraw)
+## Qué quedó hecho en sesión 3
 
-El plan en Notion lo describe completo. Resumen:
+- **tldraw v5** integrado en `BoardPane` reemplazando el mock visual.
+- **Custom shape `postit`** (`src/components/canvas/postit-shape.tsx`):
+  - Props: `w, h, text, author, kind, createdAt`
+  - 5 autores: `tu | em | sis | pra | cri`. 5 tipos: `concepto | pregunta | conexion | cita | critica`.
+  - El **color del post-it lo dicta el AUTOR** (sage tints), no el tipo. TÚ aparece en paper-tone neutro.
+  - Render con tape vintage encima (gradient brown rotado), header con avatar circular del sabio + tipo en small caps + timestamp relativo (just now / 8m / 2h).
+  - Module augmentation de `TLGlobalShapePropsMap` para que `editor.createShape({ type: "postit" ... })` typecheckee.
+- **Modal de creación** (`PostItModal.tsx`) con pills de autor (tinted en su color cuando activo), pills de tipo, textarea serif. `⌘ ⏎` para crear, `Esc` para cancelar. Se monta/desmonta con `open`, así no hay setState-in-effect.
+- **Toolbar lateral** custom (`BoardToolbar.tsx`) — select / postit / arrow / group / mic — y zoom indicator a la derecha. La toolbar default de tldraw queda oculta vía la prop `components={{ Toolbar: null, ... }}`.
+- **Crear post-it:** tecla `N` (en cualquier parte del canvas, ignorando inputs) o doble-click sobre canvas vacío. La posición de drop la calcula `editor.screenToPage`.
+- **Counter en header** ("X notas · Y conexiones") calculado en vivo desde `editor.getCurrentPageShapes()` y refrescado en cada cambio de store.
+- **Persistencia en el JSON del ensayo:** el snapshot completo de tldraw (`getSnapshot(editor.store)`) vive en `essay.board`. Se hidrata via `loadSnapshot(editor.store, snap)` exactamente una vez en `onMount`. Cuando cambias de ensayo, `BoardPane` se remonta vía `key={essayId}`. Listener con `{ source: "user", scope: "document" }` evita auto-save loops.
+- **Rust:** campo `Option<serde_json::Value>` añadido al `Essay` struct con `skip_serializing_if = "Option::is_none"` (ensayos viejos sin tablero siguen leyendo). 8/8 tests verdes incluyendo `round_trip_preserves_optional_board_snapshot`.
+- **CSS overrides:** tldraw default background hidden, su grid hidden (uso mi `.board-grid` con dotted radial), watermark hidden, selection outline tintado a `seal`.
+- **`next/dynamic` con `ssr: false`** para el `<Tldraw>` component — tldraw usa DOM APIs y no rinde en SSR.
 
-- Integrar tldraw en `BoardPane` (reemplaza el mock).
-- Custom shape `PostIt` con `{ autor, tipo, texto, timestamp }` y los colores tipados.
-- Crear post-it con tecla `n` o doble-click; modal pequeño para tipo + texto.
-- Persistir el state del tablero **dentro del JSON del ensayo** (campo `tablero`), restaurar al abrir.
-- Counter "X notas · Y conexiones" en el header del tablero, calculado en vivo.
-- Toolbar lateral matching diseño (selector / sticky / flecha / grupo / micro).
+## Decisiones de la sesión 3
 
-Decisiones a confirmar antes: tldraw v3 vs v2, custom shape via shape API o meta data, persistir snapshot completo vs duplicar parts en nuestro modelo.
+| Decisión | Por qué |
+|---|---|
+| **tldraw v5** (no v3 que sugería el plan) | Última estable; mi nueva regla por defecto. |
+| **Module augmentation** sobre `TLGlobalShapePropsMap` | El patrón oficial de v5 — sin esto `editor.createShape({ type: "postit" })` no typecheckea. |
+| **Snapshot completo en `essay.board`** | Más simple que duplicar shapes en mi modelo. tldraw maneja undo, deltas, selección, etc. |
+| **Color por autor (no por tipo)** | El plan original mezclaba ambos; el diseño Pergamino claramente codifica voz por color. Tipo queda como tag textual (CONEXIÓN, CONCEPTO…). |
+| **Hide tldraw default chrome** completo | Para preservar identidad paper-tone. Reimplementé toolbar/zoom nuestros, dejé las gestures + accesibilidad de tldraw. |
+| **`next/dynamic` para `<Tldraw>`** | Más limpio que `useEffect+setMounted` (lint set-state-in-effect en React 19). |
+| **Modal con mount-on-open** | Mismo motivo: evita el reset-on-open en `useEffect`. |
+
+## Sesión 4 (próxima) — Primer sabio (El Empirista) + Interrogatorio
+
+Por el plan en Notion: cliente Anthropic API en `src/lib/claude/`, llamada via comando Tauri (key SOLO en Rust env), vista nueva `/lectura-nueva` con drop zone + textarea, `interrogatorioInicial(texto, sabio: 'EM')` con streaming, prompts en `prompts/el-empirista.md`. Respuestas guardadas al ensayo en `interrogatorio[]`.
+
+Setup previo del usuario: el archivo `prompts/el-empirista.md` con el system prompt afinado del personaje. La key debe vivir en `ANTHROPIC_API_KEY` del environment.
+
+## Aprendido en sesión 3
+
+- tldraw v5 expone custom shapes vía `BaseBoxShapeUtil` (con `getIndicatorPath` requerido) + module augmentation de `TLGlobalShapePropsMap`. Sin la augmentation, `editor.createShape({ type: 'mishape' })` no typecheckea pese a que en runtime funciona.
+- `editor.store.listen(fn, { source: "user", scope: "document" })` filtra solo cambios del usuario al documento — clave para evitar autosave loops cuando aplicas `loadSnapshot` al montar.
+- `getViewportPageBounds().center` reemplaza `getViewportPageCenter()` (cambió de nombre en v5).
+- `next/dynamic({ ssr: false })` es la forma idiomática para componentes client-only en App Router con `output: "export"` — más limpia que `useEffect+setMounted` y no dispara el lint `set-state-in-effect`.
+- **Mount-on-open** es el patrón limpio para modales con state interno: en lugar de `if (!open) return null` con un useEffect que resetea, separar el wrapper que hace el `open` check del inner que tiene el state. Cada apertura es un mount fresh.
 
 ## Aprendido en sesión 2
 
