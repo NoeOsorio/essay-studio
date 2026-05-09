@@ -74,7 +74,7 @@ essay-studio/
 │   │   ├── canvas/              # tldraw integrado
 │   │   │   ├── BoardPane.tsx        # wrapper Tldraw + state + persistencia
 │   │   │   ├── BoardToolbar.tsx     # toolbar lateral + zoom
-│   │   │   ├── PostItModal.tsx      # modal de crear post-it
+│   │   │   ├── NoteContextPanel.tsx # panel autor/kind cuando un note está seleccionado
 │   │   │   └── note-shape.tsx       # PergaminoNoteShapeUtil (override del NoteShapeUtil default)
 │   │   ├── council/
 │   │   │   └── CouncilAvatars.tsx
@@ -189,9 +189,8 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
   - **Metadata propia** en `shape.meta`: `{ author, kind, createdAt }`. 5 autores: `tu | em | sis | pra | cri`. 5 kinds: `concepto | pregunta | conexion | cita | critica`. El **color del post-it lo dicta el AUTOR** (sage tints), no el kind.
   - Notes pre-existentes (sin meta) se re-skinean con defaults `tu / concepto`, sin timestamp — funciona como **migración automática** de cualquier sticky default que el usuario ya hubiera creado antes de este override.
   - Texto plano se extrae de `shape.props.richText` (estructura TipTap-shaped) con un walker recursivo. Sin formato rico por ahora, suficiente para el flujo del modal.
-- **Modal de creación** (`PostItModal.tsx`) con pills de autor (tinted en su color cuando activo), pills de tipo, textarea serif. `⌘ ⏎` para crear, `Esc` para cancelar. Se monta/desmonta con `open`, así no hay setState-in-effect.
-- **Toolbar lateral** custom (`BoardToolbar.tsx`) — select / postit / arrow / group / mic — y zoom indicator a la derecha. La toolbar default de tldraw queda oculta vía la prop `components={{ Toolbar: null, ... }}`.
-- **Crear post-it:** tecla `N` (en cualquier parte del canvas, ignorando inputs) o doble-click sobre canvas vacío. La posición de drop la calcula `editor.screenToPage`. Listener registrado en **capture phase con `stopImmediatePropagation`** para que el atajo `N` default de tldraw (note tool) no fire también y deje sticky notes amarillos planos en el siguiente click.
+- **Flow de creación 100% nativo:** `N` activa el note tool de tldraw, click en el canvas crea un note y entra en edit mode automáticamente. El usuario escribe inline (rich text via TipTap interno de tldraw). Sin modales propios; sin handlers paralelos. `BoardToolbar.tsx` solo enruta sus botones a `editor.setCurrentTool("note" | "arrow" | "select")`.
+- **`NoteContextPanel`** flotante (esquina superior derecha del board) que aparece cuando hay un single note seleccionado. Pills de autor (TÚ/EM/SI/PR/CR) y tipo (concepto/pregunta/conexion/cita/critica). Click → `editor.updateShape({ id, meta })`. Stamp `createdAt` la primera vez que el usuario asigna author/kind. **Importante:** el panel vive **fuera** del componente `<Tldraw>`; recibe el editor por prop. Si se pone dentro vía `components.InFrontOfTheCanvas`, el `tl-background` de tldraw intercepta los clicks.
 - **Counter en header** ("X notas · Y conexiones") calculado en vivo desde `editor.getCurrentPageShapes()` y refrescado en cada cambio de store.
 - **Persistencia en el JSON del ensayo:** el snapshot completo de tldraw (`getSnapshot(editor.store)`) vive en `essay.board`. Se hidrata via `loadSnapshot(editor.store, snap)` exactamente una vez en `onMount`. Cuando cambias de ensayo, `BoardPane` se remonta vía `key={essayId}`. Listener con `{ source: "user", scope: "document" }` evita auto-save loops.
 - **Rust:** campo `Option<serde_json::Value>` añadido al `Essay` struct con `skip_serializing_if = "Option::is_none"` (ensayos viejos sin tablero siguen leyendo). 8/8 tests verdes incluyendo `round_trip_preserves_optional_board_snapshot`.
@@ -204,6 +203,8 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 |---|---|
 | **tldraw v5** (no v3 que sugería el plan) | Última estable; mi nueva regla por defecto. |
 | **Override del `NoteShapeUtil` default** (no shape custom paralelo) | El primer intento fue un shape `postit` separado. Falló: la tecla `N` también activaba el note tool de tldraw, dejando sticky notes amarillos planos. La solución correcta fue extender el default y **reemplazarlo** vía `shapeUtils`. Reusa drag, resize, edit-mode plumbing. Notes pre-existentes se re-skinean automáticamente. (Lección: cuando una lib ya implementa el behavior, override la pieza visual + extender meta sobre crear un sistema paralelo.) |
+| **Sin modal — flow 100% nativo + panel contextual** | El segundo intento tenía un modal propio para crear (autor/tipo/texto). Mezclaba con el flow nativo de tldraw que también escuchaba `N`. La solución: confiar 100% en tldraw nativo (N → click → escribir inline) y mover autor/kind a un **panel contextual** que aparece al seleccionar un note. Una sola fuente de verdad para cada interacción. |
+| **`NoteContextPanel` fuera del `<Tldraw>`** | Tldraw renderea un `tl-background` que captura pointer events sobre el canvas, incluso cuando un componente está en `InFrontOfTheCanvas`. El panel debe estar fuera del wrapper de tldraw, recibiendo el `editor` por prop. |
 | **Meta sobre props para `author/kind/createdAt`** | El note tiene su propio schema (richText, color, font, etc.). En lugar de pelear con migrations de schema, los datos del consejo viven en el campo `meta` que es libre `JsonObject`. |
 | **Snapshot completo en `essay.board`** | Más simple que duplicar shapes en mi modelo. tldraw maneja undo, deltas, selección, etc. |
 | **Color por autor (no por tipo)** | El plan original mezclaba ambos; el diseño Pergamino claramente codifica voz por color. Tipo queda como tag textual (CONEXIÓN, CONCEPTO…). |
@@ -219,8 +220,9 @@ Setup previo del usuario: el archivo `prompts/el-empirista.md` con el system pro
 
 ## Aprendido en sesión 3
 
-- **Reusar antes de reinventar** (lección dura). El primer intento de sesión 3 fue un shape `postit` paralelo, lo que dejó al `note` default de tldraw activo y creó sticky notes amarillos cuando el usuario presionaba `N`. La solución correcta es **override del `NoteShapeUtil` default** (mismo `static type = "note"` reemplaza al built-in). Pista: cuando un atajo o feature default colisiona con el tuyo, ese subsistema es el que deberías extender, no esquivar.
+- **Reusar antes de reinventar** (lección dura, x2). Primero metí un shape `postit` paralelo y la tecla `N` creó dos notas (la mía + el sticky default de tldraw). Luego corregí con override del NoteShapeUtil pero seguí con un modal propio para crear y editar — que duplicaba el flow nativo de tldraw. La versión final: 100% flow nativo (N, click, escribir inline) + panel contextual lateral solo para autor/kind. Cuando una lib ya implementa drag/resize/atajos/inline-edit, override la **pieza visual** + persiste tus extras en `meta`. **Nunca dupliques el flow.**
 - En tldraw v5 el `shapeUtils` prop **reemplaza por tipo** — pasar un util con el mismo `static type` que un default lo override.
+- **`<Tldraw>` `tl-background`** intercepta pointer events sobre el canvas — UI overlay propio (panels, toolbars) debe vivir **fuera** del wrapper de Tldraw. Pasar el editor como prop.
 - `shape.meta` es un `JsonObject` libre, perfecto para tus props extras sin tener que migrar el schema del shape oficial.
 - `editor.store.listen(fn, { source: "user", scope: "document" })` filtra solo cambios del usuario al documento — clave para evitar autosave loops cuando aplicas `loadSnapshot` al montar.
 - `getViewportPageBounds().center` reemplaza `getViewportPageCenter()` (renombrado en v5).

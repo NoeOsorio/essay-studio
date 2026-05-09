@@ -1,15 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
-  createShapeId,
   getSnapshot,
   loadSnapshot,
-  toRichText,
   type Editor,
   type TLComponents,
-  type TLNoteShape,
   type TLStoreSnapshot,
 } from "tldraw";
 import "tldraw/tldraw.css";
@@ -18,26 +15,21 @@ import { Badge } from "@/components/ui/Badge";
 import { IconButton } from "@/components/ui/IconButton";
 import { GroupIcon } from "@/components/ui/icons";
 import { useStore } from "@/lib/store";
-import {
-  PergaminoNoteShapeUtil,
-  type PostItMeta,
-} from "./note-shape";
-import { PostItModal, type PostItDraft } from "./PostItModal";
+import { PergaminoNoteShapeUtil } from "./note-shape";
+import { NoteContextPanel } from "./NoteContextPanel";
 import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
 
-// Tldraw uses DOM APIs, so we only mount it on the client. Doing it
-// via next/dynamic keeps the SSR pass clean without resorting to a
-// useEffect-driven mounted flag.
+// Tldraw uses DOM APIs, so mount it client-only.
 const Tldraw = dynamic(
   () => import("tldraw").then((m) => ({ default: m.Tldraw })),
   { ssr: false },
 );
 
-// We replace the default note util — tldraw merges by `static type`,
-// so passing this overrides the built-in NoteShapeUtil ("note" type).
+// Replaces the default note util by type ("note").
 const SHAPE_UTILS = [PergaminoNoteShapeUtil];
 
-const HIDDEN_COMPONENTS: TLComponents = {
+// Hide tldraw's default chrome — we paint our own toolbar/zoom/header.
+const COMPONENTS: TLComponents = {
   Toolbar: null,
   MainMenu: null,
   PageMenu: null,
@@ -53,8 +45,6 @@ const HIDDEN_COMPONENTS: TLComponents = {
   TopPanel: null,
   SharePanel: null,
 };
-
-const NOTE_SIZE = 200;
 
 export function BoardPane() {
   const current = useStore((s) => s.current);
@@ -73,44 +63,10 @@ function BoardPaneInner() {
   const [tool, setTool] = useState<BoardTool>("select");
   const [zoom, setZoom] = useState(1);
   const [counts, setCounts] = useState({ postits: 0, arrows: 0 });
-  const [modalOpen, setModalOpen] = useState(false);
-  const dropPointRef = useRef<{ x: number; y: number } | null>(null);
+  // Held in state (not a ref) so the NoteContextPanel can subscribe
+  // to the editor's signals via useValue. Set once on mount.
+  const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<Editor | null>(null);
-
-  const openModal = useMemo(
-    () => () => {
-      const editor = editorRef.current;
-      if (!editor) return;
-      if (!dropPointRef.current) {
-        const { x, y } = editor.getViewportPageBounds().center;
-        dropPointRef.current = {
-          x: x - NOTE_SIZE / 2,
-          y: y - NOTE_SIZE / 2,
-        };
-      }
-      setModalOpen(true);
-    },
-    [],
-  );
-
-  // Global N key opens our modal. Capture phase + stopImmediatePropagation
-  // so tldraw's own "note tool" shortcut doesn't also fire (which would
-  // drop a default sticky on next click).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "n" && e.key !== "N") return;
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("input, textarea, [contenteditable=true]")) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      dropPointRef.current = null;
-      openModal();
-    };
-    window.addEventListener("keydown", onKey, { capture: true });
-    return () =>
-      window.removeEventListener("keydown", onKey, { capture: true });
-  }, [openModal]);
 
   return (
     <div className="board-grid relative h-full overflow-hidden">
@@ -135,10 +91,10 @@ function BoardPaneInner() {
       <div className="absolute inset-0 pt-[44px]">
         <Tldraw
           shapeUtils={SHAPE_UTILS}
-          components={HIDDEN_COMPONENTS}
-          hideUi={false}
+          components={COMPONENTS}
           onMount={(editor) => {
             editorRef.current = editor;
+            setEditor(editor);
 
             if (initialSnapshot) {
               try {
@@ -165,24 +121,23 @@ function BoardPaneInner() {
               { scope: "session" },
             );
 
-            const onPointerDown = (e: PointerEvent) => {
-              if (e.detail < 2) return;
-              const target = e.target as HTMLElement | null;
-              if (target?.closest(".tl-shape")) return;
-              const pt = editor.screenToPage({ x: e.clientX, y: e.clientY });
-              dropPointRef.current = {
-                x: pt.x - NOTE_SIZE / 2,
-                y: pt.y - NOTE_SIZE / 2,
-              };
-              openModal();
+            // Keep our toolbar's "tool" state in sync with tldraw's
+            // current tool, so when the user uses keyboard shortcuts
+            // (N for note, A/V for select, etc.) the highlight follows.
+            const syncTool = () => {
+              const t = editor.getCurrentToolId();
+              if (t === "note") setTool("postit");
+              else if (t === "arrow") setTool("arrow");
+              else setTool("select");
             };
-            const container = editor.getContainer();
-            container.addEventListener("pointerdown", onPointerDown);
+            const unlistenTool = editor.store.listen(syncTool, {
+              scope: "session",
+            });
 
             return () => {
               unlistenStore();
               unlistenCamera();
-              container.removeEventListener("pointerdown", onPointerDown);
+              unlistenTool();
             };
           }}
         />
@@ -194,18 +149,11 @@ function BoardPaneInner() {
           setTool(t);
           const editor = editorRef.current;
           if (!editor) return;
-          if (t === "postit") {
-            dropPointRef.current = null;
-            openModal();
-          } else if (t === "arrow") {
-            editor.setCurrentTool("arrow");
-          } else {
-            editor.setCurrentTool("select");
-          }
+          if (t === "postit") editor.setCurrentTool("note");
+          else if (t === "arrow") editor.setCurrentTool("arrow");
+          else editor.setCurrentTool("select");
         }}
-        onMicTeaser={() => {
-          alert("Dictado · próximamente.");
-        }}
+        onMicTeaser={() => alert("Dictado · próximamente.")}
       />
 
       <BoardZoom
@@ -215,19 +163,10 @@ function BoardPaneInner() {
         onZoomFit={() => editorRef.current?.zoomToFit()}
       />
 
-      <PostItModal
-        open={modalOpen}
-        onCancel={() => {
-          setModalOpen(false);
-          setTool("select");
-        }}
-        onConfirm={(draft) => {
-          createPostIt(editorRef.current, dropPointRef.current, draft);
-          dropPointRef.current = null;
-          setModalOpen(false);
-          setTool("select");
-        }}
-      />
+      {/* Sits OUTSIDE the Tldraw container so its clicks aren't
+          intercepted by tldraw's background overlay. Receives the
+          editor as a prop so it can still subscribe to selection. */}
+      {editor ? <NoteContextPanel editor={editor} /> : null}
     </div>
   );
 }
@@ -243,36 +182,4 @@ function recomputeCounts(
     else if (shape.type === "arrow") arrows += 1;
   }
   setCounts({ postits, arrows });
-}
-
-function createPostIt(
-  editor: Editor | null,
-  point: { x: number; y: number } | null,
-  draft: PostItDraft,
-) {
-  if (!editor) return;
-  const center = editor.getViewportPageBounds().center;
-  const pos =
-    point ?? {
-      x: center.x - NOTE_SIZE / 2,
-      y: center.y - NOTE_SIZE / 2,
-    };
-  const id = createShapeId();
-  const meta: PostItMeta = {
-    author: draft.author,
-    kind: draft.kind,
-    createdAt: Date.now(),
-  };
-  editor.createShape<TLNoteShape>({
-    id,
-    type: "note",
-    x: pos.x,
-    y: pos.y,
-    props: {
-      richText: toRichText(draft.text),
-    },
-    meta,
-  });
-  editor.setCurrentTool("select");
-  editor.select(id);
 }

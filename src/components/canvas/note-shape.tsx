@@ -3,7 +3,10 @@
 import {
   HTMLContainer,
   NoteShapeUtil,
+  RichTextLabel,
   toRichText,
+  useEditor,
+  useValue,
   type TLNoteShape,
   type TLRichText,
 } from "tldraw";
@@ -17,9 +20,10 @@ export type PostItKind =
   | "critica";
 
 /**
- * Meta we tack onto every note. Existing notes (created by tldraw's
- * default tools before this util landed, or imported elsewhere) won't
- * have meta; we fall back to "TÚ · concepto" so they re-skin gracefully.
+ * Meta we tack onto every note. Notes created before this util landed
+ * (or via tldraw's default tools without going through our context
+ * panel) won't have meta; we fall back to "TÚ · concepto" so they
+ * re-skin gracefully.
  */
 export type PostItMeta = {
   author?: PostItAuthor;
@@ -84,16 +88,27 @@ const AUTHOR_THEME: Record<
   },
 };
 
+const HEADER_HEIGHT = 30;
+const NOTE_W = 200;
+const NOTE_H = 200;
+
 /**
- * Override of tldraw's default note. We keep all the built-in
- * behaviours (drag, resize, edit-in-place rich text, snapping, etc.)
- * and only swap the visual: paper-tone background tinted by the
- * post-it author, vintage tape on top, and a header with sage initials,
- * the kind label and a relative timestamp.
+ * Override of tldraw's default note. Reuses all the built-in
+ * behaviours (drag, resize, snap, inline rich-text editing, native
+ * keyboard shortcuts) and only swaps the visual: paper-tone
+ * background tinted by the post-it author, vintage tape on top, and
+ * a header row with sage initials + kind label + relative timestamp.
+ *
+ * The author and kind live in `shape.meta`. They're assigned via the
+ * NoteContextPanel that appears when a single note is selected, not
+ * via a modal — the creation flow stays 100% native (click N, click
+ * canvas, type, Esc).
  */
 export class PergaminoNoteShapeUtil extends NoteShapeUtil {
   override getDefaultProps() {
     const base = super.getDefaultProps();
+    // Smaller font + start-anchored text feels more like a Pergamino
+    // post-it than tldraw's default centered sticky.
     return {
       ...base,
       size: "s",
@@ -103,62 +118,51 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
     } as TLNoteShape["props"];
   }
 
-  // For now, post-its are created and edited via our modal — not
-  // tldraw's inline rich-text editor. Keeps the visual paint simple
-  // and consistent. We'll wire up a re-open-modal-on-double-click in a
-  // future session (or swap to RichTextLabel when sages need to edit
-  // notes from the council).
-  override canEdit(): boolean {
-    return false;
-  }
-
   override component(shape: TLNoteShape) {
     return <PergaminoNoteRenderer shape={shape} />;
   }
 }
 
 function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
+  const editor = useEditor();
+
+  const isSelected = useValue(
+    "is selected",
+    () => editor.getOnlySelectedShapeId() === shape.id,
+    [editor, shape.id],
+  );
+  const isEditing = useValue(
+    "is editing",
+    () => editor.getEditingShapeId() === shape.id,
+    [editor, shape.id],
+  );
+
   const meta = (shape.meta ?? {}) as PostItMeta;
   const author = meta.author ?? "tu";
   const kind = meta.kind ?? "concepto";
   const createdAt = meta.createdAt;
   const theme = AUTHOR_THEME[author];
-  const bodyText = richTextToPlain(shape.props.richText);
 
-  // Notes are aspect-ratio-locked at 200x200; the visible size in
-  // page coords scales with `props.scale`.
-  const SIZE = 200;
-  const w = SIZE * shape.props.scale;
-  const h = SIZE * shape.props.scale;
+  const { scale, growY, richText } = shape.props;
+  const w = NOTE_W;
+  const h = NOTE_H + growY;
+
+  const isEmpty = richTextIsEmpty(richText);
 
   return (
-    <HTMLContainer
-      style={{
-        position: "relative",
-        width: w,
-        height: h,
-        pointerEvents: "all",
-      }}
-    >
+    <HTMLContainer style={{ pointerEvents: "all" }}>
       <div
         style={{
           position: "relative",
-          width: "100%",
-          height: "100%",
+          width: w * scale,
+          height: h * scale,
           background: theme.bg,
           color: theme.ink,
           border: `1px solid ${theme.border}`,
           borderRadius: 8,
-          padding: "20px 14px 14px",
-          fontFamily: "var(--font-serif)",
-          fontSize: 14,
-          lineHeight: 1.55,
           boxShadow:
             "0 6px 14px rgba(60,40,10,0.10), 0 1px 0 rgba(255,255,255,0.5) inset",
           overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
         }}
       >
         {/* Vintage tape on top */}
@@ -174,17 +178,24 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
             background: "rgba(120,100,60,0.20)",
             boxShadow: "0 1px 0 rgba(255,255,255,0.4) inset",
             pointerEvents: "none",
+            zIndex: 2,
           }}
         />
 
-        {/* Header */}
+        {/* Header overlay */}
         <div
           style={{
+            position: "absolute",
+            top: 8,
+            left: 14,
+            right: 14,
+            height: HEADER_HEIGHT - 8,
             display: "flex",
             alignItems: "center",
             gap: 8,
             color: theme.accent,
-            flex: "0 0 auto",
+            zIndex: 1,
+            pointerEvents: "none",
           }}
         >
           <span
@@ -200,6 +211,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
               border: "1px solid currentColor",
               color: theme.accent,
               background: theme.iniBg,
+              flex: "0 0 auto",
             }}
           >
             {AUTHOR_INITIALS[author]}
@@ -229,51 +241,63 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
           ) : null}
         </div>
 
-        {/* Body — plain text extracted from the shape's richText. We
-            forgo tldraw's inline editor for now; editing happens via
-            the modal. */}
-        <div
-          style={{
-            flex: "1 1 auto",
-            minHeight: 0,
-            color: theme.ink,
-            fontFamily: "var(--font-serif)",
-            fontSize: 13,
-            lineHeight: 1.5,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            overflow: "hidden",
-            opacity: bodyText ? 1 : 0.5,
-            fontStyle: bodyText ? "normal" : "italic",
-          }}
-        >
-          {bodyText || "(post-it sin texto)"}
-        </div>
+        {/* Rich text body — reuses tldraw's built-in inline editor.
+            The container is absolutely positioned so RichTextLabel
+            gets correct bounds; the header sits above it visually. */}
+        {(isSelected || isEditing || !isEmpty) && (
+          <div
+            style={{
+              position: "absolute",
+              top: HEADER_HEIGHT,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 0,
+            }}
+          >
+            <RichTextLabel
+              shapeId={shape.id}
+              type="note"
+              fontFamily="var(--font-serif)"
+              fontSize={14}
+              lineHeight={1.5}
+              textAlign="start"
+              verticalAlign="start"
+              richText={richText}
+              isSelected={isSelected}
+              labelColor={theme.ink}
+              wrap={true}
+              padding={14}
+              showTextOutline={false}
+              hasCustomTabBehavior={false}
+              style={
+                scale !== 1
+                  ? {
+                      transform: `scale(${scale})`,
+                      transformOrigin: "top left",
+                      width: w,
+                      height: h - HEADER_HEIGHT,
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        )}
       </div>
     </HTMLContainer>
   );
 }
 
-/**
- * Walk a TLRichText (TipTap-shaped JSON document) and concatenate its
- * text leaves, separating paragraphs with a newline. Good enough for
- * the post-it body which is plain text today.
- */
-function richTextToPlain(rt: TLRichText): string {
-  const parts: string[] = [];
+function richTextIsEmpty(rt: TLRichText): boolean {
   type Node = { type?: string; text?: string; content?: Node[] };
-  const walk = (node: Node) => {
-    if (typeof node.text === "string") {
-      parts.push(node.text);
-      return;
-    }
+  const walk = (node: Node): boolean => {
+    if (typeof node.text === "string" && node.text.length > 0) return false;
     if (Array.isArray(node.content)) {
-      for (const child of node.content) walk(child);
-      if (node.type === "paragraph") parts.push("\n");
+      for (const child of node.content) if (!walk(child)) return false;
     }
+    return true;
   };
-  walk(rt as Node);
-  return parts.join("").replace(/\n+$/, "");
+  return walk(rt as Node);
 }
 
 function relativeTime(epochMs: number): string {
