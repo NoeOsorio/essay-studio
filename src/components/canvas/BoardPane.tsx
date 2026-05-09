@@ -136,10 +136,26 @@ function BoardPaneInner() {
               scope: "session",
             });
 
+            // After a user creates a note, switch back to the select
+            // tool. Otherwise the note tool stays "sticky" and every
+            // subsequent click drops another empty note — surprising
+            // when the user's intent was to write into the one they
+            // just made.
+            const unlistenAfterCreate =
+              editor.sideEffects.registerAfterCreateHandler(
+                "shape",
+                (shape, source) => {
+                  if (shape.type === "note" && source === "user") {
+                    editor.setCurrentTool("select");
+                  }
+                },
+              );
+
             return () => {
               unlistenStore();
               unlistenCamera();
               unlistenTool();
+              unlistenAfterCreate();
             };
           }}
         />
