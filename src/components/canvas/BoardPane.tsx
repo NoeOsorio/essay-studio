@@ -191,58 +191,72 @@ function recomputeCounts(
  * custom-shape implementation) into the current `type: "note"` form,
  * preserving author / kind / text in `meta` + `richText`.
  *
- * Idempotent: snapshots without legacy postits pass through unchanged.
- * Any unexpected shape is left as-is and let through to tldraw's own
- * validation, which will throw and trigger our load-empty fallback.
+ * `getSnapshot()` returns a TLEditorSnapshot shaped as
+ * `{ document: { store, schema }, session }`, but `loadSnapshot()`
+ * also accepts a bare TLStoreSnapshot (`{ store, schema }`). Walk
+ * both layouts so we never miss the records.
+ *
+ * Idempotent: snapshots without legacy postits pass through
+ * unchanged.
  */
 function migrateLegacyPostits(snapshot: unknown): TLStoreSnapshot {
   const cloned = JSON.parse(JSON.stringify(snapshot)) as TLStoreSnapshot;
-  const store = (cloned as { store?: Record<string, unknown> }).store;
-  if (!store || typeof store !== "object") return cloned;
 
-  for (const key of Object.keys(store)) {
-    const record = store[key] as
-      | {
-          typeName?: string;
-          type?: string;
-          props?: Record<string, unknown>;
-          meta?: Record<string, unknown>;
-        }
-      | undefined;
-    if (!record || record.typeName !== "shape" || record.type !== "postit") {
-      continue;
+  type AnyRecord = {
+    typeName?: string;
+    type?: string;
+    props?: Record<string, unknown>;
+    meta?: Record<string, unknown>;
+  };
+
+  const candidates: Record<string, AnyRecord>[] = [];
+  const root = cloned as {
+    store?: Record<string, AnyRecord>;
+    document?: { store?: Record<string, AnyRecord> };
+  };
+  if (root.store && typeof root.store === "object") candidates.push(root.store);
+  if (root.document?.store && typeof root.document.store === "object") {
+    candidates.push(root.document.store);
+  }
+
+  for (const store of candidates) {
+    for (const key of Object.keys(store)) {
+      const record = store[key];
+      if (!record || record.typeName !== "shape" || record.type !== "postit") {
+        continue;
+      }
+
+      const oldProps = record.props ?? {};
+      const oldMeta = record.meta ?? {};
+      const text = typeof oldProps.text === "string" ? oldProps.text : "";
+
+      store[key] = {
+        ...record,
+        type: "note",
+        props: {
+          color: "yellow",
+          labelColor: "black",
+          size: "s",
+          font: "draw",
+          fontSizeAdjustment: 1,
+          align: "start",
+          verticalAlign: "start",
+          growY: 0,
+          url: "",
+          richText: toRichText(text),
+          scale: 1,
+          textFirstEditedBy: null,
+        },
+        meta: {
+          ...oldMeta,
+          ...(oldProps.author !== undefined ? { author: oldProps.author } : {}),
+          ...(oldProps.kind !== undefined ? { kind: oldProps.kind } : {}),
+          ...(oldProps.createdAt !== undefined
+            ? { createdAt: oldProps.createdAt }
+            : {}),
+        },
+      };
     }
-
-    const oldProps = record.props ?? {};
-    const oldMeta = record.meta ?? {};
-    const text = typeof oldProps.text === "string" ? oldProps.text : "";
-
-    store[key] = {
-      ...record,
-      type: "note",
-      props: {
-        color: "yellow",
-        labelColor: "black",
-        size: "s",
-        font: "draw",
-        fontSizeAdjustment: 1,
-        align: "start",
-        verticalAlign: "start",
-        growY: 0,
-        url: "",
-        richText: toRichText(text),
-        scale: 1,
-        textFirstEditedBy: null,
-      },
-      meta: {
-        ...oldMeta,
-        ...(oldProps.author !== undefined ? { author: oldProps.author } : {}),
-        ...(oldProps.kind !== undefined ? { kind: oldProps.kind } : {}),
-        ...(oldProps.createdAt !== undefined
-          ? { createdAt: oldProps.createdAt }
-          : {}),
-      },
-    };
   }
   return cloned;
 }
