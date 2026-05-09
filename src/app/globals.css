@@ -1,26 +1,242 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* =========================================================
+   Essay Studio — Pergamino paper-tone design tokens.
+   Tailwind 4 reads `@theme` to expose tokens as utilities
+   (bg-paper, text-ink-1, font-serif, etc.).
+   The sage colors (em/sis/pra/cri) carry voice — never
+   substitute with generic palette colors.
+   ========================================================= */
+
+@theme {
+  /* ---- paper surfaces ---- */
+  --color-paper:    #F6F1E7;
+  --color-paper-2:  #FBF7EE;
+  --color-paper-3:  #EFE8DA;
+  --color-paper-4:  #E6DDC9;
+
+  /* ---- ink (text) ---- */
+  --color-ink-1: #1F1B14;
+  --color-ink-2: #4A4338;
+  --color-ink-3: #7B7261;
+  --color-ink-4: #A89E89;
+
+  /* ---- rules / borders ---- */
+  --color-rule-1: #E2D9C5;
+  --color-rule-2: #D2C7AE;
+  --color-rule-3: #B7A98A;
+
+  /* ---- seal red (primary accent) ---- */
+  --color-seal:      #B23A2A;
+  --color-seal-soft: #E8C9C2;
+
+  /* ---- sages — Empirista (ámbar) ---- */
+  --color-em:     #B07A1F;
+  --color-em-bg:  #F4E5C2;
+  --color-em-ink: #54401A;
+
+  /* ---- sages — Sistémico (teal) ---- */
+  --color-sis:     #2E7E72;
+  --color-sis-bg:  #CFE3DD;
+  --color-sis-ink: #1F4A43;
+
+  /* ---- sages — Práctico (coral) ---- */
+  --color-pra:     #B14B36;
+  --color-pra-bg:  #F2D0C5;
+  --color-pra-ink: #5A2519;
+
+  /* ---- sages — Crítico (morado) ---- */
+  --color-cri:     #6E4FA8;
+  --color-cri-bg:  #DCD0EC;
+  --color-cri-ink: #3A2660;
+
+  /* ---- semantic ---- */
+  --color-ok:   #3F7F4A;
+  --color-warn: #9A7220;
+  --color-err:  #9C2C1F;
+
+  /* ---- typography ---- */
+  --font-serif: var(--font-newsreader), "Iowan Old Style", Georgia, serif;
+  --font-sans:  var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:  var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* ---- radii ---- */
+  --radius-1: 6px;
+  --radius-2: 8px;
+  --radius-3: 14px;
+
+  /* ---- shadows ---- */
+  --shadow-soft: 0 1px 0 rgba(255,255,255,.6) inset, 0 1px 2px rgba(60,40,10,.06);
+  --shadow-lift: 0 1px 0 rgba(255,255,255,.6) inset, 0 8px 24px rgba(60,40,10,.10);
+  --shadow-pop:  0 16px 40px rgba(60,40,10,.18), 0 2px 6px rgba(60,40,10,.08);
+  --shadow-postit: 0 6px 14px rgba(60,40,10,.10), 0 1px 0 rgba(255,255,255,.5) inset;
+  --shadow-postit-lifted: 0 16px 36px rgba(60,40,10,.18), 0 1px 0 rgba(255,255,255,.5) inset;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ---------------------------------------------------------
+   Base styles
+   --------------------------------------------------------- */
+html, body {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-paper);
+  color: var(--color-ink-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* paper grain — subtle SVG turbulence overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.4  0 0 0 0 0.3  0 0 0 0 0.15  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* dotted grid for the board panel */
+.board-grid {
+  background-color: var(--color-paper-3);
+  background-image: radial-gradient(circle at 1px 1px, rgba(60, 40, 10, 0.10) 1px, transparent 1px);
+  background-size: 22px 22px;
 }
+
+/* keyboard chip */
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-3);
+  background: var(--color-paper);
+  border: 1px solid var(--color-rule-2);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.kbd-dark {
+  background: rgba(255,255,255,0.10);
+  color: #E6DDC9;
+  border-color: rgba(255,255,255,0.20);
+}
+
+/* slim scrollbars on editor + board columns */
+.thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--color-rule-2); border-radius: 4px; }
+
+/* ---------------------------------------------------------
+   Inline annotations in the editor — tinted highlight + chip
+   --------------------------------------------------------- */
+.anno {
+  --anno-tint: rgba(0,0,0,0.08);
+  --anno-solid: var(--color-ink-3);
+  background: linear-gradient(180deg, transparent 25%, var(--anno-tint) 25%, var(--anno-tint) 92%, transparent 92%);
+  border-bottom: 1.5px solid var(--anno-solid);
+  cursor: pointer;
+  position: relative;
+  padding: 1px 1px 0;
+}
+.anno::after {
+  content: attr(data-by);
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 5px;
+  border-radius: 50%;
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: var(--anno-solid);
+  vertical-align: 2px;
+  box-shadow: 0 1px 2px rgba(60,40,10,0.18);
+}
+.anno-cri { --anno-tint: rgba(110, 79,168,0.28); --anno-solid: var(--color-cri); }
+.anno-emp { --anno-tint: rgba(176,122, 31,0.32); --anno-solid: var(--color-em);  }
+.anno-sis { --anno-tint: rgba( 46,126,114,0.28); --anno-solid: var(--color-sis); }
+.anno-pra { --anno-tint: rgba(177, 75, 54,0.28); --anno-solid: var(--color-pra); }
+
+/* ---------------------------------------------------------
+   Post-it with vintage tape
+   --------------------------------------------------------- */
+.postit {
+  position: relative;
+  padding: 18px 14px 14px;
+  border-radius: var(--radius-2);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule-2);
+  font: 400 13.5px/1.55 var(--font-serif);
+  color: var(--color-ink-1);
+  box-shadow: var(--shadow-postit);
+  cursor: grab;
+}
+.postit::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -9px;
+  transform: translateX(-50%) rotate(-2deg);
+  width: 48px;
+  height: 14px;
+  background: rgba(120, 100, 60, 0.20);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset;
+}
+.postit-lifted {
+  transform: rotate(-1.5deg) translateY(-2px);
+  box-shadow: var(--shadow-postit-lifted);
+}
+
+/* quote block in editor */
+.quote-block {
+  border-left: 2px solid var(--color-seal);
+  padding: 14px 22px;
+  margin: 14px 0 14px -22px;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--color-ink-1);
+  background: linear-gradient(90deg, rgba(178,58,42,0.05), transparent 70%);
+}
+.quote-block cite {
+  display: block;
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+
+/* citation link */
+.cite {
+  color: var(--color-seal);
+  border-bottom: 1px solid rgba(178,58,42,0.35);
+  cursor: pointer;
+  text-decoration: none;
+  background: transparent;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+.cite:hover { background: rgba(178,58,42,0.06); }
+
+/* fade on right edge of board (suggests more columns) */
+.board-fade::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 96px;
+  bottom: 24px;
+  width: 48px;
+  background: linear-gradient(270deg, var(--color-paper-3), transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* avatar pulse on the active sage */
+@keyframes sage-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+.sage-pulse { animation: sage-pulse 1.4s infinite; }
