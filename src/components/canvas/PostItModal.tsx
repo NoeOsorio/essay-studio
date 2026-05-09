@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   PostItAuthor,
   PostItKind,
-} from "./postit-shape";
+} from "./note-shape";
 
 export type PostItDraft = {
   author: PostItAuthor;

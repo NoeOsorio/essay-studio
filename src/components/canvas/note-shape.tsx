@@ -1,10 +1,11 @@
 "use client";
 
 import {
-  BaseBoxShapeUtil,
   HTMLContainer,
-  T,
-  type RecordProps,
+  NoteShapeUtil,
+  toRichText,
+  type TLNoteShape,
+  type TLRichText,
 } from "tldraw";
 
 export type PostItAuthor = "tu" | "em" | "sis" | "pra" | "cri";
@@ -16,28 +17,15 @@ export type PostItKind =
   | "critica";
 
 /**
- * Tell tldraw that "postit" is a known shape with these props,
- * so `TLShape['type']` includes it and `editor.createShape<PostItShape>`
- * type-checks.
+ * Meta we tack onto every note. Existing notes (created by tldraw's
+ * default tools before this util landed, or imported elsewhere) won't
+ * have meta; we fall back to "TÚ · concepto" so they re-skin gracefully.
  */
-declare module "@tldraw/tlschema" {
-  interface TLGlobalShapePropsMap {
-    postit: {
-      w: number;
-      h: number;
-      text: string;
-      author: PostItAuthor;
-      kind: PostItKind;
-      createdAt: number;
-    };
-  }
-}
-
-import type { TLShape } from "tldraw";
-export type PostItShape = Extract<TLShape, { type: "postit" }>;
-
-const POSTIT_W = 224;
-const POSTIT_H = 132;
+export type PostItMeta = {
+  author?: PostItAuthor;
+  kind?: PostItKind;
+  createdAt?: number;
+};
 
 const AUTHOR_INITIALS: Record<PostItAuthor, string> = {
   tu: "TÚ",
@@ -55,100 +43,93 @@ const KIND_LABEL: Record<PostItKind, string> = {
   critica: "CRÍTICA",
 };
 
-/**
- * The post-it color is driven by the AUTHOR (sage). When TÚ writes,
- * the post-it is paper-toned. When a sage writes, it picks up the
- * sage's tinted background. This matches the Pergamino direction.
- */
 const AUTHOR_THEME: Record<
   PostItAuthor,
-  { bg: string; ink: string; border: string; accent: string }
+  { bg: string; ink: string; border: string; accent: string; iniBg: string }
 > = {
   tu: {
     bg: "var(--color-paper-2)",
     ink: "var(--color-ink-1)",
     border: "var(--color-rule-2)",
     accent: "var(--color-ink-2)",
+    iniBg: "var(--color-paper-3)",
   },
   em: {
     bg: "var(--color-em-bg)",
     ink: "var(--color-em-ink)",
     border: "rgba(176,122,31,0.3)",
     accent: "var(--color-em)",
+    iniBg: "transparent",
   },
   sis: {
     bg: "var(--color-sis-bg)",
     ink: "var(--color-sis-ink)",
     border: "rgba(46,126,114,0.3)",
     accent: "var(--color-sis)",
+    iniBg: "transparent",
   },
   pra: {
     bg: "var(--color-pra-bg)",
     ink: "var(--color-pra-ink)",
     border: "rgba(177,75,54,0.3)",
     accent: "var(--color-pra)",
+    iniBg: "transparent",
   },
   cri: {
     bg: "var(--color-cri-bg)",
     ink: "var(--color-cri-ink)",
     border: "rgba(110,79,168,0.3)",
     accent: "var(--color-cri)",
+    iniBg: "transparent",
   },
 };
 
-const postitProps: RecordProps<PostItShape> = {
-  w: T.number,
-  h: T.number,
-  text: T.string,
-  author: T.literalEnum("tu", "em", "sis", "pra", "cri"),
-  kind: T.literalEnum("concepto", "pregunta", "conexion", "cita", "critica"),
-  createdAt: T.number,
-};
-
-export class PostItShapeUtil extends BaseBoxShapeUtil<PostItShape> {
-  static override type = "postit" as const;
-  static override props = postitProps;
-
-  override getDefaultProps(): PostItShape["props"] {
+/**
+ * Override of tldraw's default note. We keep all the built-in
+ * behaviours (drag, resize, edit-in-place rich text, snapping, etc.)
+ * and only swap the visual: paper-tone background tinted by the
+ * post-it author, vintage tape on top, and a header with sage initials,
+ * the kind label and a relative timestamp.
+ */
+export class PergaminoNoteShapeUtil extends NoteShapeUtil {
+  override getDefaultProps() {
+    const base = super.getDefaultProps();
     return {
-      w: POSTIT_W,
-      h: POSTIT_H,
-      text: "",
-      author: "tu",
-      kind: "concepto",
-      createdAt: Date.now(),
-    };
+      ...base,
+      size: "s",
+      align: "start",
+      verticalAlign: "start",
+      richText: toRichText(""),
+    } as TLNoteShape["props"];
   }
 
-  override canEdit() {
+  // For now, post-its are created and edited via our modal — not
+  // tldraw's inline rich-text editor. Keeps the visual paint simple
+  // and consistent. We'll wire up a re-open-modal-on-double-click in a
+  // future session (or swap to RichTextLabel when sages need to edit
+  // notes from the council).
+  override canEdit(): boolean {
     return false;
   }
 
-  override canResize() {
-    return true;
-  }
-
-  override component(shape: PostItShape) {
-    return <PostItRenderer shape={shape} />;
-  }
-
-  override getIndicatorPath(shape: PostItShape) {
-    const path = new Path2D();
-    // Rounded rectangle approximated with quadratic curves; falls back
-    // to plain rect on browsers that don't support roundRect.
-    if (typeof (path as Path2D & { roundRect?: unknown }).roundRect === "function") {
-      (path as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void })
-        .roundRect(0, 0, shape.props.w, shape.props.h, 8);
-    } else {
-      path.rect(0, 0, shape.props.w, shape.props.h);
-    }
-    return path;
+  override component(shape: TLNoteShape) {
+    return <PergaminoNoteRenderer shape={shape} />;
   }
 }
 
-function PostItRenderer({ shape }: { shape: PostItShape }) {
-  const { text, author, kind, w, h, createdAt } = shape.props;
+function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
+  const meta = (shape.meta ?? {}) as PostItMeta;
+  const author = meta.author ?? "tu";
+  const kind = meta.kind ?? "concepto";
+  const createdAt = meta.createdAt;
   const theme = AUTHOR_THEME[author];
+  const bodyText = richTextToPlain(shape.props.richText);
+
+  // Notes are aspect-ratio-locked at 200x200; the visible size in
+  // page coords scales with `props.scale`.
+  const SIZE = 200;
+  const w = SIZE * shape.props.scale;
+  const h = SIZE * shape.props.scale;
 
   return (
     <HTMLContainer
@@ -168,10 +149,10 @@ function PostItRenderer({ shape }: { shape: PostItShape }) {
           color: theme.ink,
           border: `1px solid ${theme.border}`,
           borderRadius: 8,
-          padding: "18px 14px 14px",
+          padding: "20px 14px 14px",
           fontFamily: "var(--font-serif)",
-          fontSize: 13.5,
-          lineHeight: 1.5,
+          fontSize: 14,
+          lineHeight: 1.55,
           boxShadow:
             "0 6px 14px rgba(60,40,10,0.10), 0 1px 0 rgba(255,255,255,0.5) inset",
           overflow: "hidden",
@@ -188,7 +169,7 @@ function PostItRenderer({ shape }: { shape: PostItShape }) {
             left: "50%",
             top: -9,
             transform: "translateX(-50%) rotate(-2deg)",
-            width: 48,
+            width: 56,
             height: 14,
             background: "rgba(120,100,60,0.20)",
             boxShadow: "0 1px 0 rgba(255,255,255,0.4) inset",
@@ -196,19 +177,20 @@ function PostItRenderer({ shape }: { shape: PostItShape }) {
           }}
         />
 
-        {/* Header: initials + kind + relative time */}
+        {/* Header */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
             color: theme.accent,
+            flex: "0 0 auto",
           }}
         >
           <span
             style={{
-              width: 20,
-              height: 20,
+              width: 22,
+              height: 22,
               borderRadius: "50%",
               display: "grid",
               placeItems: "center",
@@ -217,8 +199,7 @@ function PostItRenderer({ shape }: { shape: PostItShape }) {
               fontWeight: 500,
               border: "1px solid currentColor",
               color: theme.accent,
-              background:
-                author === "tu" ? "var(--color-paper-3)" : "transparent",
+              background: theme.iniBg,
             }}
           >
             {AUTHOR_INITIALS[author]}
@@ -234,36 +215,65 @@ function PostItRenderer({ shape }: { shape: PostItShape }) {
           >
             {KIND_LABEL[kind]}
           </span>
-          <span
-            style={{
-              marginLeft: "auto",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              color: "var(--color-ink-3)",
-            }}
-          >
-            {relativeTime(createdAt)}
-          </span>
+          {createdAt !== undefined ? (
+            <span
+              style={{
+                marginLeft: "auto",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "var(--color-ink-3)",
+              }}
+            >
+              {relativeTime(createdAt)}
+            </span>
+          ) : null}
         </div>
 
-        {/* Body */}
+        {/* Body — plain text extracted from the shape's richText. We
+            forgo tldraw's inline editor for now; editing happens via
+            the modal. */}
         <div
           style={{
-            flex: 1,
-            margin: 0,
+            flex: "1 1 auto",
+            minHeight: 0,
+            color: theme.ink,
+            fontFamily: "var(--font-serif)",
             fontSize: 13,
             lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
             overflow: "hidden",
-            color: theme.ink,
-            opacity: text ? 1 : 0.5,
-            fontStyle: text ? "normal" : "italic",
+            opacity: bodyText ? 1 : 0.5,
+            fontStyle: bodyText ? "normal" : "italic",
           }}
         >
-          {text || "(post-it sin texto)"}
+          {bodyText || "(post-it sin texto)"}
         </div>
       </div>
     </HTMLContainer>
   );
+}
+
+/**
+ * Walk a TLRichText (TipTap-shaped JSON document) and concatenate its
+ * text leaves, separating paragraphs with a newline. Good enough for
+ * the post-it body which is plain text today.
+ */
+function richTextToPlain(rt: TLRichText): string {
+  const parts: string[] = [];
+  type Node = { type?: string; text?: string; content?: Node[] };
+  const walk = (node: Node) => {
+    if (typeof node.text === "string") {
+      parts.push(node.text);
+      return;
+    }
+    if (Array.isArray(node.content)) {
+      for (const child of node.content) walk(child);
+      if (node.type === "paragraph") parts.push("\n");
+    }
+  };
+  walk(rt as Node);
+  return parts.join("").replace(/\n+$/, "");
 }
 
 function relativeTime(epochMs: number): string {
@@ -279,6 +289,3 @@ function relativeTime(epochMs: number): string {
   const d = Math.floor(h / 24);
   return `${d}d`;
 }
-
-export const POSTIT_INITIAL_W = POSTIT_W;
-export const POSTIT_INITIAL_H = POSTIT_H;

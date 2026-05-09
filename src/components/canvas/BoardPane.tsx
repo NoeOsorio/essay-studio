@@ -6,11 +6,24 @@ import {
   createShapeId,
   getSnapshot,
   loadSnapshot,
+  toRichText,
   type Editor,
   type TLComponents,
+  type TLNoteShape,
   type TLStoreSnapshot,
 } from "tldraw";
 import "tldraw/tldraw.css";
+
+import { Badge } from "@/components/ui/Badge";
+import { IconButton } from "@/components/ui/IconButton";
+import { GroupIcon } from "@/components/ui/icons";
+import { useStore } from "@/lib/store";
+import {
+  PergaminoNoteShapeUtil,
+  type PostItMeta,
+} from "./note-shape";
+import { PostItModal, type PostItDraft } from "./PostItModal";
+import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
 
 // Tldraw uses DOM APIs, so we only mount it on the client. Doing it
 // via next/dynamic keeps the SSR pass clean without resorting to a
@@ -20,25 +33,10 @@ const Tldraw = dynamic(
   { ssr: false },
 );
 
-import { Badge } from "@/components/ui/Badge";
-import { IconButton } from "@/components/ui/IconButton";
-import { GroupIcon } from "@/components/ui/icons";
-import { useStore } from "@/lib/store";
-import {
-  PostItShapeUtil,
-  POSTIT_INITIAL_W,
-  POSTIT_INITIAL_H,
-  type PostItShape,
-} from "./postit-shape";
-import { PostItModal, type PostItDraft } from "./PostItModal";
-import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
+// We replace the default note util — tldraw merges by `static type`,
+// so passing this overrides the built-in NoteShapeUtil ("note" type).
+const SHAPE_UTILS = [PergaminoNoteShapeUtil];
 
-const SHAPE_UTILS = [PostItShapeUtil];
-
-/**
- * Hide tldraw's default chrome — we render our own toolbar, zoom and
- * header to fit the Pergamino paper-tone palette.
- */
 const HIDDEN_COMPONENTS: TLComponents = {
   Toolbar: null,
   MainMenu: null,
@@ -56,12 +54,13 @@ const HIDDEN_COMPONENTS: TLComponents = {
   SharePanel: null,
 };
 
+const NOTE_SIZE = 200;
+
 export function BoardPane() {
   const current = useStore((s) => s.current);
-  // Mount + hydrate fresh on each essay switch. Tldraw's store is
-  // local; when the user opens a different essay we re-mount the
-  // whole canvas with the new snapshot.
   const essayId = current?.id ?? "none";
+  // Re-mount the canvas on essay switch — tldraw's local store is per
+  // canvas, so we hydrate fresh from the new essay's snapshot.
   return <BoardPaneInner key={essayId} />;
 }
 
@@ -75,39 +74,42 @@ function BoardPaneInner() {
   const [zoom, setZoom] = useState(1);
   const [counts, setCounts] = useState({ postits: 0, arrows: 0 });
   const [modalOpen, setModalOpen] = useState(false);
-  // Where to drop the next post-it (in tldraw page coords).
   const dropPointRef = useRef<{ x: number; y: number } | null>(null);
   const editorRef = useRef<Editor | null>(null);
 
-  // Open the modal; uses the center of the current viewport as the
-  // drop point if no explicit one is set.
   const openModal = useMemo(
     () => () => {
       const editor = editorRef.current;
       if (!editor) return;
       if (!dropPointRef.current) {
         const { x, y } = editor.getViewportPageBounds().center;
-        dropPointRef.current = { x: x - POSTIT_INITIAL_W / 2, y: y - POSTIT_INITIAL_H / 2 };
+        dropPointRef.current = {
+          x: x - NOTE_SIZE / 2,
+          y: y - NOTE_SIZE / 2,
+        };
       }
       setModalOpen(true);
     },
     [],
   );
 
-  // Global N key opens the modal. Skip when the user is typing.
+  // Global N key opens our modal. Capture phase + stopImmediatePropagation
+  // so tldraw's own "note tool" shortcut doesn't also fire (which would
+  // drop a default sticky on next click).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "n" && e.key !== "N") return;
       const target = e.target as HTMLElement | null;
       if (target?.closest("input, textarea, [contenteditable=true]")) return;
-      // Don't trigger while a modifier is held (so Cmd+N etc. pass through).
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       e.preventDefault();
+      e.stopImmediatePropagation();
       dropPointRef.current = null;
       openModal();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
   }, [openModal]);
 
   return (
@@ -118,15 +120,18 @@ function BoardPaneInner() {
           Tablero
         </div>
         <div className="flex items-center gap-2">
-          <Badge dotColor="bg-sis">{counts.postits} {counts.postits === 1 ? "nota" : "notas"}</Badge>
-          <Badge dotColor="bg-ink-3">{counts.arrows} {counts.arrows === 1 ? "conexión" : "conexiones"}</Badge>
+          <Badge dotColor="bg-sis">
+            {counts.postits} {counts.postits === 1 ? "nota" : "notas"}
+          </Badge>
+          <Badge dotColor="bg-ink-3">
+            {counts.arrows} {counts.arrows === 1 ? "conexión" : "conexiones"}
+          </Badge>
           <IconButton title="Agrupar (futuro)">
             <GroupIcon />
           </IconButton>
         </div>
       </div>
 
-      {/* The canvas */}
       <div className="absolute inset-0 pt-[44px]">
         <Tldraw
           shapeUtils={SHAPE_UTILS}
@@ -135,7 +140,6 @@ function BoardPaneInner() {
           onMount={(editor) => {
             editorRef.current = editor;
 
-            // Hydrate from the saved snapshot exactly once on mount.
             if (initialSnapshot) {
               try {
                 loadSnapshot(editor.store, initialSnapshot);
@@ -144,11 +148,9 @@ function BoardPaneInner() {
               }
             }
 
-            // Initial counts + zoom.
             recomputeCounts(editor, setCounts);
             setZoom(editor.getZoomLevel());
 
-            // Subscribe to document-level changes for autosave.
             const unlistenStore = editor.store.listen(
               () => {
                 const snap = getSnapshot(editor.store);
@@ -158,21 +160,19 @@ function BoardPaneInner() {
               { source: "user", scope: "document" },
             );
 
-            // Camera changes update the zoom indicator.
             const unlistenCamera = editor.store.listen(
               () => setZoom(editor.getZoomLevel()),
               { scope: "session" },
             );
 
-            // Double-click on empty space → create post-it modal at that point.
             const onPointerDown = (e: PointerEvent) => {
               if (e.detail < 2) return;
               const target = e.target as HTMLElement | null;
-              if (target?.closest(".tl-shape")) return; // click on shape, not empty
+              if (target?.closest(".tl-shape")) return;
               const pt = editor.screenToPage({ x: e.clientX, y: e.clientY });
               dropPointRef.current = {
-                x: pt.x - POSTIT_INITIAL_W / 2,
-                y: pt.y - POSTIT_INITIAL_H / 2,
+                x: pt.x - NOTE_SIZE / 2,
+                y: pt.y - NOTE_SIZE / 2,
               };
               openModal();
             };
@@ -188,7 +188,6 @@ function BoardPaneInner() {
         />
       </div>
 
-      {/* Custom toolbar / zoom overlays */}
       <BoardToolbar
         active={tool}
         onTool={(t) => {
@@ -200,15 +199,11 @@ function BoardPaneInner() {
             openModal();
           } else if (t === "arrow") {
             editor.setCurrentTool("arrow");
-          } else if (t === "select") {
-            editor.setCurrentTool("select");
-          } else if (t === "group") {
-            // Group = select tool with marquee — we just switch back.
+          } else {
             editor.setCurrentTool("select");
           }
         }}
         onMicTeaser={() => {
-          // Hint until voice arrives in a future session.
           alert("Dictado · próximamente.");
         }}
       />
@@ -220,7 +215,6 @@ function BoardPaneInner() {
         onZoomFit={() => editorRef.current?.zoomToFit()}
       />
 
-      {/* Modal */}
       <PostItModal
         open={modalOpen}
         onCancel={() => {
@@ -245,7 +239,7 @@ function recomputeCounts(
   let postits = 0;
   let arrows = 0;
   for (const shape of editor.getCurrentPageShapes()) {
-    if (shape.type === "postit") postits += 1;
+    if (shape.type === "note") postits += 1;
     else if (shape.type === "arrow") arrows += 1;
   }
   setCounts({ postits, arrows });
@@ -260,24 +254,25 @@ function createPostIt(
   const center = editor.getViewportPageBounds().center;
   const pos =
     point ?? {
-      x: center.x - POSTIT_INITIAL_W / 2,
-      y: center.y - POSTIT_INITIAL_H / 2,
+      x: center.x - NOTE_SIZE / 2,
+      y: center.y - NOTE_SIZE / 2,
     };
   const id = createShapeId();
-  editor.createShape({
+  const meta: PostItMeta = {
+    author: draft.author,
+    kind: draft.kind,
+    createdAt: Date.now(),
+  };
+  editor.createShape<TLNoteShape>({
     id,
-    type: "postit",
+    type: "note",
     x: pos.x,
     y: pos.y,
     props: {
-      w: POSTIT_INITIAL_W,
-      h: POSTIT_INITIAL_H,
-      text: draft.text,
-      author: draft.author,
-      kind: draft.kind,
-      createdAt: Date.now(),
+      richText: toRichText(draft.text),
     },
-  } satisfies Partial<PostItShape> & { id: PostItShape["id"]; type: "postit" });
+    meta,
+  });
   editor.setCurrentTool("select");
   editor.select(id);
 }

@@ -75,7 +75,7 @@ essay-studio/
 │   │   │   ├── BoardPane.tsx        # wrapper Tldraw + state + persistencia
 │   │   │   ├── BoardToolbar.tsx     # toolbar lateral + zoom
 │   │   │   ├── PostItModal.tsx      # modal de crear post-it
-│   │   │   └── postit-shape.tsx     # ShapeUtil + renderer del post-it
+│   │   │   └── note-shape.tsx       # PergaminoNoteShapeUtil (override del NoteShapeUtil default)
 │   │   ├── council/
 │   │   │   └── CouncilAvatars.tsx
 │   │   └── ui/                  # primitivos compartidos
@@ -182,15 +182,16 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 ## Qué quedó hecho en sesión 3
 
 - **tldraw v5** integrado en `BoardPane` reemplazando el mock visual.
-- **Custom shape `postit`** (`src/components/canvas/postit-shape.tsx`):
-  - Props: `w, h, text, author, kind, createdAt`
-  - 5 autores: `tu | em | sis | pra | cri`. 5 tipos: `concepto | pregunta | conexion | cita | critica`.
-  - El **color del post-it lo dicta el AUTOR** (sage tints), no el tipo. TÚ aparece en paper-tone neutro.
-  - Render con tape vintage encima (gradient brown rotado), header con avatar circular del sabio + tipo en small caps + timestamp relativo (just now / 8m / 2h).
-  - Module augmentation de `TLGlobalShapePropsMap` para que `editor.createShape({ type: "postit" ... })` typecheckee.
+- **Override del `NoteShapeUtil`** default (`src/components/canvas/note-shape.tsx`) en lugar de un shape custom paralelo:
+  - `class PergaminoNoteShapeUtil extends NoteShapeUtil` con `static type = "note"` heredado, lo que **reemplaza** el default cuando se pasa al prop `shapeUtils`.
+  - Override de `component()` para el visual Pergamino (tape vintage, header con avatar circular del sabio + kind label + timestamp relativo) y de `getDefaultProps()` para usar `size: "s"`, `align: "start"`.
+  - Override de `canEdit()` → `false`. La edición ocurre vía modal en sesión 3; reactivamos el editor inline cuando los sabios necesiten escribir directo.
+  - **Metadata propia** en `shape.meta`: `{ author, kind, createdAt }`. 5 autores: `tu | em | sis | pra | cri`. 5 kinds: `concepto | pregunta | conexion | cita | critica`. El **color del post-it lo dicta el AUTOR** (sage tints), no el kind.
+  - Notes pre-existentes (sin meta) se re-skinean con defaults `tu / concepto`, sin timestamp — funciona como **migración automática** de cualquier sticky default que el usuario ya hubiera creado antes de este override.
+  - Texto plano se extrae de `shape.props.richText` (estructura TipTap-shaped) con un walker recursivo. Sin formato rico por ahora, suficiente para el flujo del modal.
 - **Modal de creación** (`PostItModal.tsx`) con pills de autor (tinted en su color cuando activo), pills de tipo, textarea serif. `⌘ ⏎` para crear, `Esc` para cancelar. Se monta/desmonta con `open`, así no hay setState-in-effect.
 - **Toolbar lateral** custom (`BoardToolbar.tsx`) — select / postit / arrow / group / mic — y zoom indicator a la derecha. La toolbar default de tldraw queda oculta vía la prop `components={{ Toolbar: null, ... }}`.
-- **Crear post-it:** tecla `N` (en cualquier parte del canvas, ignorando inputs) o doble-click sobre canvas vacío. La posición de drop la calcula `editor.screenToPage`.
+- **Crear post-it:** tecla `N` (en cualquier parte del canvas, ignorando inputs) o doble-click sobre canvas vacío. La posición de drop la calcula `editor.screenToPage`. Listener registrado en **capture phase con `stopImmediatePropagation`** para que el atajo `N` default de tldraw (note tool) no fire también y deje sticky notes amarillos planos en el siguiente click.
 - **Counter en header** ("X notas · Y conexiones") calculado en vivo desde `editor.getCurrentPageShapes()` y refrescado en cada cambio de store.
 - **Persistencia en el JSON del ensayo:** el snapshot completo de tldraw (`getSnapshot(editor.store)`) vive en `essay.board`. Se hidrata via `loadSnapshot(editor.store, snap)` exactamente una vez en `onMount`. Cuando cambias de ensayo, `BoardPane` se remonta vía `key={essayId}`. Listener con `{ source: "user", scope: "document" }` evita auto-save loops.
 - **Rust:** campo `Option<serde_json::Value>` añadido al `Essay` struct con `skip_serializing_if = "Option::is_none"` (ensayos viejos sin tablero siguen leyendo). 8/8 tests verdes incluyendo `round_trip_preserves_optional_board_snapshot`.
@@ -202,7 +203,8 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 | Decisión | Por qué |
 |---|---|
 | **tldraw v5** (no v3 que sugería el plan) | Última estable; mi nueva regla por defecto. |
-| **Module augmentation** sobre `TLGlobalShapePropsMap` | El patrón oficial de v5 — sin esto `editor.createShape({ type: "postit" })` no typecheckea. |
+| **Override del `NoteShapeUtil` default** (no shape custom paralelo) | El primer intento fue un shape `postit` separado. Falló: la tecla `N` también activaba el note tool de tldraw, dejando sticky notes amarillos planos. La solución correcta fue extender el default y **reemplazarlo** vía `shapeUtils`. Reusa drag, resize, edit-mode plumbing. Notes pre-existentes se re-skinean automáticamente. (Lección: cuando una lib ya implementa el behavior, override la pieza visual + extender meta sobre crear un sistema paralelo.) |
+| **Meta sobre props para `author/kind/createdAt`** | El note tiene su propio schema (richText, color, font, etc.). En lugar de pelear con migrations de schema, los datos del consejo viven en el campo `meta` que es libre `JsonObject`. |
 | **Snapshot completo en `essay.board`** | Más simple que duplicar shapes en mi modelo. tldraw maneja undo, deltas, selección, etc. |
 | **Color por autor (no por tipo)** | El plan original mezclaba ambos; el diseño Pergamino claramente codifica voz por color. Tipo queda como tag textual (CONEXIÓN, CONCEPTO…). |
 | **Hide tldraw default chrome** completo | Para preservar identidad paper-tone. Reimplementé toolbar/zoom nuestros, dejé las gestures + accesibilidad de tldraw. |
@@ -217,11 +219,14 @@ Setup previo del usuario: el archivo `prompts/el-empirista.md` con el system pro
 
 ## Aprendido en sesión 3
 
-- tldraw v5 expone custom shapes vía `BaseBoxShapeUtil` (con `getIndicatorPath` requerido) + module augmentation de `TLGlobalShapePropsMap`. Sin la augmentation, `editor.createShape({ type: 'mishape' })` no typecheckea pese a que en runtime funciona.
+- **Reusar antes de reinventar** (lección dura). El primer intento de sesión 3 fue un shape `postit` paralelo, lo que dejó al `note` default de tldraw activo y creó sticky notes amarillos cuando el usuario presionaba `N`. La solución correcta es **override del `NoteShapeUtil` default** (mismo `static type = "note"` reemplaza al built-in). Pista: cuando un atajo o feature default colisiona con el tuyo, ese subsistema es el que deberías extender, no esquivar.
+- En tldraw v5 el `shapeUtils` prop **reemplaza por tipo** — pasar un util con el mismo `static type` que un default lo override.
+- `shape.meta` es un `JsonObject` libre, perfecto para tus props extras sin tener que migrar el schema del shape oficial.
 - `editor.store.listen(fn, { source: "user", scope: "document" })` filtra solo cambios del usuario al documento — clave para evitar autosave loops cuando aplicas `loadSnapshot` al montar.
-- `getViewportPageBounds().center` reemplaza `getViewportPageCenter()` (cambió de nombre en v5).
+- `getViewportPageBounds().center` reemplaza `getViewportPageCenter()` (renombrado en v5).
 - `next/dynamic({ ssr: false })` es la forma idiomática para componentes client-only en App Router con `output: "export"` — más limpia que `useEffect+setMounted` y no dispara el lint `set-state-in-effect`.
 - **Mount-on-open** es el patrón limpio para modales con state interno: en lugar de `if (!open) return null` con un useEffect que resetea, separar el wrapper que hace el `open` check del inner que tiene el state. Cada apertura es un mount fresh.
+- **Capture phase + `stopImmediatePropagation`** para interceptar atajos antes de que la lib los reciba: `window.addEventListener("keydown", h, { capture: true })`.
 
 ## Aprendido en sesión 2
 
