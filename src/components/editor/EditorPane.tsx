@@ -28,15 +28,16 @@ export function EditorPane() {
 
   return (
     <div className="relative overflow-y-auto thin-scroll bg-paper">
-      <div className="px-[88px] pt-16 pb-[100px] max-w-none">
+      {/* Single key on the wrapper: when the user opens a different
+          essay, the whole subtree (title + editor + meta) remounts
+          with the new initial values. */}
+      <div key={essayId} className="px-[88px] pt-16 pb-[100px] max-w-none">
         <TitleInput
-          key={essayId}
           initialValue={current.title === "Sin título" ? "" : current.title}
           onChange={updateTitle}
         />
         <DocMeta />
         <TipTapEditor
-          key={essayId}
           initialContent={current.content}
           onChange={updateContent}
         />
