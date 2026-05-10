@@ -2,7 +2,7 @@
 
 App de escritorio para escritura aumentada con IA — editor + canvas + un consejo de cuatro sabios que anotan, organizan y critican borradores. Pensada para escribir ensayos sobre psicología organizacional.
 
-> Estado: **sesión 1**. Shell visual de la vista de escritura listo, sin IA ni persistencia reales todavía. Para el plan de sesiones y memoria persistente del proyecto, ver [CLAUDE.md](CLAUDE.md).
+> Estado: **sesión 3 cerrada**. Editor TipTap real con persistencia local + tablero tldraw con post-its tipados (autor + kind via `meta`). Sabios todavía no existen — llegan en sesión 4. Para el plan de sesiones y memoria persistente del proyecto, ver [CLAUDE.md](CLAUDE.md).
 
 ## Stack
 
@@ -11,6 +11,10 @@ App de escritorio para escritura aumentada con IA — editor + canvas + un conse
 - [React 19](https://react.dev/)
 - [TypeScript](https://www.typescriptlang.org/) strict
 - [Tailwind CSS 4](https://tailwindcss.com/) — tokens en CSS via `@theme`
+- [TipTap 3](https://tiptap.dev/) — editor de texto rico con slash commands custom
+- [tldraw 5](https://tldraw.dev/) — canvas con override del `NoteShapeUtil` para el visual Pergamino
+- [Zustand 5](https://zustand-demo.pmnd.rs/) — state global (ensayo abierto, save status)
+- [Playwright](https://playwright.dev/) — suite E2E para atajos y flow
 - Fuentes: [Newsreader](https://fonts.google.com/specimen/Newsreader), [Inter](https://fonts.google.com/specimen/Inter), [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) (vía `next/font/google`)
 
 ## Requisitos
@@ -27,10 +31,11 @@ App de escritorio para escritura aumentada con IA — editor + canvas + un conse
 ## Cómo correrlo
 
 ```bash
-# Instalar deps
+# Instalar deps (incluye descargar el binario chromium para Playwright)
 npm install
+npx playwright install chromium
 
-# Vista web suelta (rápido, en localhost:3000)
+# Vista web suelta (rápido, en localhost:3000) — útil para iterar UI
 npm run dev
 
 # App de escritorio completa (Next.js + ventana Tauri)
@@ -38,6 +43,31 @@ npm run tauri:dev
 ```
 
 > ⚠️ La **primera vez** que corres `npm run tauri:dev`, Cargo descarga y compila ~470 crates de Tauri y sus deps. Puede tardar **5-10 minutos**. Las siguientes corridas son segundos.
+
+> En `npm run dev` solo (sin Tauri), las llamadas de persistencia van a fallar porque el bridge `window.__TAURI_INTERNALS__` no existe en un browser puro. Para desarrollar la persistencia real, usa `npm run tauri:dev`.
+
+## Tests
+
+Suite E2E con Playwright que cubre el flow completo (TipTap + tldraw + autosave) contra `next dev` con un stub de Tauri en memoria. **Antes de tocar atajos, edit modes o el flow lista↔editor, corre `npm run test:e2e`.**
+
+```bash
+npm run test:e2e          # headless, ~25s
+npm run test:e2e:ui       # UI interactiva (debugging)
+```
+
+Lo que cubre:
+
+- **Editor** — texto plano, título single-line, slash menu, `⌘B` bold
+- **Tablero** — `N` no es sticky, escribir después de crear va al note, atajos no se solapan con typing, counter live, panel contextual asigna autor/kind
+- **Flow** — crear ensayo persiste, autosave guarda, breadcrumb vuelve a la lista
+
+Tests del lado Rust:
+
+```bash
+cd src-tauri && cargo test
+```
+
+Cubren round-trip de persistencia, ordenamiento, sanitización de IDs, escritura atómica.
 
 ## Build de producción
 
@@ -54,6 +84,8 @@ Genera el bundle nativo en `src-tauri/target/release/bundle/` (`.dmg` / `.app` e
 | `npm run dev` | Next.js dev server en `http://localhost:3000` |
 | `npm run build` | Build estático → `./out` |
 | `npm run lint` | ESLint sobre `src/` |
+| `npm run test:e2e` | Suite Playwright headless |
+| `npm run test:e2e:ui` | Suite Playwright con UI interactiva |
 | `npm run tauri:dev` | Arranca Next dev + ventana Tauri |
 | `npm run tauri:build` | Empaqueta la app de escritorio |
 | `npm run tauri` | CLI de Tauri (passthrough) |
@@ -64,20 +96,32 @@ Ver [CLAUDE.md](CLAUDE.md) para el detalle. Resumen:
 
 ```
 src/
-├── app/                  # rutas Next.js
+├── app/                       # rutas Next.js (SPA puro: una sola ruta)
 ├── components/
-│   ├── editor/           # placeholder, TipTap (futuro)
-│   ├── canvas/           # placeholder, tldraw (futuro)
-│   ├── council/          # avatares + UI del consejo de sabios
-│   ├── ui/               # primitivos compartidos
+│   ├── editor/                # TipTap real
+│   │   ├── EditorPane.tsx
+│   │   ├── TitleInput.tsx
+│   │   ├── SlashMenu.tsx
+│   │   └── extensions/
+│   │       └── SlashCommand.ts
+│   ├── canvas/                # tldraw real
+│   │   ├── BoardPane.tsx
+│   │   ├── BoardToolbar.tsx
+│   │   ├── NoteContextPanel.tsx
+│   │   └── note-shape.tsx     # PergaminoNoteShapeUtil (override)
+│   ├── council/               # avatares + UI del consejo
+│   ├── ui/                    # primitivos compartidos
+│   ├── EssayList.tsx
 │   ├── Topbar.tsx
 │   └── Scorebar.tsx
 └── lib/
-    ├── agents/           # orquestación del consejo (futuro)
-    ├── claude/           # cliente Anthropic API (futuro)
-    └── storage/          # persistencia local (futuro)
-src-tauri/                # lado Rust de Tauri
-prompts/                  # prompts MD por sabio
+    ├── store.ts               # Zustand (ensayo abierto, save status)
+    ├── storage/               # invoke wrappers + tipos del Essay
+    ├── agents/                # orquestación del consejo (sesión 4+)
+    └── claude/                # cliente Anthropic API (sesión 4+)
+src-tauri/                     # lado Rust de Tauri (storage commands)
+tests/e2e/                     # Playwright specs (keyboard + flow)
+prompts/                       # prompts MD por sabio (los agrega Noé)
 ```
 
 ## Convenciones
@@ -86,6 +130,7 @@ prompts/                  # prompts MD por sabio
 - **TS strict, prohibido `any`.**
 - **Sin librerías de componentes externas.** Primitivos propios.
 - **API key de Anthropic SOLO desde env** (`ANTHROPIC_API_KEY`). Jamás hardcoded.
+- **Antes de tocar keyboard handlers / edit modes**, correr `npm run test:e2e`. La suite existe porque ese subsistema nos ha mordido dos veces.
 
 ## Diseño
 
