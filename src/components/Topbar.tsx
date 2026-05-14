@@ -7,6 +7,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { ChevronLeft, MoreHorizontal } from "@/components/ui/icons";
 import { CouncilAvatars } from "@/components/council/CouncilAvatars";
 import { useStore } from "@/lib/store";
+import { FEATURES } from "@/lib/features";
 import type { EssayMode } from "@/lib/storage/types";
 
 export function Topbar() {
@@ -77,24 +78,32 @@ export function Topbar() {
         <CouncilAvatars />
       </div>
 
-      {/* Right — actions */}
+      {/* Right — actions. Future-session features stay in source but
+          are gated by `FEATURES.*` so the topbar doesn't read as
+          half-broken while we build. */}
       <div className="flex items-center justify-end gap-2.5">
         <InterrogateButton />
-        <Button disabled title="Disponible en sesión 5">
-          <span className="w-[7px] h-[7px] rounded-full bg-sis" />
-          Mesa redonda
-          <span className="kbd ml-1">⌘ R</span>
-        </Button>
-        <Button variant="seal" disabled title="Disponible en sesión 7">
-          Pluma roja
-        </Button>
-        <Button variant="dark" disabled title="Disponible en sesión 8">
-          Benchmark
-          <span className="kbd kbd-dark ml-1">⌘ B</span>
-        </Button>
-        <IconButton title="Más">
-          <MoreHorizontal />
-        </IconButton>
+        {FEATURES.mesaRedonda ? (
+          <Button>
+            <span className="w-[7px] h-[7px] rounded-full bg-sis" />
+            Mesa redonda
+            <span className="kbd ml-1">⌘ R</span>
+          </Button>
+        ) : null}
+        {FEATURES.plumaRoja ? (
+          <Button variant="seal">Pluma roja</Button>
+        ) : null}
+        {FEATURES.benchmark ? (
+          <Button variant="dark">
+            Benchmark
+            <span className="kbd kbd-dark ml-1">⌘ B</span>
+          </Button>
+        ) : null}
+        {FEATURES.topbarMore ? (
+          <IconButton title="Más">
+            <MoreHorizontal />
+          </IconButton>
+        ) : null}
       </div>
     </div>
   );

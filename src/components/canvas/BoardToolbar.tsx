@@ -10,6 +10,7 @@ import {
   ZoomMinus,
   ZoomPlus,
 } from "@/components/ui/icons";
+import { FEATURES } from "@/lib/features";
 
 export type BoardTool = "select" | "postit" | "arrow" | "group";
 
@@ -20,6 +21,7 @@ type ToolbarProps = {
 };
 
 export function BoardToolbar({ active, onTool, onMicTeaser }: ToolbarProps) {
+  const showFuture = FEATURES.boardGroup || FEATURES.boardMic;
   return (
     <div className="absolute left-3.5 top-[60px] z-[3] flex flex-col gap-1 bg-paper-2 border border-rule-1 rounded-[8px] p-1 shadow-(--shadow-soft)">
       <ToolBtn label="seleccionar" active={active === "select"} onClick={() => onTool("select")}>
@@ -35,13 +37,17 @@ export function BoardToolbar({ active, onTool, onMicTeaser }: ToolbarProps) {
       <ToolBtn label="flecha / conexión" active={active === "arrow"} onClick={() => onTool("arrow")}>
         <ArrowIcon />
       </ToolBtn>
-      <ToolBtn label="grupo" active={active === "group"} onClick={() => onTool("group")}>
-        <GroupDashedIcon />
-      </ToolBtn>
-      <hr className="border-0 border-t border-rule-1 my-1 w-[80%]" />
-      <ToolBtn label="dictar (sesión futura)" active={false} onClick={onMicTeaser}>
-        <MicIcon />
-      </ToolBtn>
+      {FEATURES.boardGroup ? (
+        <ToolBtn label="grupo" active={active === "group"} onClick={() => onTool("group")}>
+          <GroupDashedIcon />
+        </ToolBtn>
+      ) : null}
+      {showFuture ? <hr className="border-0 border-t border-rule-1 my-1 w-[80%]" /> : null}
+      {FEATURES.boardMic ? (
+        <ToolBtn label="dictar (sesión futura)" active={false} onClick={onMicTeaser}>
+          <MicIcon />
+        </ToolBtn>
+      ) : null}
     </div>
   );
 }

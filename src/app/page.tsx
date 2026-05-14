@@ -8,6 +8,7 @@ import { Scorebar } from "@/components/Scorebar";
 import { EssayList } from "@/components/EssayList";
 import { LecturaOverlay } from "@/components/lectura/LecturaOverlay";
 import { useStore } from "@/lib/store";
+import { FEATURES } from "@/lib/features";
 
 export default function Page() {
   const view = useStore((s) => s.view);
@@ -40,7 +41,7 @@ export default function Page() {
           <BoardPane />
         </main>
       )}
-      {view === "editor" ? <Scorebar /> : null}
+      {view === "editor" && FEATURES.benchmark ? <Scorebar /> : null}
       <LecturaOverlay />
     </div>
   );
