@@ -17,6 +17,7 @@ import {
 
 export function EditorPane() {
   const current = useStore((s) => s.current);
+  const boardOpen = useStore((s) => s.boardOpen);
   const updateContent = useStore((s) => s.updateContent);
   const updateTitle = useStore((s) => s.updateTitle);
 
@@ -26,12 +27,19 @@ export function EditorPane() {
 
   if (!current) return null;
 
+  // When the board is hidden, the editor pane gets the full width
+  // of the window. Center the prose column so it doesn't read as a
+  // wall hugging the left margin.
+  const innerClass = boardOpen
+    ? "px-[88px] pt-16 pb-[100px] max-w-none"
+    : "px-[88px] pt-16 pb-[100px] max-w-[920px] mx-auto";
+
   return (
     <div className="relative overflow-y-auto thin-scroll bg-paper">
       {/* Single key on the wrapper: when the user opens a different
           essay, the whole subtree (title + editor + meta) remounts
           with the new initial values. */}
-      <div key={essayId} className="px-[88px] pt-16 pb-[100px] max-w-none">
+      <div key={essayId} className={innerClass}>
         <TitleInput
           initialValue={current.title === "Sin título" ? "" : current.title}
           onChange={updateTitle}

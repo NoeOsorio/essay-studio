@@ -112,3 +112,16 @@ export function ZoomFit(p: IconProps) {
     </svg>
   );
 }
+
+/** Frame with a right-hand sidebar; the sidebar fills when `active`. */
+export function PanelRightIcon({ active = false, ...p }: IconProps & { active?: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} {...base(p)}>
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <line x1="10" y1="3" x2="10" y2="13" />
+      {active ? (
+        <rect x="10" y="3" width="4" height="10" fill="currentColor" stroke="none" />
+      ) : null}
+    </svg>
+  );
+}

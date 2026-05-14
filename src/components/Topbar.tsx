@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
-import { ChevronLeft, MoreHorizontal } from "@/components/ui/icons";
+import { ChevronLeft, MoreHorizontal, PanelRightIcon } from "@/components/ui/icons";
 import { CouncilAvatars } from "@/components/council/CouncilAvatars";
 import { useStore } from "@/lib/store";
 import { FEATURES } from "@/lib/features";
@@ -82,6 +82,7 @@ export function Topbar() {
           are gated by `FEATURES.*` so the topbar doesn't read as
           half-broken while we build. */}
       <div className="flex items-center justify-end gap-2.5">
+        <BoardToggle />
         <InterrogateButton />
         {FEATURES.mesaRedonda ? (
           <Button>
@@ -116,6 +117,21 @@ function InterrogateButton() {
       <span className="w-[7px] h-[7px] rounded-full bg-em" />
       Interrogar
     </Button>
+  );
+}
+
+function BoardToggle() {
+  const boardOpen = useStore((s) => s.boardOpen);
+  const toggleBoard = useStore((s) => s.toggleBoard);
+  return (
+    <IconButton
+      onClick={toggleBoard}
+      title={boardOpen ? "Ocultar tablero" : "Mostrar tablero"}
+      aria-pressed={boardOpen}
+      className={boardOpen ? "bg-paper-3 text-ink-1 border-rule-1" : ""}
+    >
+      <PanelRightIcon active={boardOpen} />
+    </IconButton>
   );
 }
 

@@ -36,6 +36,9 @@ type State = {
   saveStatus: SaveStatus;
   /** Modal overlay shown above the editor (Lectura nueva, etc.). */
   overlay: Overlay;
+  /** Whether the right-hand board pane is visible. Hidden = editor
+   *  takes the full main column, centered. */
+  boardOpen: boolean;
   /** Internal: timer handle for the debounced save. */
   _autosaveTimer: ReturnType<typeof setTimeout> | null;
 
@@ -60,6 +63,9 @@ type State = {
   addInterrogatorio: (entry: Interrogatorio) => void;
   /** Open / close the lectura overlay. */
   setOverlay: (overlay: Overlay) => void;
+  /** Show/hide the right-hand board pane. Force-flushes any pending
+   *  save before hiding so unmounting tldraw doesn't lose work. */
+  toggleBoard: () => void;
 
   /** Force-flush any pending save. */
   flush: () => Promise<void>;
@@ -102,6 +108,7 @@ export const useStore = create<State>((set, get) => ({
   current: null,
   saveStatus: { kind: "idle" },
   overlay: null,
+  boardOpen: true,
   _autosaveTimer: null,
 
   async loadList() {
@@ -259,6 +266,14 @@ export const useStore = create<State>((set, get) => ({
 
   setOverlay(overlay) {
     set({ overlay });
+  },
+
+  toggleBoard() {
+    const next = !get().boardOpen;
+    // When hiding, force-flush any pending autosave so nothing
+    // in-flight gets dropped when BoardPane unmounts.
+    if (!next) void get().flush();
+    set({ boardOpen: next });
   },
 
   async flush() {

@@ -12,6 +12,7 @@ import { FEATURES } from "@/lib/features";
 
 export default function Page() {
   const view = useStore((s) => s.view);
+  const boardOpen = useStore((s) => s.boardOpen);
   const flush = useStore((s) => s.flush);
   const loadList = useStore((s) => s.loadList);
 
@@ -34,11 +35,18 @@ export default function Page() {
       <Topbar />
       {view === "list" ? (
         <EssayList />
-      ) : (
+      ) : boardOpen ? (
         <main className="grid grid-cols-[1fr_1px_1fr] min-h-0">
           <EditorPane />
           <div className="bg-rule-1" />
           <BoardPane />
+        </main>
+      ) : (
+        // Board hidden: editor takes the full main column, centered.
+        // We keep BoardPane unmounted; its snapshot lives in the
+        // essay JSON, so toggling back hydrates from scratch.
+        <main className="min-h-0 overflow-hidden">
+          <EditorPane />
         </main>
       )}
       {view === "editor" && FEATURES.benchmark ? <Scorebar /> : null}

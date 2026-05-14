@@ -44,6 +44,22 @@ test("typing into the title and body autosaves under the same id", async ({
   expect(essays[0].wordCount).toBeGreaterThan(0);
 });
 
+test("topbar toggle hides and re-shows the board pane", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Nuevo académico/i }).click();
+  await page.getByRole("textbox", { name: "Título del ensayo" }).waitFor();
+  // Board starts visible.
+  await expect(page.locator(".tl-container")).toBeVisible();
+
+  // Click "Ocultar tablero" — board disappears.
+  await page.getByRole("button", { name: /Ocultar tablero/ }).click();
+  await expect(page.locator(".tl-container")).toHaveCount(0);
+
+  // Now the toggle is in "show" state — click again and the board comes back.
+  await page.getByRole("button", { name: /Mostrar tablero/ }).click();
+  await expect(page.locator(".tl-container")).toBeVisible();
+});
+
 test("breadcrumb 'ensayos' returns to the list", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /Nuevo académico/i }).click();
