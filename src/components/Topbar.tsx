@@ -111,9 +111,9 @@ export function Topbar() {
 }
 
 function InterrogateButton() {
-  const setOverlay = useStore((s) => s.setOverlay);
+  const openLectura = useStore((s) => s.openLectura);
   return (
-    <Button onClick={() => setOverlay("lectura")} title="Pedir al Empirista que interrogue un texto">
+    <Button onClick={openLectura} title="Pedir al Empirista que interrogue un texto">
       <span className="w-[7px] h-[7px] rounded-full bg-em" />
       Interrogar
     </Button>

@@ -20,6 +20,23 @@ test("'Interrogar' button opens the Lectura overlay", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("'Interrogar' auto-shows the board when it was hidden", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  // Hide the board first.
+  await page.getByRole("button", { name: /Ocultar tablero/ }).click();
+  await expect(page.locator(".tl-container")).toHaveCount(0);
+
+  // Now click Interrogar — overlay opens AND the board comes back so
+  // the future post-its will have somewhere to land.
+  await page.getByRole("button", { name: /Interrogar/ }).click();
+  await expect(
+    page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
+  ).toBeVisible();
+  await expect(page.locator(".tl-container")).toBeVisible();
+});
+
 test("interrogating a text streams 5 questions and lets the user save them", async ({
   page,
 }) => {

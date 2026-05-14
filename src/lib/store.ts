@@ -63,6 +63,10 @@ type State = {
   addInterrogatorio: (entry: Interrogatorio) => void;
   /** Open / close the lectura overlay. */
   setOverlay: (overlay: Overlay) => void;
+  /** Open the Lectura overlay AND make sure the board pane is
+   *  visible — interrogating implies you want to see the resulting
+   *  post-its land. */
+  openLectura: () => void;
   /** Show/hide the right-hand board pane. Force-flushes any pending
    *  save before hiding so unmounting tldraw doesn't lose work. */
   toggleBoard: () => void;
@@ -266,6 +270,10 @@ export const useStore = create<State>((set, get) => ({
 
   setOverlay(overlay) {
     set({ overlay });
+  },
+
+  openLectura() {
+    set({ overlay: "lectura", boardOpen: true });
   },
 
   toggleBoard() {
