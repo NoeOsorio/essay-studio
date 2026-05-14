@@ -46,11 +46,21 @@ export async function installTauriStub(page: Page) {
 
     const win = window as unknown as {
       __TAURI_INTERNALS__: unknown;
+      __TAURI_EVENT_PLUGIN_INTERNALS__: unknown;
       __E2E_ESSAYS__: Map<string, EssayLike>;
       __E2E_DISPATCH: (name: string, payload: unknown) => void;
     };
     win.__E2E_ESSAYS__ = essays;
     win.__E2E_DISPATCH = dispatchEvent;
+
+    // Tauri's event package uses this side-namespace for direct
+    // unlisten — it's NOT routed through invoke().
+    win.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+      unregisterListener: (event: string, subId: number) => {
+        eventSubs.get(event)?.delete(subId);
+        eventIndex.delete(subId);
+      },
+    };
 
     win.__TAURI_INTERNALS__ = {
       transformCallback: (cb: (msg: unknown) => void) => {
