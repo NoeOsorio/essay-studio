@@ -17,6 +17,9 @@ pub struct Essay {
     /// Optional tldraw snapshot for the canvas pane. Opaque JSON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<serde_json::Value>,
+    /// Cumulative interrogations by sages. Opaque to Rust beyond serde.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrogatorios: Option<serde_json::Value>,
     pub mode: String,
     #[serde(rename = "wordCount", default)]
     pub word_count: u32,
@@ -163,6 +166,7 @@ mod tests {
                 }]
             }),
             board: None,
+            interrogatorios: None,
             mode: "academico".to_string(),
             word_count: 3,
             created_at: "2026-05-09T20:00:00Z".to_string(),

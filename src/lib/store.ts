@@ -13,6 +13,7 @@ import type {
   Essay,
   EssayMeta,
   EssayMode,
+  Interrogatorio,
 } from "@/lib/storage/types";
 
 const AUTOSAVE_MS = 800;
@@ -26,11 +27,15 @@ export type SaveStatus =
 
 export type View = "list" | "editor";
 
+export type Overlay = "lectura" | null;
+
 type State = {
   view: View;
   list: EssayMeta[];
   current: Essay | null;
   saveStatus: SaveStatus;
+  /** Modal overlay shown above the editor (Lectura nueva, etc.). */
+  overlay: Overlay;
   /** Internal: timer handle for the debounced save. */
   _autosaveTimer: ReturnType<typeof setTimeout> | null;
 
@@ -51,6 +56,10 @@ type State = {
   updateMode: (mode: EssayMode) => void;
   /** Update the tldraw board snapshot for the open essay. */
   updateBoard: (snapshot: BoardSnapshot | null) => void;
+  /** Append an interrogatorio entry from a sage and flush. */
+  addInterrogatorio: (entry: Interrogatorio) => void;
+  /** Open / close the lectura overlay. */
+  setOverlay: (overlay: Overlay) => void;
 
   /** Force-flush any pending save. */
   flush: () => Promise<void>;
@@ -92,6 +101,7 @@ export const useStore = create<State>((set, get) => ({
   list: [],
   current: null,
   saveStatus: { kind: "idle" },
+  overlay: null,
   _autosaveTimer: null,
 
   async loadList() {
@@ -233,6 +243,22 @@ export const useStore = create<State>((set, get) => ({
       saveStatus: { kind: "dirty" },
       _autosaveTimer: timer,
     });
+  },
+
+  addInterrogatorio(entry) {
+    const cur = get().current;
+    if (!cur) return;
+    const updated: Essay = {
+      ...cur,
+      interrogatorios: [...(cur.interrogatorios ?? []), entry],
+      updatedAt: nowIso(),
+    };
+    set({ current: updated, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
+  setOverlay(overlay) {
+    set({ overlay });
   },
 
   async flush() {

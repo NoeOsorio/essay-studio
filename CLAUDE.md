@@ -24,7 +24,8 @@ Noé la usa para aprender psicología organizacional mientras escribe ensayos.
 | Zustand | 5.0.13 | state global del documento abierto + saveStatus + tablero |
 | TipTap | 3.23.x | editor real con StarterKit + Placeholder + CharacterCount + slash commands custom |
 | tldraw | 5.0.x | canvas con custom shape `postit` (tape vintage, headers de sabio, 5 tipos) |
-| Anthropic SDK | _futuro_ (sesión 4+) | `claude-sonnet-4-5` o más reciente |
+| Claude Agent SDK | `@anthropic-ai/claude-agent-sdk` 0.2.x (Node) | corre en un sidecar; auth OAuth de Claude Code → Agent SDK monthly credit |
+| Playwright | 1.59.x | E2E suite (keyboard + flow + sage) |
 
 Persistencia: JSON files en app data dir para v1; migrar a SQLite cuando haya volumen.
 
@@ -76,6 +77,8 @@ essay-studio/
 │   │   │   ├── BoardToolbar.tsx     # toolbar lateral + zoom
 │   │   │   ├── NoteContextPanel.tsx # panel autor/kind cuando un note está seleccionado
 │   │   │   └── note-shape.tsx       # PergaminoNoteShapeUtil (override del NoteShapeUtil default)
+│   │   ├── lectura/                 # overlay del Interrogatorio del Empirista
+│   │   │   └── LecturaOverlay.tsx
 │   │   ├── council/
 │   │   │   └── CouncilAvatars.tsx
 │   │   └── ui/                  # primitivos compartidos
@@ -85,20 +88,24 @@ essay-studio/
 │   │       ├── IconButton.tsx
 │   │       └── icons.tsx
 │   └── lib/
-│       ├── store.ts             # Zustand: view, current essay, saveStatus, autosave
+│       ├── store.ts             # Zustand: view, current essay, saveStatus, overlay, autosave
 │       ├── storage/
 │       │   ├── index.ts         # invoke() wrappers de los comandos Rust
-│       │   └── types.ts         # Essay / EssayMeta / EssayMode
-│       ├── agents/              # orquestación del consejo (sesión 4+)
-│       └── claude/              # cliente Anthropic API (sesión 4+)
+│       │   └── types.ts         # Essay / EssayMeta / EssayMode / Sage / Interrogatorio
+│       └── agents/              # interrogate() + parsePreguntas + sage:// events
 ├── src-tauri/                   # lado Rust de Tauri
 │   ├── src/
 │   │   ├── main.rs
-│   │   ├── lib.rs               # registra handlers de storage
-│   │   └── storage.rs           # essay_list/read/write/delete
+│   │   ├── lib.rs               # registra storage + sidecar handlers
+│   │   ├── storage.rs           # essay_list/read/write/delete
+│   │   └── sidecar.rs           # spawn() del sidecar + sage_interrogate/sage_ping
 │   ├── capabilities/            # permisos Tauri 2
 │   ├── icons/
 │   └── tauri.conf.json
+├── sidecar/                     # Node + Claude Agent SDK (sabios)
+│   ├── src/sage.ts              # JSON-Lines stdin/stdout protocol
+│   ├── dist/sage.js             # compilado (gitignored)
+│   └── package.json
 ├── next.config.ts               # output:export, turbopack root pin
 ├── postcss.config.mjs           # @tailwindcss/postcss
 └── package.json
@@ -121,14 +128,17 @@ Las carpetas `src/lib/{agents,claude,storage}` contienen un `index.ts` stub para
 ## Comandos
 
 ```bash
-npm run dev          # Next.js dev server (localhost:3000)
-npm run build        # build estático → ./out
-npm run lint         # ESLint
-npm run test:e2e     # Playwright E2E (keyboard shortcuts, autosave, etc.)
-npm run test:e2e:ui  # mismo, con la UI interactiva
-npm run tauri:dev    # arranca Next dev + ventana Tauri
-npm run tauri:build  # build Tauri (.app / .dmg / .msi según OS)
+npm run dev              # Next.js dev server (localhost:3000)
+npm run build            # build estático → ./out
+npm run lint             # ESLint
+npm run test:e2e         # Playwright E2E (keyboard shortcuts, autosave, sage)
+npm run test:e2e:ui      # mismo, con la UI interactiva
+npm run sidecar:build    # compila el sidecar Node (./sidecar/dist/sage.js)
+npm run tauri:dev        # arranca Next dev + ventana Tauri + sidecar
+npm run tauri:build      # build Tauri (.app / .dmg / .msi según OS)
 ```
+
+**Antes de correr `npm run tauri:dev`:** asegúrate de haber corrido `npm run sidecar:build` al menos una vez. El Rust backend busca `sidecar/dist/sage.js` al startup; si no existe, los sabios no funcionan (pero el editor + tablero siguen).
 
 **Antes de tocar atajos / handlers de teclado:** correr `npm run test:e2e`. Ya nos mordió dos veces (el `N` que disparaba dos notes; el `select` tool que cancelaba edit-in-place). El suite en `tests/e2e/` cubre el flow real con un `__TAURI_INTERNALS__` stub que mantiene los essays en memoria.
 
@@ -216,11 +226,43 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 | **`next/dynamic` para `<Tldraw>`** | Más limpio que `useEffect+setMounted` (lint set-state-in-effect en React 19). |
 | **Modal con mount-on-open** | Mismo motivo: evita el reset-on-open en `useEffect`. |
 
-## Sesión 4 (próxima) — Primer sabio (El Empirista) + Interrogatorio
+## Qué quedó hecho en sesión 4
 
-Por el plan en Notion: cliente Anthropic API en `src/lib/claude/`, llamada via comando Tauri (key SOLO en Rust env), vista nueva `/lectura-nueva` con drop zone + textarea, `interrogatorioInicial(texto, sabio: 'EM')` con streaming, prompts en `prompts/el-empirista.md`. Respuestas guardadas al ensayo en `interrogatorio[]`.
+- **Sidecar Node con `@anthropic-ai/claude-agent-sdk`** en `./sidecar/`:
+  - `sidecar/src/sage.ts` lee JSON Lines de stdin, ejecuta `query()` del Agent SDK, emite eventos JSON Lines a stdout (`started`, `token`, `complete`, `error`).
+  - `systemPrompt` = contenido literal de `prompts/<sage>.md` (reemplaza completamente el Claude Code default).
+  - `allowedTools: []` + `settingSources: []` + `maxTurns: 1` para forzar generación pura de texto sin Read/Bash/etc. ni inherit de CLAUDE.md del usuario.
+  - `includePartialMessages: true` para recibir `stream_event` y emitir tokens en vivo.
+- **Auth por OAuth de Claude Code** — el SDK reusa las credentials del Claude Code instalado en la máquina (macOS Keychain en 2.1.x). Las llamadas cuentan contra el **Agent SDK monthly credit** del plan Max, no contra un API key separado. No hay `ANTHROPIC_API_KEY` en el proyecto.
+- **Rust (`src-tauri/src/sidecar.rs`):**
+  - `spawn()` lanza `node sidecar/dist/sage.js` con `tokio::process::Command`, captura stdin/stdout/stderr, busca el script via walk-up desde cwd o via `SAGE_SIDECAR_PATH` env.
+  - Background task lee cada línea de stdout, la parsea como JSON y la emite al frontend via `app.emit("sage://event", payload)`.
+  - Stderr → log via `log::info`. Child se reapea automáticamente.
+  - Commands `sage_interrogate(id, sage, text)` y `sage_ping(id)` escriben a la stdin del sidecar via un `Mutex<Option<ChildStdin>>` compartido por State.
+- **Frontend (`src/lib/agents/index.ts`):**
+  - `interrogate({ sage, text, onUpdate })` genera un UUID, suscribe a `sage://event` filtrando por id, e invoca `sage_interrogate`. Resuelve con `{ result, costUsd }` cuando llega `complete`.
+  - `parsePreguntas(raw)` parsea las líneas numeradas `1. … 5. …` a `string[]`.
+- **Vista `LecturaOverlay`** (`src/components/lectura/`): modal full-screen con textarea + streaming output a la derecha + parser de preguntas al `complete` + botón "Guardar al ensayo". Disparada desde un nuevo botón **Interrogar** en el topbar del editor (color EM ámbar).
+- **Modelo del ensayo** extendido con `interrogatorios?: Interrogatorio[]` (TS) y `Option<serde_json::Value>` (Rust, opaco). Store gana `addInterrogatorio()` y `setOverlay()`.
+- **`prompts/el-empirista.md`** con un placeholder funcional documentando reglas de voz, formato de las cinco preguntas, y TODO para que Noé lo afine.
+- **E2E (`tests/e2e/sage.spec.ts`)**: el sidecar está **stubbed** en `setup.ts` con un fake `sage_interrogate` que emite 5 preguntas canónicas via el event protocol mockeado (incluye `plugin:event|listen`/`unlisten`). No se queman créditos en CI. 19/19 verde.
 
-Setup previo del usuario: el archivo `prompts/el-empirista.md` con el system prompt afinado del personaje. La key debe vivir en `ANTHROPIC_API_KEY` del environment.
+## Decisiones de la sesión 4
+
+| Decisión | Por qué |
+|---|---|
+| **Sidecar Node** (no llamada HTTP directa desde Rust) | El SDK requiere Node y trae el binario de Claude Code empaquetado. Hace todo el OAuth/auth/streaming/caching internamente. |
+| **JSON Lines sobre stdin/stdout** | Streaming token-por-token sin abrir puertos; supervisión de child trivial. |
+| **`systemPrompt: string` custom** (no preset) | El Empirista no es Claude Code — necesita su persona, no la del coding assistant. `settingSources: []` evita que el CLAUDE.md del proyecto se filtre. |
+| **Auth via Claude Code OAuth** | Reusa las credentials de tu Max plan en Keychain → consumo cae en el **Agent SDK monthly credit**, no en API billing. Tope monetario predecible. |
+| **`maxTurns: 1` + `disallowedTools` agresivo** | El Empirista solo genera texto; bloquear Read/Bash/etc. evita que el modelo intente "agentear" por error. |
+| **Tests con sidecar stubbed** | Cada test E2E ejecutándose contra Anthropic real costaría ~1¢ + sería flaky. El stub mantiene el flow renderer↔Tauri↔eventos intacto. |
+
+## Sesión 5 (próxima) — Los 4 sabios + Mesa redonda
+
+Por el plan en Notion: generalizar `sage_interrogate` para `em`/`sis`/`pra`/`cri` (los prompts MD ya tienen las rutas listadas). Disparar los 4 en paralelo desde el overlay de lectura. Después, vista nueva **Mesa Redonda** con threading: tú aportas un punto, el sabio default responde primero, botones para invocar a sabios específicos. Persistencia en `essay.mesaRedonda`.
+
+Setup previo del usuario antes de sesión 5: los archivos `prompts/el-sistemico.md`, `prompts/el-practico.md`, `prompts/el-critico.md` con cada persona afinada.
 
 ## Aprendido en sesión 3
 

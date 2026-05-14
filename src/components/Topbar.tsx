@@ -77,8 +77,9 @@ export function Topbar() {
         <CouncilAvatars />
       </div>
 
-      {/* Right — actions (kept as visual placeholders for future sessions) */}
+      {/* Right — actions */}
       <div className="flex items-center justify-end gap-2.5">
+        <InterrogateButton />
         <Button disabled title="Disponible en sesión 5">
           <span className="w-[7px] h-[7px] rounded-full bg-sis" />
           Mesa redonda
@@ -96,6 +97,16 @@ export function Topbar() {
         </IconButton>
       </div>
     </div>
+  );
+}
+
+function InterrogateButton() {
+  const setOverlay = useStore((s) => s.setOverlay);
+  return (
+    <Button onClick={() => setOverlay("lectura")} title="Pedir al Empirista que interrogue un texto">
+      <span className="w-[7px] h-[7px] rounded-full bg-em" />
+      Interrogar
+    </Button>
   );
 }
 

@@ -2,7 +2,7 @@
 
 App de escritorio para escritura aumentada con IA — editor + canvas + un consejo de cuatro sabios que anotan, organizan y critican borradores. Pensada para escribir ensayos sobre psicología organizacional.
 
-> Estado: **sesión 3 cerrada**. Editor TipTap real con persistencia local + tablero tldraw con post-its tipados (autor + kind via `meta`). Sabios todavía no existen — llegan en sesión 4. Para el plan de sesiones y memoria persistente del proyecto, ver [CLAUDE.md](CLAUDE.md).
+> Estado: **sesión 4 cerrada**. Editor TipTap + tablero tldraw + **El Empirista** vivo: pega un texto, te genera cinco preguntas streamadas en vivo, las guardas al ensayo. Auth contra el Agent SDK monthly credit de Claude Max (no API key). Los otros 3 sabios llegan en sesión 5. Para el plan completo, ver [CLAUDE.md](CLAUDE.md).
 
 ## Stack
 
@@ -13,8 +13,9 @@ App de escritorio para escritura aumentada con IA — editor + canvas + un conse
 - [Tailwind CSS 4](https://tailwindcss.com/) — tokens en CSS via `@theme`
 - [TipTap 3](https://tiptap.dev/) — editor de texto rico con slash commands custom
 - [tldraw 5](https://tldraw.dev/) — canvas con override del `NoteShapeUtil` para el visual Pergamino
-- [Zustand 5](https://zustand-demo.pmnd.rs/) — state global (ensayo abierto, save status)
-- [Playwright](https://playwright.dev/) — suite E2E para atajos y flow
+- [Zustand 5](https://zustand-demo.pmnd.rs/) — state global (ensayo abierto, save status, overlays)
+- [Claude Agent SDK](https://docs.claude.com/en/docs/agent-sdk/overview) — sabios via sidecar Node, auth OAuth de Claude Code
+- [Playwright](https://playwright.dev/) — suite E2E para atajos, flow y sage (con sidecar stubbed)
 - Fuentes: [Newsreader](https://fonts.google.com/specimen/Newsreader), [Inter](https://fonts.google.com/specimen/Inter), [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) (vía `next/font/google`)
 
 ## Requisitos
@@ -31,16 +32,20 @@ App de escritorio para escritura aumentada con IA — editor + canvas + un conse
 ## Cómo correrlo
 
 ```bash
-# Instalar deps (incluye descargar el binario chromium para Playwright)
+# Instalar deps (proyecto + sidecar de sabios)
 npm install
+npm run sidecar:install
+npm run sidecar:build
 npx playwright install chromium
 
 # Vista web suelta (rápido, en localhost:3000) — útil para iterar UI
 npm run dev
 
-# App de escritorio completa (Next.js + ventana Tauri)
+# App de escritorio completa (Next.js + ventana Tauri + sidecar Node)
 npm run tauri:dev
 ```
+
+> Para que el **Empirista** (y los demás sabios en sesiones futuras) funcionen, necesitas tener [Claude Code](https://claude.com/code) instalado y logueado con tu cuenta Max/Pro. El sidecar reutiliza esas credenciales OAuth (vía macOS Keychain en mac) y consume del **Agent SDK monthly credit** de tu plan — no se cobra a un API key separado.
 
 > ⚠️ La **primera vez** que corres `npm run tauri:dev`, Cargo descarga y compila ~470 crates de Tauri y sus deps. Puede tardar **5-10 minutos**. Las siguientes corridas son segundos.
 
@@ -86,7 +91,9 @@ Genera el bundle nativo en `src-tauri/target/release/bundle/` (`.dmg` / `.app` e
 | `npm run lint` | ESLint sobre `src/` |
 | `npm run test:e2e` | Suite Playwright headless |
 | `npm run test:e2e:ui` | Suite Playwright con UI interactiva |
-| `npm run tauri:dev` | Arranca Next dev + ventana Tauri |
+| `npm run sidecar:install` | Instala deps del sidecar (Agent SDK + tipos) |
+| `npm run sidecar:build` | Compila el sidecar Node → `sidecar/dist/sage.js` |
+| `npm run tauri:dev` | Arranca Next dev + ventana Tauri + sidecar de sabios |
 | `npm run tauri:build` | Empaqueta la app de escritorio |
 | `npm run tauri` | CLI de Tauri (passthrough) |
 
@@ -99,29 +106,23 @@ src/
 ├── app/                       # rutas Next.js (SPA puro: una sola ruta)
 ├── components/
 │   ├── editor/                # TipTap real
-│   │   ├── EditorPane.tsx
-│   │   ├── TitleInput.tsx
-│   │   ├── SlashMenu.tsx
-│   │   └── extensions/
-│   │       └── SlashCommand.ts
-│   ├── canvas/                # tldraw real
-│   │   ├── BoardPane.tsx
-│   │   ├── BoardToolbar.tsx
-│   │   ├── NoteContextPanel.tsx
-│   │   └── note-shape.tsx     # PergaminoNoteShapeUtil (override)
+│   ├── canvas/                # tldraw real (override NoteShapeUtil)
+│   ├── lectura/               # overlay del Interrogatorio
 │   ├── council/               # avatares + UI del consejo
 │   ├── ui/                    # primitivos compartidos
 │   ├── EssayList.tsx
-│   ├── Topbar.tsx
+│   ├── Topbar.tsx             # incluye botón "Interrogar"
 │   └── Scorebar.tsx
 └── lib/
-    ├── store.ts               # Zustand (ensayo abierto, save status)
+    ├── store.ts               # Zustand (ensayo abierto, save status, overlay)
     ├── storage/               # invoke wrappers + tipos del Essay
-    ├── agents/                # orquestación del consejo (sesión 4+)
-    └── claude/                # cliente Anthropic API (sesión 4+)
-src-tauri/                     # lado Rust de Tauri (storage commands)
-tests/e2e/                     # Playwright specs (keyboard + flow)
-prompts/                       # prompts MD por sabio (los agrega Noé)
+    └── agents/                # interrogate() + parsePreguntas + sage://event
+src-tauri/                     # storage commands + sidecar lifecycle
+sidecar/                       # Node + Claude Agent SDK (sabios)
+   ├── src/sage.ts             # JSON-Lines stdin/stdout protocol
+   └── dist/sage.js            # compilado (gitignored)
+tests/e2e/                     # Playwright (keyboard + flow + sage stubbed)
+prompts/                       # personas markdown por sabio
 ```
 
 ## Convenciones

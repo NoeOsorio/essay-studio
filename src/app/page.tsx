@@ -6,6 +6,7 @@ import { EditorPane } from "@/components/editor/EditorPane";
 import { BoardPane } from "@/components/canvas/BoardPane";
 import { Scorebar } from "@/components/Scorebar";
 import { EssayList } from "@/components/EssayList";
+import { LecturaOverlay } from "@/components/lectura/LecturaOverlay";
 import { useStore } from "@/lib/store";
 
 export default function Page() {
@@ -40,6 +41,7 @@ export default function Page() {
         </main>
       )}
       {view === "editor" ? <Scorebar /> : null}
+      <LecturaOverlay />
     </div>
   );
 }
