@@ -127,13 +127,40 @@ export async function installTauriStub(page: Page) {
           }
           case "sage_interrogate": {
             const id = String(args.id);
-            const fakeAnswer = [
-              "1. ¿En qué muestra se midió ese efecto y con qué N?",
-              "2. ¿La cita de Edmondson es del estudio original o de una review?",
-              "3. ¿En qué población se vuelve falso este argumento?",
-              "4. ¿Qué instrumento medible reemplazaría la frase \"rituales sostienen seguridad\"?",
-              "5. ¿Qué resultado te incomodaría descubrir aquí?",
-            ];
+            const sage = String(args.sage);
+            // Per-sage canned answers so the test can assert which
+            // sage produced the questions without burning credits.
+            const fakeAnswers: Record<string, string[]> = {
+              em: [
+                "1. ¿En qué muestra se midió ese efecto y con qué N?",
+                "2. ¿La cita de Edmondson es del estudio original o de una review?",
+                "3. ¿En qué población se vuelve falso este argumento?",
+                "4. ¿Qué instrumento medible reemplazaría la frase \"rituales sostienen seguridad\"?",
+                "5. ¿Qué resultado te incomodaría descubrir aquí?",
+              ],
+              sis: [
+                "1. ¿Qué loop de retroalimentación sostiene este comportamiento?",
+                "2. ¿Estás explicando una dinámica estructural con causas individuales?",
+                "3. ¿Dónde está el punto de apalancamiento implícito?",
+                "4. ¿Qué delay hay entre causa y efecto en este argumento?",
+                "5. ¿Estás mezclando nivel individuo y nivel organización?",
+              ],
+              pra: [
+                "1. ¿Qué cambiaría un manager el lunes si esto fuera verdad?",
+                "2. ¿Quién implementa esto y qué se lo impide?",
+                "3. ¿Lo has visto funcionar en una org real?",
+                "4. ¿Cuál es el primer paso accionable concreto?",
+                "5. ¿Qué stakeholder no aparece en el modelo del autor?",
+              ],
+              cri: [
+                "1. ¿Cuál sería el steelman del lado opuesto?",
+                "2. ¿Quién no aparece en esta historia?",
+                "3. ¿Es genuinamente novel o common sense disfrazado?",
+                "4. ¿Qué supuestos ideológicos asume el autor sin examinar?",
+                "5. ¿El autor escribe para tener razón o para encontrar la verdad?",
+              ],
+            };
+            const fakeAnswer = fakeAnswers[sage] ?? fakeAnswers.em;
             // Emit after a microtask so the renderer has time to wire
             // its listener before the first event arrives.
             queueMicrotask(() => {

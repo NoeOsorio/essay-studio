@@ -14,6 +14,7 @@ import type {
   EssayMeta,
   EssayMode,
   Interrogatorio,
+  Sage,
 } from "@/lib/storage/types";
 
 const AUTOSAVE_MS = 800;
@@ -39,6 +40,8 @@ type State = {
   /** Whether the right-hand board pane is visible. Hidden = editor
    *  takes the full main column, centered. */
   boardOpen: boolean;
+  /** Which sage is selected in the Lectura overlay. */
+  lecturaSage: Sage;
   /** Internal: timer handle for the debounced save. */
   _autosaveTimer: ReturnType<typeof setTimeout> | null;
 
@@ -65,8 +68,11 @@ type State = {
   setOverlay: (overlay: Overlay) => void;
   /** Open the Lectura overlay AND make sure the board pane is
    *  visible — interrogating implies you want to see the resulting
-   *  post-its land. */
-  openLectura: () => void;
+   *  post-its land. Optionally pre-selects a sage. */
+  openLectura: (sage?: Sage) => void;
+  /** Change the sage selected in the Lectura overlay (e.g. from
+   *  the 4-avatar selector inside the modal). */
+  setLecturaSage: (sage: Sage) => void;
   /** Show/hide the right-hand board pane. Force-flushes any pending
    *  save before hiding so unmounting tldraw doesn't lose work. */
   toggleBoard: () => void;
@@ -113,6 +119,7 @@ export const useStore = create<State>((set, get) => ({
   saveStatus: { kind: "idle" },
   overlay: null,
   boardOpen: true,
+  lecturaSage: "em",
   _autosaveTimer: null,
 
   async loadList() {
@@ -272,8 +279,16 @@ export const useStore = create<State>((set, get) => ({
     set({ overlay });
   },
 
-  openLectura() {
-    set({ overlay: "lectura", boardOpen: true });
+  openLectura(sage) {
+    set({
+      overlay: "lectura",
+      boardOpen: true,
+      ...(sage ? { lecturaSage: sage } : {}),
+    });
+  },
+
+  setLecturaSage(sage) {
+    set({ lecturaSage: sage });
   },
 
   toggleBoard() {

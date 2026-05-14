@@ -7,10 +7,37 @@ import { useStore } from "@/lib/store";
 import { interrogate, parsePreguntas } from "@/lib/agents";
 import type { Interrogatorio, Sage } from "@/lib/storage/types";
 
+/** Static per-sage descriptors used by the overlay header + selector. */
+const SAGE_META: Record<
+  Sage,
+  { initials: string; name: string; tagline: string }
+> = {
+  em: {
+    initials: "EM",
+    name: "el Empirista",
+    tagline: "Calidad de la evidencia, métodos, replicación",
+  },
+  sis: {
+    initials: "SI",
+    name: "el Sistémico",
+    tagline: "Loops, niveles, leverage points",
+  },
+  pra: {
+    initials: "PR",
+    name: "el Práctico",
+    tagline: "¿Qué cambia el lunes? Aplicación real",
+  },
+  cri: {
+    initials: "CR",
+    name: "el Crítico",
+    tagline: "Steelman, lo no dicho, análisis de poder",
+  },
+};
+
 /**
  * Overlay: paste a text, ask a sage to interrogate it, watch the
  * questions stream in, and (optionally) save them onto the current
- * essay.
+ * essay. The sage is selectable inside the modal via a 4-avatar row.
  */
 export function LecturaOverlay() {
   const overlay = useStore((s) => s.overlay);
@@ -51,14 +78,17 @@ function LecturaInner({
   onSave: (entry: Interrogatorio) => void;
   essayTitle?: string;
 }) {
+  const sage = useStore((s) => s.lecturaSage);
+  const setLecturaSage = useStore((s) => s.setLecturaSage);
+
   const [text, setText] = useState("");
-  const [sage] = useState<Sage>("em"); // EM only for now; expand in session 5
   const [streaming, setStreaming] = useState<string>("");
   const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">(
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
   const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
+  const [resultSage, setResultSage] = useState<Sage | null>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll while tokens stream in.
@@ -68,12 +98,15 @@ function LecturaInner({
     }
   }, [streaming]);
 
+  const meta = SAGE_META[sage];
+
   const start = async () => {
     if (text.trim().length === 0 || phase === "running") return;
     setPhase("running");
     setStreaming("");
     setError(null);
     setCostUsd(undefined);
+    setResultSage(sage);
 
     try {
       const { result, costUsd } = await interrogate({
@@ -96,40 +129,85 @@ function LecturaInner({
 
   const save = () => {
     const preguntas = parsePreguntas(streaming);
+    const savedSage = resultSage ?? sage;
     onSave({
-      sage,
+      sage: savedSage,
       preguntas,
       generadoEn: new Date().toISOString(),
       costoUsd: costUsd,
     });
-    // Also drop one post-it per pregunta on the board, so the user
-    // sees the questions land in their workspace instead of just
-    // vanishing into the essay's metadata.
+    // Materialize each pregunta as a post-it on the board.
     window.dispatchEvent(
       new CustomEvent("sage:materialize-preguntas", {
-        detail: { sage, preguntas },
+        detail: { sage: savedSage, preguntas },
       }),
     );
+  };
+
+  // When the user changes sage mid-flight, reset the visible stream
+  // so the leftover text from the previous sage doesn't confuse them.
+  const switchSage = (next: Sage) => {
+    if (phase === "running") return; // ignore mid-stream
+    setLecturaSage(next);
+    if (phase === "done" || phase === "error") {
+      setStreaming("");
+      setPhase("idle");
+      setError(null);
+      setResultSage(null);
+    }
   };
 
   return (
     <>
       <header className="flex items-center justify-between px-6 py-4 border-b border-rule-1 bg-paper-2">
-        <div className="flex items-center gap-3">
-          <Avatar sage={sage} initials="EM" size={32} title="El Empirista" />
-          <div>
-            <h2 className="font-serif italic text-[20px] text-ink-1 leading-none">
-              Interrogatorio — el Empirista
+        <div className="flex items-center gap-4 min-w-0">
+          <Avatar sage={sage} initials={meta.initials} size={36} title={meta.name} />
+          <div className="min-w-0">
+            <h2 className="font-serif italic text-[20px] text-ink-1 leading-tight truncate">
+              Interrogatorio — {meta.name}
             </h2>
-            <p className="font-mono text-[10px] text-ink-3 mt-1 tracking-[0.04em]">
-              {essayTitle ? `Sobre · ${essayTitle}` : "Sin ensayo abierto"}
+            <p className="font-mono text-[10px] text-ink-3 mt-1 tracking-[0.04em] truncate">
+              {meta.tagline}
+              {essayTitle ? ` · sobre ${essayTitle}` : ""}
             </p>
           </div>
         </div>
+
+        {/* 4-avatar selector — click to switch sage. */}
+        <div
+          className="flex items-center gap-1.5 mx-4"
+          role="tablist"
+          aria-label="Elegir sabio"
+        >
+          {(Object.keys(SAGE_META) as Sage[]).map((s) => {
+            const active = s === sage;
+            const m = SAGE_META[s];
+            return (
+              <button
+                key={s}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-label={m.name}
+                title={m.name}
+                onClick={() => switchSage(s)}
+                disabled={phase === "running"}
+                className={`p-0.5 rounded-full cursor-pointer transition-all ${
+                  active
+                    ? "ring-2 ring-ink-2 ring-offset-1 ring-offset-paper-2"
+                    : "opacity-60 hover:opacity-100"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <Avatar sage={s} initials={m.initials} size={26} title={m.name} />
+              </button>
+            );
+          })}
+        </div>
+
         <button
           type="button"
           onClick={onClose}
-          className="w-8 h-8 grid place-items-center rounded text-ink-3 hover:bg-paper-3 hover:text-ink-1 cursor-pointer"
+          className="w-8 h-8 grid place-items-center rounded text-ink-3 hover:bg-paper-3 hover:text-ink-1 cursor-pointer flex-none"
           title="Cerrar"
         >
           ×
@@ -158,7 +236,9 @@ function LecturaInner({
               onClick={start}
               disabled={phase === "running" || text.trim().length === 0}
             >
-              {phase === "running" ? "El Empirista piensa…" : "Interrogar"}
+              {phase === "running"
+                ? `${meta.name.replace(/^el /, "El ")} piensa…`
+                : "Interrogar"}
             </Button>
           </div>
         </div>
@@ -174,7 +254,7 @@ function LecturaInner({
           >
             {phase === "idle" ? (
               <span className="font-serif italic text-ink-3">
-                Las cinco preguntas del Empirista aparecerán aquí, una a una.
+                Las cinco preguntas aparecerán aquí, una a una.
               </span>
             ) : phase === "error" ? (
               <div>
@@ -220,7 +300,7 @@ function PreguntasView({ raw, live }: { raw: string; live: boolean }) {
     <ol className="list-none p-0 m-0">
       {preguntas.map((p, i) => (
         <li key={i} className="flex gap-3 mb-3 last:mb-0">
-          <span className="font-mono text-[11px] text-em font-semibold mt-1">
+          <span className="font-mono text-[11px] text-ink-2 font-semibold mt-1">
             {String(i + 1).padStart(2, "0")}
           </span>
           <span>{p}</span>

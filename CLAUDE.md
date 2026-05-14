@@ -258,11 +258,18 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 | **`maxTurns: 1` + `disallowedTools` agresivo** | El Empirista solo genera texto; bloquear Read/Bash/etc. evita que el modelo intente "agentear" por error. |
 | **Tests con sidecar stubbed** | Cada test E2E ejecutándose contra Anthropic real costaría ~1¢ + sería flaky. El stub mantiene el flow renderer↔Tauri↔eventos intacto. |
 
-## Sesión 5 (próxima) — Los 4 sabios + Mesa redonda
+## Qué quedó hecho en sesión 5a (parcial)
 
-Por el plan en Notion: generalizar `sage_interrogate` para `em`/`sis`/`pra`/`cri` (los prompts MD ya tienen las rutas listadas). Disparar los 4 en paralelo desde el overlay de lectura. Después, vista nueva **Mesa Redonda** con threading: tú aportas un punto, el sabio default responde primero, botones para invocar a sabios específicos. Persistencia en `essay.mesaRedonda`.
+- **Las cuatro personas instaladas** en `prompts/`: `el-empirista.md`, `el-sistemico.md`, `el-practico.md`, `el-critico.md`. Cada una con su voz afinada, frases que usa / nunca usa, héroes, modos por fase, y reglas de cuándo declinar.
+- **Selector de sabio en el overlay** (`LecturaOverlay`): fila de 4 avatares en el header; el activo tiene ring. Click cambia el sabio mid-flujo (resetea el stream si ya había uno previo). Disabled mientras el sabio actual está pensando.
+- **Avatares del topbar = shortcuts**: `CouncilAvatars` ahora envuelve cada Avatar en un `<button>` que llama `openLectura(sage)`. El cursor scale-hovers, el title es "Interrogar como X". Solo activos en view editor (en la lista quedan decorativos).
+- **Store:** `lecturaSage: Sage` (default "em"), `openLectura(sage?)`, `setLecturaSage(sage)`.
+- **Stub E2E** retorna preguntas distintas por cada sabio (em / sis / pra / cri), así los tests pueden asertar autoría sin depender del modelo real.
+- **E2E** ampliado a 23/23 — cubre: click en avatar abre lectura con su sabio activo, switch dentro del modal cambia header, save persiste con el sabio correcto.
 
-Setup previo del usuario antes de sesión 5: los archivos `prompts/el-sistemico.md`, `prompts/el-practico.md`, `prompts/el-critico.md` con cada persona afinada.
+## Sesión 5b (pendiente) — Mesa Redonda
+
+Generalización del flujo de interrogación a una **conversación**: tú aportas un punto, el sabio default responde primero, botones para invocar a sabios específicos, el Crítico interviene cuando los otros convergen demasiado. Persistencia en `essay.mesaRedonda`. Probablemente una vista nueva (no overlay).
 
 ## Aprendido en sesión 3
 

@@ -113,7 +113,10 @@ export function Topbar() {
 function InterrogateButton() {
   const openLectura = useStore((s) => s.openLectura);
   return (
-    <Button onClick={openLectura} title="Pedir al Empirista que interrogue un texto">
+    <Button
+      onClick={() => openLectura()}
+      title="Interrogar un texto · el Empirista por defecto"
+    >
       <span className="w-[7px] h-[7px] rounded-full bg-em" />
       Interrogar
     </Button>
