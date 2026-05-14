@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  createShapeId,
   getSnapshot,
   loadSnapshot,
   toRichText,
@@ -16,9 +17,10 @@ import { Badge } from "@/components/ui/Badge";
 import { IconButton } from "@/components/ui/IconButton";
 import { GroupIcon } from "@/components/ui/icons";
 import { useStore } from "@/lib/store";
-import { PergaminoNoteShapeUtil } from "./note-shape";
+import { PergaminoNoteShapeUtil, type PostItMeta } from "./note-shape";
 import { NoteContextPanel } from "./NoteContextPanel";
 import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
+import type { Sage } from "@/lib/storage/types";
 
 // Tldraw uses DOM APIs, so mount it client-only.
 const Tldraw = dynamic(
@@ -68,6 +70,21 @@ function BoardPaneInner() {
   // to the editor's signals via useValue. Set once on mount.
   const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<Editor | null>(null);
+
+  // Materialize sage interrogation results as post-its on the board
+  // when the Lectura overlay finishes. The overlay dispatches the
+  // event on `window` so we don't need to plumb the editor ref out.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ sage: Sage; preguntas: string[] }>;
+      const ed = editorRef.current;
+      if (!ed) return;
+      materializePreguntas(ed, ce.detail.sage, ce.detail.preguntas);
+    };
+    window.addEventListener("sage:materialize-preguntas", handler);
+    return () =>
+      window.removeEventListener("sage:materialize-preguntas", handler);
+  }, []);
 
   return (
     <div className="board-grid relative h-full overflow-hidden">
@@ -180,6 +197,62 @@ function BoardPaneInner() {
           editor as a prop so it can still subscribe to selection. */}
       {editor ? <NoteContextPanel editor={editor} /> : null}
     </div>
+  );
+}
+
+/**
+ * Drop one note shape per pregunta, laid out in a grid centred on
+ * the current viewport. Notes are tagged with `kind: "pregunta"` and
+ * the sage as author, so they re-skin with the right colour + header
+ * via PergaminoNoteShapeUtil.
+ */
+function materializePreguntas(
+  editor: Editor,
+  sage: Sage,
+  preguntas: string[],
+) {
+  if (preguntas.length === 0) return;
+  const center = editor.getViewportPageBounds().center;
+  const W = 200;
+  const H = 200;
+  const GAP = 24;
+  const cols = preguntas.length <= 3 ? preguntas.length : 3;
+  const rows = Math.ceil(preguntas.length / cols);
+  const totalW = cols * W + (cols - 1) * GAP;
+  const totalH = rows * H + (rows - 1) * GAP;
+  const startX = center.x - totalW / 2;
+  const startY = center.y - totalH / 2;
+  const now = Date.now();
+  const tilt = [-0.025, 0.018, -0.012, 0.022, -0.02]; // subtle radians
+
+  editor.createShapes(
+    preguntas.map((text, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const meta: PostItMeta = {
+        author: sage,
+        kind: "pregunta",
+        createdAt: now + i,
+      };
+      return {
+        id: createShapeId(),
+        type: "note" as const,
+        x: startX + col * (W + GAP),
+        y: startY + row * (H + GAP),
+        rotation: tilt[i % tilt.length] ?? 0,
+        props: {
+          richText: toRichText(text),
+          size: "s" as const,
+          align: "start" as const,
+          verticalAlign: "start" as const,
+        },
+        meta: {
+          author: meta.author,
+          kind: meta.kind,
+          createdAt: meta.createdAt,
+        },
+      };
+    }),
   );
 }
 

@@ -102,6 +102,14 @@ function LecturaInner({
       generadoEn: new Date().toISOString(),
       costoUsd: costUsd,
     });
+    // Also drop one post-it per pregunta on the board, so the user
+    // sees the questions land in their workspace instead of just
+    // vanishing into the essay's metadata.
+    window.dispatchEvent(
+      new CustomEvent("sage:materialize-preguntas", {
+        detail: { sage, preguntas },
+      }),
+    );
   };
 
   return (

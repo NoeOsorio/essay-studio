@@ -47,7 +47,8 @@ test("interrogating a text streams 5 questions and lets the user save them", asy
   // And a "save" button shows with the cost line.
   await expect(page.getByText(/costo · \$/)).toBeVisible();
 
-  // Save → overlay closes and the essay now has one interrogatorio.
+  // Save → overlay closes, the essay gets one interrogatorio, AND
+  // five post-its appear on the board (one per pregunta).
   await page.getByRole("button", { name: /Guardar al ensayo/ }).click();
   await expect(
     page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
@@ -65,6 +66,11 @@ test("interrogating a text streams 5 questions and lets the user save them", asy
   expect(entry.sage).toBe("em");
   expect(entry.preguntas).toHaveLength(5);
   expect(entry.preguntas[0]).toMatch(/N\?/);
+
+  // The five questions also materialised as note shapes on the board.
+  await expect(
+    page.locator('.tl-shape[data-shape-type="note"]'),
+  ).toHaveCount(5);
 });
 
 test("Esc / click outside closes the overlay without saving", async ({
