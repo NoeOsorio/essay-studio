@@ -10,6 +10,7 @@ import type { JSONContent } from "@tiptap/core";
 import { useStore } from "@/lib/store";
 import { TitleInput } from "./TitleInput";
 import { SlashMenu, type SlashMenuRef } from "./SlashMenu";
+import { SelectionMenu } from "./SelectionMenu";
 import {
   SlashCommand,
   type SlashSuggestionProps,
@@ -185,7 +186,12 @@ function TipTapEditor({
     };
   }, []);
 
-  return <EditorContent editor={editor} />;
+  return (
+    <>
+      <EditorContent editor={editor} />
+      <SelectionMenu editor={editor} />
+    </>
+  );
 }
 
 function relativeTime(iso: string): string {

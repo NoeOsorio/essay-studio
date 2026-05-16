@@ -42,6 +42,9 @@ type State = {
   boardOpen: boolean;
   /** Which sage is selected in the Lectura overlay. */
   lecturaSage: Sage;
+  /** Optional text to pre-fill the Lectura textarea with (e.g. the
+   *  current editor selection when launched via the bubble menu). */
+  lecturaPrefill: string;
   /** Internal: timer handle for the debounced save. */
   _autosaveTimer: ReturnType<typeof setTimeout> | null;
 
@@ -68,8 +71,9 @@ type State = {
   setOverlay: (overlay: Overlay) => void;
   /** Open the Lectura overlay AND make sure the board pane is
    *  visible — interrogating implies you want to see the resulting
-   *  post-its land. Optionally pre-selects a sage. */
-  openLectura: (sage?: Sage) => void;
+   *  post-its land. Optionally pre-selects a sage and pre-fills the
+   *  textarea (e.g. from the editor selection). */
+  openLectura: (sage?: Sage, prefill?: string) => void;
   /** Change the sage selected in the Lectura overlay (e.g. from
    *  the 4-avatar selector inside the modal). */
   setLecturaSage: (sage: Sage) => void;
@@ -120,6 +124,7 @@ export const useStore = create<State>((set, get) => ({
   overlay: null,
   boardOpen: true,
   lecturaSage: "em",
+  lecturaPrefill: "",
   _autosaveTimer: null,
 
   async loadList() {
@@ -276,14 +281,21 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setOverlay(overlay) {
-    set({ overlay });
+    // Clear any pending prefill when the overlay closes, so the next
+    // manual "Interrogar" starts on an empty textarea.
+    if (overlay === null) {
+      set({ overlay, lecturaPrefill: "" });
+    } else {
+      set({ overlay });
+    }
   },
 
-  openLectura(sage) {
+  openLectura(sage, prefill) {
     set({
       overlay: "lectura",
       boardOpen: true,
       ...(sage ? { lecturaSage: sage } : {}),
+      ...(prefill !== undefined ? { lecturaPrefill: prefill } : {}),
     });
   },
 

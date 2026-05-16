@@ -148,6 +148,54 @@ test("switching sage inside the overlay updates the persona header", async ({
   ).toBeVisible();
 });
 
+test("selecting text in the editor shows the sage bubble menu", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  const editor = page.locator(".tiptap-content");
+  await editor.click();
+  await page.keyboard.type(
+    "Edmondson definió la seguridad psicológica como creencia compartida.",
+    { delay: 5 },
+  );
+  // Select all the text we just typed.
+  await page.keyboard.press("ControlOrMeta+A");
+
+  // The bubble menu has a small "Interrogar" label and four sage
+  // avatar buttons.
+  await expect(page.getByText("Interrogar", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Interrogar como El Empirista/ }).last(),
+  ).toBeVisible();
+});
+
+test("clicking a sage in the bubble menu opens the overlay prefilled", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  const editor = page.locator(".tiptap-content");
+  await editor.click();
+  const selected = "los rituales sostienen la seguridad psicológica";
+  await page.keyboard.type(selected, { delay: 5 });
+  await page.keyboard.press("ControlOrMeta+A");
+
+  // Click the Sistémico avatar inside the bubble menu specifically
+  // (the topbar avatar has the same aria-label).
+  const bubble = page.getByTestId("sage-selection-menu");
+  await bubble
+    .getByRole("button", { name: /Interrogar como El Sist.mico/ })
+    .click();
+
+  // Overlay opens with Sistémico header AND the textarea prefilled.
+  await expect(
+    page.getByRole("heading", { name: /Interrogatorio — el Sist.mico/i }),
+  ).toBeVisible();
+  const textarea = page.getByPlaceholder(
+    "Pega aquí un fragmento de tu ensayo, o de un paper que estés leyendo…",
+  );
+  await expect(textarea).toHaveValue(new RegExp(selected));
+});
+
 test("Esc / click outside closes the overlay without saving", async ({
   page,
 }) => {

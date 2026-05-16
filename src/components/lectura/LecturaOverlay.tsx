@@ -80,8 +80,12 @@ function LecturaInner({
 }) {
   const sage = useStore((s) => s.lecturaSage);
   const setLecturaSage = useStore((s) => s.setLecturaSage);
+  // The prefill is captured ONCE at mount; further mutations of the
+  // textarea are user-owned. (The overlay is mount-on-open, so each
+  // launch reads the latest prefill.)
+  const initialText = useStore.getState().lecturaPrefill;
 
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText);
   const [streaming, setStreaming] = useState<string>("");
   const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">(
     "idle",
