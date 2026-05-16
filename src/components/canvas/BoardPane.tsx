@@ -122,12 +122,14 @@ function BoardPaneInner() {
                 console.warn("loadSnapshot failed; starting empty", err);
               }
             }
-            // Snapshots persist `selectedShapeIds`. Re-opening an essay
-            // would auto-select whatever was selected when you closed
-            // it, popping the NoteContextPanel open every time. Start
-            // every session with a clean selection — explicit user
-            // click is required to re-select.
+            // Defense in depth against the "rogue selection on
+            // reopen" bug: we already wipe selection state inside
+            // the snapshot above, but tldraw applies the session in
+            // a separate phase, so we also call selectNone() once
+            // now and once on the next frame in case it gets
+            // re-asserted after our sync call.
             editor.selectNone();
+            requestAnimationFrame(() => editor.selectNone());
 
             recomputeCounts(editor, setCounts);
             setZoom(editor.getZoomLevel());
@@ -278,15 +280,17 @@ function recomputeCounts(
 /**
  * Convert any leftover `type: "postit"` shapes (from the previous
  * custom-shape implementation) into the current `type: "note"` form,
- * preserving author / kind / text in `meta` + `richText`.
+ * preserving author / kind / text in `meta` + `richText`. Also
+ * clears any persisted `selectedShapeIds` so reopening an essay
+ * doesn't auto-pop the NoteContextPanel for whatever shape was
+ * selected at save time.
  *
  * `getSnapshot()` returns a TLEditorSnapshot shaped as
  * `{ document: { store, schema }, session }`, but `loadSnapshot()`
  * also accepts a bare TLStoreSnapshot (`{ store, schema }`). Walk
  * both layouts so we never miss the records.
  *
- * Idempotent: snapshots without legacy postits pass through
- * unchanged.
+ * Idempotent.
  */
 function migrateLegacyPostits(snapshot: unknown): TLStoreSnapshot {
   const cloned = JSON.parse(JSON.stringify(snapshot)) as TLStoreSnapshot;
@@ -296,13 +300,31 @@ function migrateLegacyPostits(snapshot: unknown): TLStoreSnapshot {
     type?: string;
     props?: Record<string, unknown>;
     meta?: Record<string, unknown>;
+    selectedShapeIds?: unknown[];
   };
 
   const candidates: Record<string, AnyRecord>[] = [];
   const root = cloned as {
     store?: Record<string, AnyRecord>;
     document?: { store?: Record<string, AnyRecord> };
+    session?: {
+      selectedShapeIds?: unknown[];
+      pageStates?: Array<{ selectedShapeIds?: unknown[] }>;
+    };
   };
+
+  // Clear selection state at the session level so it doesn't get
+  // re-applied when tldraw hydrates the snapshot.
+  if (root.session) {
+    if (Array.isArray(root.session.selectedShapeIds)) {
+      root.session.selectedShapeIds = [];
+    }
+    if (Array.isArray(root.session.pageStates)) {
+      for (const ps of root.session.pageStates) {
+        if (Array.isArray(ps.selectedShapeIds)) ps.selectedShapeIds = [];
+      }
+    }
+  }
   if (root.store && typeof root.store === "object") candidates.push(root.store);
   if (root.document?.store && typeof root.document.store === "object") {
     candidates.push(root.document.store);
@@ -311,7 +333,19 @@ function migrateLegacyPostits(snapshot: unknown): TLStoreSnapshot {
   for (const store of candidates) {
     for (const key of Object.keys(store)) {
       const record = store[key];
-      if (!record || record.typeName !== "shape" || record.type !== "postit") {
+      if (!record) continue;
+
+      // Clear selectedShapeIds on any instance / page_state record
+      // — these are the record-level mirrors of session selection.
+      if (
+        (record.typeName === "instance" ||
+          record.typeName === "instance_page_state") &&
+        Array.isArray(record.selectedShapeIds)
+      ) {
+        record.selectedShapeIds = [];
+      }
+
+      if (record.typeName !== "shape" || record.type !== "postit") {
         continue;
       }
 
