@@ -60,6 +60,86 @@ test("topbar toggle hides and re-shows the board pane", async ({ page }) => {
   await expect(page.locator(".tl-container")).toBeVisible();
 });
 
+test("reopening an essay does NOT auto-select a note (no rogue context panel)", async ({
+  page,
+}) => {
+  // Create an essay, drop a sage note on the board (which will be
+  // selected after creation by tldraw), close, reopen.
+  await page.goto("/");
+  await page.getByRole("button", { name: /Nuevo académico/i }).click();
+  await page.getByRole("textbox", { name: "Título del ensayo" }).waitFor();
+  await page.locator(".tl-container").first().waitFor({ state: "visible" });
+  await page.waitForTimeout(250);
+
+  // Create a note via the native flow.
+  await page.keyboard.press("n");
+  const canvas = page.locator(".tl-container").first();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("canvas not laid out");
+  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.5);
+  await page.keyboard.type("nota de prueba", { delay: 10 });
+  await page.keyboard.press("Escape");
+
+  // Now the note is selected → context panel ("Autor" group) visible.
+  await expect(page.getByText(/^Autor$/i)).toBeVisible();
+
+  // Save + close + reopen.
+  await page.waitForTimeout(1200);
+  await page.getByText(/^ensayos$/).click();
+  await page.locator(".tiptap-content").waitFor({ state: "detached" });
+  await page.getByRole("heading", { name: /Sin título/ }).click();
+  await page.locator(".tl-container").first().waitFor({ state: "visible" });
+  await page.waitForTimeout(400);
+
+  // The context panel should NOT be visible on reopen.
+  await expect(page.getByText(/^Autor$/i)).toHaveCount(0);
+});
+
+test("create essay → close → reopen from the list works without errors", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+  page.on("console", (msg) => {
+    if (msg.type() === "error") errors.push(`console.error: ${msg.text()}`);
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Nuevo académico/i }).click();
+  await page.getByRole("textbox", { name: "Título del ensayo" }).waitFor();
+
+  // Type something so the essay has content.
+  await page.getByRole("textbox", { name: "Título del ensayo" }).click();
+  await page.keyboard.type("Edmondson revisada", { delay: 5 });
+  await page.locator(".tiptap-content").click();
+  await page.keyboard.type("La seguridad psicológica es la creencia compartida.", {
+    delay: 5,
+  });
+  await page.waitForTimeout(1200); // autosave debounce + flush
+
+  // Back to the list.
+  await page.getByText(/^ensayos$/).click();
+  await expect(page.getByRole("heading", { name: /Tus/ })).toBeVisible();
+
+  // The essay should be in the list. Click it to reopen.
+  await page.getByRole("heading", { name: /Edmondson revisada/ }).click();
+
+  // Editor view again, prefilled.
+  await expect(
+    page.getByRole("textbox", { name: "Título del ensayo" }),
+  ).toHaveText("Edmondson revisada");
+  await expect(page.locator(".tiptap-content")).toContainText(
+    "La seguridad psicológica",
+  );
+
+  // Filter out the known benign "loadSnapshot failed; starting empty"
+  // warning that fires when a fresh essay has no board snapshot yet.
+  const real = errors.filter((e) => !/loadSnapshot/.test(e));
+  if (real.length > 0) {
+    throw new Error(`Console errors on reopen:\n${real.join("\n")}`);
+  }
+});
+
 test("breadcrumb 'ensayos' returns to the list", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /Nuevo académico/i }).click();

@@ -122,6 +122,12 @@ function BoardPaneInner() {
                 console.warn("loadSnapshot failed; starting empty", err);
               }
             }
+            // Snapshots persist `selectedShapeIds`. Re-opening an essay
+            // would auto-select whatever was selected when you closed
+            // it, popping the NoteContextPanel open every time. Start
+            // every session with a clean selection — explicit user
+            // click is required to re-select.
+            editor.selectNone();
 
             recomputeCounts(editor, setCounts);
             setZoom(editor.getZoomLevel());
