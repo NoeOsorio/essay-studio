@@ -267,9 +267,27 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
 - **Stub E2E** retorna preguntas distintas por cada sabio (em / sis / pra / cri), así los tests pueden asertar autoría sin depender del modelo real.
 - **E2E** ampliado a 23/23 — cubre: click en avatar abre lectura con su sabio activo, switch dentro del modal cambia header, save persiste con el sabio correcto.
 
-## Sesión 5b (pendiente) — Mesa Redonda
+## Sesión 5b — Interrogación coral + checkboxes
 
-Generalización del flujo de interrogación a una **conversación**: tú aportas un punto, el sabio default responde primero, botones para invocar a sabios específicos, el Crítico interviene cuando los otros convergen demasiado. Persistencia en `essay.mesaRedonda`. Probablemente una vista nueva (no overlay).
+Decisión de producto (Noé, 2026-05-16): **los sabios no se hablan entre ellos**. El valor está en que te cuestionen *a ti*, no en que debatan. Mesa Redonda (el diseño original donde los 4 dialogaban) queda **descartada** del roadmap. En su lugar:
+
+- **Modo "consejo"**: el botón `Interrogar` del topbar dispara la interrogación de los 4 sabios **en paralelo** sobre la misma fuente. Cada uno genera sus 5 preguntas en su propio panel (grid 2×2 dentro del overlay).
+- **Modo "un sabio"**: click en un avatar (topbar o bubble menu de selección) abre el overlay con ese sabio activo, comportamiento que ya existía.
+- **Toggle de modo** dentro del overlay: pasas de "consejo" a "un sabio" sin cerrar.
+- **Checkboxes por pregunta** (default ✓): solo las marcadas se persisten en `essay.interrogatorios[]` Y se materializan como post-its. Lo que desmarcas desaparece — sin papelera.
+- **Layout del tablero**: 1 sabio → cascada (≤3 × n), 2+ sabios → **una columna vertical por sabio**, anclada a la derecha del contenido existente para que múltiples interrogaciones no se piesen.
+- **Fuente por archivo**: nuevo botón "Subir .txt / .md" que carga el contenido al textarea. `.pdf`/`.docx` muestran un toast "próximamente · copia-pega por ahora".
+
+Implementación:
+
+- Store: `lecturaMode: "single" | "council"` (default `council`). `openLectura(sage?, prefill?, mode?)`: cuando se pasa `sage` cambia a `single`; sin sage → `council`.
+- `LecturaOverlay` refactor completo: 4 paneles de streaming en paralelo, cada uno con su phase/raw/checked/cost; footer único con "Guardar seleccionadas" + resumen "X de Y preguntas seleccionadas".
+- `materializePreguntas(editor, batches)` ahora acepta un array de batches. 1 batch → cascada, n batches → columnas. La X de inicio busca el `maxX` de las shapes existentes para encadenar interrogaciones sin pisarse.
+- E2E ampliado a **29/29**: council (20 notes), checkboxes (3 de 5 quedan), file upload, modes/tabs.
+
+## Sesión 6 (próxima) — Pluma Roja
+
+Por el plan original. Revisión multi-pasada del ensayo completo con anotaciones inline color-coded en el texto + comentarios al margen. 3 pasadas: Coherencia (SI), Estilo (EM/PR según modo), Argumento (CR).
 
 ## Aprendido en sesión 3
 

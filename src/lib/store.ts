@@ -30,6 +30,9 @@ export type View = "list" | "editor";
 
 export type Overlay = "lectura" | null;
 
+/** How the Lectura overlay runs the interrogation. */
+export type LecturaMode = "single" | "council";
+
 type State = {
   view: View;
   list: EssayMeta[];
@@ -40,8 +43,10 @@ type State = {
   /** Whether the right-hand board pane is visible. Hidden = editor
    *  takes the full main column, centered. */
   boardOpen: boolean;
-  /** Which sage is selected in the Lectura overlay. */
+  /** Which sage is selected in the Lectura overlay (single mode). */
   lecturaSage: Sage;
+  /** Whether the Lectura overlay runs one sage or the whole council. */
+  lecturaMode: LecturaMode;
   /** Optional text to pre-fill the Lectura textarea with (e.g. the
    *  current editor selection when launched via the bubble menu). */
   lecturaPrefill: string;
@@ -71,12 +76,19 @@ type State = {
   setOverlay: (overlay: Overlay) => void;
   /** Open the Lectura overlay AND make sure the board pane is
    *  visible — interrogating implies you want to see the resulting
-   *  post-its land. Optionally pre-selects a sage and pre-fills the
-   *  textarea (e.g. from the editor selection). */
-  openLectura: (sage?: Sage, prefill?: string) => void;
-  /** Change the sage selected in the Lectura overlay (e.g. from
-   *  the 4-avatar selector inside the modal). */
+   *  post-its land. Optionally pre-selects a sage, pre-fills the
+   *  textarea, and chooses the mode. The default mode when no sage
+   *  is given is "council" (the whole council in parallel);
+   *  passing a `sage` switches to "single". */
+  openLectura: (
+    sage?: Sage,
+    prefill?: string,
+    mode?: LecturaMode,
+  ) => void;
+  /** Change the sage selected in the Lectura overlay (single mode). */
   setLecturaSage: (sage: Sage) => void;
+  /** Switch between single-sage and council modes inside the modal. */
+  setLecturaMode: (mode: LecturaMode) => void;
   /** Show/hide the right-hand board pane. Force-flushes any pending
    *  save before hiding so unmounting tldraw doesn't lose work. */
   toggleBoard: () => void;
@@ -124,6 +136,7 @@ export const useStore = create<State>((set, get) => ({
   overlay: null,
   boardOpen: true,
   lecturaSage: "em",
+  lecturaMode: "council",
   lecturaPrefill: "",
   _autosaveTimer: null,
 
@@ -290,17 +303,24 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  openLectura(sage, prefill) {
+  openLectura(sage, prefill, mode) {
     set({
       overlay: "lectura",
       boardOpen: true,
       ...(sage ? { lecturaSage: sage } : {}),
       ...(prefill !== undefined ? { lecturaPrefill: prefill } : {}),
+      // If a sage was named explicitly the caller wants single mode
+      // (they're targeting one voice); otherwise default to council.
+      lecturaMode: mode ?? (sage ? "single" : "council"),
     });
   },
 
   setLecturaSage(sage) {
     set({ lecturaSage: sage });
+  },
+
+  setLecturaMode(mode) {
+    set({ lecturaMode: mode });
   },
 
   toggleBoard() {

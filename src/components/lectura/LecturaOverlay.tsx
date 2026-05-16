@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
@@ -34,10 +34,13 @@ const SAGE_META: Record<
   },
 };
 
+const ALL_SAGES: Sage[] = ["em", "sis", "pra", "cri"];
+
 /**
- * Overlay: paste a text, ask a sage to interrogate it, watch the
- * questions stream in, and (optionally) save them onto the current
- * essay. The sage is selectable inside the modal via a 4-avatar row.
+ * Overlay: paste a text (or load a file), have one sage or the whole
+ * council interrogate it, then pick the questions you want to keep
+ * via checkboxes. Selected questions persist into the essay's
+ * interrogatorios and land on the board as sage-coloured post-its.
  */
 export function LecturaOverlay() {
   const overlay = useStore((s) => s.overlay);
@@ -53,13 +56,13 @@ export function LecturaOverlay() {
       onClick={() => setOverlay(null)}
     >
       <div
-        className="w-[900px] max-w-[95vw] max-h-[90vh] bg-paper-2 border border-rule-2 rounded-[14px] shadow-(--shadow-pop) overflow-hidden flex flex-col"
+        className="w-[1080px] max-w-[96vw] max-h-[92vh] bg-paper-2 border border-rule-2 rounded-[14px] shadow-(--shadow-pop) overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <LecturaInner
           onClose={() => setOverlay(null)}
-          onSave={(entry) => {
-            addInterrogatorio(entry);
+          onSave={(entries) => {
+            for (const entry of entries) addInterrogatorio(entry);
             setOverlay(null);
           }}
           essayTitle={current?.title}
@@ -69,144 +72,174 @@ export function LecturaOverlay() {
   );
 }
 
+type SagePane = {
+  sage: Sage;
+  phase: "idle" | "running" | "done" | "error";
+  raw: string;
+  error: string | null;
+  costUsd?: number;
+  /** Per-pregunta checkbox state, by question index, default true. */
+  checked: Record<number, boolean>;
+};
+
+function makePane(sage: Sage): SagePane {
+  return { sage, phase: "idle", raw: "", error: null, checked: {} };
+}
+
 function LecturaInner({
   onClose,
   onSave,
   essayTitle,
 }: {
   onClose: () => void;
-  onSave: (entry: Interrogatorio) => void;
+  onSave: (entries: Interrogatorio[]) => void;
   essayTitle?: string;
 }) {
   const sage = useStore((s) => s.lecturaSage);
   const setLecturaSage = useStore((s) => s.setLecturaSage);
-  // The prefill is captured ONCE at mount; further mutations of the
-  // textarea are user-owned. (The overlay is mount-on-open, so each
-  // launch reads the latest prefill.)
+  const mode = useStore((s) => s.lecturaMode);
+  const setLecturaMode = useStore((s) => s.setLecturaMode);
   const initialText = useStore.getState().lecturaPrefill;
 
   const [text, setText] = useState(initialText);
-  const [streaming, setStreaming] = useState<string>("");
-  const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">(
-    "idle",
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
-  const [resultSage, setResultSage] = useState<Sage | null>(null);
-  const streamRef = useRef<HTMLDivElement | null>(null);
+  const [panes, setPanes] = useState<Record<Sage, SagePane>>({
+    em: makePane("em"),
+    sis: makePane("sis"),
+    pra: makePane("pra"),
+    cri: makePane("cri"),
+  });
 
-  // Auto-scroll while tokens stream in.
-  useEffect(() => {
-    if (streamRef.current) {
-      streamRef.current.scrollTop = streamRef.current.scrollHeight;
-    }
-  }, [streaming]);
+  // The set of sages whose stream we should render right now.
+  const activeSages: Sage[] = mode === "council" ? ALL_SAGES : [sage];
 
-  const meta = SAGE_META[sage];
+  const anyRunning = activeSages.some((s) => panes[s].phase === "running");
+  const anyDone = activeSages.some((s) => panes[s].phase === "done");
 
-  const start = async () => {
-    if (text.trim().length === 0 || phase === "running") return;
-    setPhase("running");
-    setStreaming("");
-    setError(null);
-    setCostUsd(undefined);
-    setResultSage(sage);
-
-    try {
-      const { result, costUsd } = await interrogate({
-        sage,
-        text,
-        onUpdate: (u) => {
-          if (u.kind === "token") {
-            setStreaming((prev) => prev + u.delta);
-          }
-        },
-      });
-      setStreaming(result);
-      setCostUsd(costUsd);
-      setPhase("done");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase("error");
-    }
+  const setPane = (s: Sage, patch: Partial<SagePane>) => {
+    setPanes((prev) => ({ ...prev, [s]: { ...prev[s], ...patch } }));
   };
 
-  const save = () => {
-    const preguntas = parsePreguntas(streaming);
-    const savedSage = resultSage ?? sage;
-    onSave({
-      sage: savedSage,
-      preguntas,
-      generadoEn: new Date().toISOString(),
-      costoUsd: costUsd,
+  const start = async () => {
+    if (text.trim().length === 0 || anyRunning) return;
+
+    // Reset the panes we're about to fill so a re-run replaces
+    // previous output instead of stacking.
+    setPanes((prev) => {
+      const next = { ...prev };
+      for (const s of activeSages) next[s] = { ...makePane(s), phase: "running" };
+      return next;
     });
-    // Materialize each pregunta as a post-it on the board.
-    window.dispatchEvent(
-      new CustomEvent("sage:materialize-preguntas", {
-        detail: { sage: savedSage, preguntas },
+
+    await Promise.all(
+      activeSages.map(async (s) => {
+        try {
+          const { result, costUsd } = await interrogate({
+            sage: s,
+            text,
+            onUpdate: (u) => {
+              if (u.kind === "token") {
+                setPanes((prev) => ({
+                  ...prev,
+                  [s]: { ...prev[s], raw: prev[s].raw + u.delta },
+                }));
+              }
+            },
+          });
+          // Default every parsed question to checked.
+          const preguntas = parsePreguntas(result);
+          const checked: Record<number, boolean> = {};
+          for (let i = 0; i < preguntas.length; i++) checked[i] = true;
+          setPane(s, { phase: "done", raw: result, costUsd, checked });
+        } catch (err) {
+          setPane(s, {
+            phase: "error",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }),
     );
   };
 
-  // When the user changes sage mid-flight, reset the visible stream
-  // so the leftover text from the previous sage doesn't confuse them.
-  const switchSage = (next: Sage) => {
-    if (phase === "running") return; // ignore mid-stream
-    setLecturaSage(next);
-    if (phase === "done" || phase === "error") {
-      setStreaming("");
-      setPhase("idle");
-      setError(null);
-      setResultSage(null);
+  const save = () => {
+    const entries: Interrogatorio[] = [];
+    const materialize: { sage: Sage; preguntas: string[] }[] = [];
+    const generadoEn = new Date().toISOString();
+
+    for (const s of activeSages) {
+      const pane = panes[s];
+      if (pane.phase !== "done") continue;
+      const all = parsePreguntas(pane.raw);
+      const kept = all.filter((_, i) => pane.checked[i] !== false);
+      if (kept.length === 0) continue;
+      entries.push({
+        sage: s,
+        preguntas: kept,
+        generadoEn,
+        costoUsd: pane.costUsd,
+      });
+      materialize.push({ sage: s, preguntas: kept });
     }
+    if (entries.length === 0) {
+      onClose();
+      return;
+    }
+    onSave(entries);
+
+    // Materialize on the board. The board listener handles layout
+    // (cascade for single sage, columns when multiple sages arrive
+    // in the same dispatch).
+    window.dispatchEvent(
+      new CustomEvent("sage:materialize-preguntas", {
+        detail: { batches: materialize },
+      }),
+    );
+  };
+
+  const onFile = async (file: File | null) => {
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".doc")) {
+      alert(
+        "PDF / Word soon. Por ahora copia el texto al portapapeles y pégalo en el cuadro.",
+      );
+      return;
+    }
+    const buf = await file.text();
+    setText(buf);
   };
 
   return (
     <>
       <header className="flex items-center justify-between px-6 py-4 border-b border-rule-1 bg-paper-2">
         <div className="flex items-center gap-4 min-w-0">
-          <Avatar sage={sage} initials={meta.initials} size={36} title={meta.name} />
+          <Avatar
+            sage={mode === "single" ? sage : "em"}
+            initials={mode === "single" ? SAGE_META[sage].initials : "C"}
+            size={36}
+            title={mode === "single" ? SAGE_META[sage].name : "El consejo"}
+          />
           <div className="min-w-0">
             <h2 className="font-serif italic text-[20px] text-ink-1 leading-tight truncate">
-              Interrogatorio — {meta.name}
+              {mode === "single"
+                ? `Interrogatorio — ${SAGE_META[sage].name}`
+                : "Interrogatorio — el consejo"}
             </h2>
             <p className="font-mono text-[10px] text-ink-3 mt-1 tracking-[0.04em] truncate">
-              {meta.tagline}
+              {mode === "single"
+                ? SAGE_META[sage].tagline
+                : "Cuatro voces sobre el mismo texto"}
               {essayTitle ? ` · sobre ${essayTitle}` : ""}
             </p>
           </div>
         </div>
 
-        {/* 4-avatar selector — click to switch sage. */}
-        <div
-          className="flex items-center gap-1.5 mx-4"
-          role="tablist"
-          aria-label="Elegir sabio"
-        >
-          {(Object.keys(SAGE_META) as Sage[]).map((s) => {
-            const active = s === sage;
-            const m = SAGE_META[s];
-            return (
-              <button
-                key={s}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-label={m.name}
-                title={m.name}
-                onClick={() => switchSage(s)}
-                disabled={phase === "running"}
-                className={`p-0.5 rounded-full cursor-pointer transition-all ${
-                  active
-                    ? "ring-2 ring-ink-2 ring-offset-1 ring-offset-paper-2"
-                    : "opacity-60 hover:opacity-100"
-                } disabled:cursor-not-allowed disabled:opacity-40`}
-              >
-                <Avatar sage={s} initials={m.initials} size={26} title={m.name} />
-              </button>
-            );
-          })}
-        </div>
+        <ModeAndSageControls
+          mode={mode}
+          sage={sage}
+          disabled={anyRunning}
+          onModeChange={(m) => setLecturaMode(m)}
+          onSageChange={(s) => setLecturaSage(s)}
+        />
 
         <button
           type="button"
@@ -218,18 +251,21 @@ function LecturaInner({
         </button>
       </header>
 
-      <div className="flex-1 grid grid-cols-2 min-h-0">
-        {/* Left: input text */}
+      <div className="flex-1 min-h-0 grid grid-cols-[360px_1fr]">
+        {/* Left: source */}
         <div className="flex flex-col gap-2 p-6 border-r border-rule-1 min-h-0">
-          <label className="font-mono text-[10px] font-semibold text-ink-3 uppercase tracking-[0.14em]">
-            Texto a interrogar
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="font-mono text-[10px] font-semibold text-ink-3 uppercase tracking-[0.14em]">
+              Fuente
+            </label>
+            <FileInput onFile={onFile} disabled={anyRunning} />
+          </div>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Pega aquí un fragmento de tu ensayo, o de un paper que estés leyendo…"
-            className="flex-1 min-h-[300px] resize-none p-3 rounded-[8px] border border-rule-2 bg-paper text-ink-1 font-serif text-[14px] leading-[1.55] outline-none focus:border-rule-3"
-            disabled={phase === "running"}
+            placeholder="Pega aquí un fragmento, o sube un .txt / .md desde el botón."
+            className="flex-1 min-h-[280px] resize-none p-3 rounded-[8px] border border-rule-2 bg-paper text-ink-1 font-serif text-[14px] leading-[1.55] outline-none focus:border-rule-3"
+            disabled={anyRunning}
           />
           <div className="flex items-center justify-between mt-1">
             <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
@@ -238,78 +274,305 @@ function LecturaInner({
             <Button
               variant="dark"
               onClick={start}
-              disabled={phase === "running" || text.trim().length === 0}
+              disabled={anyRunning || text.trim().length === 0}
             >
-              {phase === "running"
-                ? `${meta.name.replace(/^el /, "El ")} piensa…`
+              {anyRunning
+                ? mode === "council"
+                  ? "El consejo piensa…"
+                  : `${SAGE_META[sage].name.replace(/^el /, "El ")} piensa…`
                 : "Interrogar"}
             </Button>
           </div>
         </div>
 
-        {/* Right: streaming output */}
-        <div className="flex flex-col p-6 min-h-0">
-          <label className="font-mono text-[10px] font-semibold text-ink-3 uppercase tracking-[0.14em] mb-2">
-            Preguntas
-          </label>
-          <div
-            ref={streamRef}
-            className="flex-1 overflow-y-auto thin-scroll rounded-[8px] border border-rule-1 bg-paper p-4 font-serif text-[14px] leading-[1.6] text-ink-1 whitespace-pre-wrap"
-          >
-            {phase === "idle" ? (
-              <span className="font-serif italic text-ink-3">
-                Las cinco preguntas aparecerán aquí, una a una.
-              </span>
-            ) : phase === "error" ? (
-              <div>
-                <span className="font-mono text-[11px] text-err tracking-[0.04em]">
-                  error · {error}
-                </span>
-              </div>
-            ) : (
-              <PreguntasView raw={streaming} live={phase === "running"} />
-            )}
-          </div>
-
-          {phase === "done" ? (
-            <div className="mt-3 flex items-center justify-between">
-              <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
-                {costUsd !== undefined
-                  ? `costo · $${costUsd.toFixed(4)}`
-                  : "guardado contra agent sdk credit"}
-              </span>
-              <Button variant="seal" onClick={save}>
-                Guardar al ensayo
-              </Button>
-            </div>
-          ) : null}
+        {/* Right: per-sage output */}
+        <div
+          className={`min-h-0 grid gap-3 p-6 ${
+            activeSages.length === 1
+              ? "grid-cols-1"
+              : "grid-cols-2 grid-rows-2"
+          }`}
+        >
+          {activeSages.map((s) => (
+            <SagePaneView
+              key={s}
+              pane={panes[s]}
+              onToggle={(idx) =>
+                setPanes((prev) => ({
+                  ...prev,
+                  [s]: {
+                    ...prev[s],
+                    checked: {
+                      ...prev[s].checked,
+                      [idx]: !(prev[s].checked[idx] ?? true),
+                    },
+                  },
+                }))
+              }
+            />
+          ))}
         </div>
       </div>
+
+      {anyDone ? (
+        <footer className="flex items-center justify-between px-6 py-3 border-t border-rule-1 bg-paper-2">
+          <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
+            {summarize(panes, activeSages)}
+          </span>
+          <Button variant="seal" onClick={save} disabled={anyRunning}>
+            Guardar seleccionadas
+          </Button>
+        </footer>
+      ) : null}
     </>
   );
 }
 
-function PreguntasView({ raw, live }: { raw: string; live: boolean }) {
-  // While streaming, just show the raw text + a cursor caret.
-  if (live) {
+function ModeAndSageControls({
+  mode,
+  sage,
+  disabled,
+  onModeChange,
+  onSageChange,
+}: {
+  mode: "single" | "council";
+  sage: Sage;
+  disabled: boolean;
+  onModeChange: (m: "single" | "council") => void;
+  onSageChange: (s: Sage) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 mx-4">
+      <div
+        role="tablist"
+        aria-label="Modo de interrogación"
+        className="inline-flex p-[3px] bg-paper-3 border border-rule-1 rounded-full"
+      >
+        <ModeTab
+          label="Consejo"
+          active={mode === "council"}
+          onClick={() => onModeChange("council")}
+          disabled={disabled}
+        />
+        <ModeTab
+          label="Un sabio"
+          active={mode === "single"}
+          onClick={() => onModeChange("single")}
+          disabled={disabled}
+        />
+      </div>
+
+      {mode === "single" ? (
+        <div
+          className="flex items-center gap-1.5"
+          role="tablist"
+          aria-label="Elegir sabio"
+        >
+          {ALL_SAGES.map((s) => {
+            const active = s === sage;
+            const m = SAGE_META[s];
+            return (
+              <button
+                key={s}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-label={m.name}
+                title={m.name}
+                onClick={() => onSageChange(s)}
+                disabled={disabled}
+                className={`p-0.5 rounded-full cursor-pointer transition-all ${
+                  active
+                    ? "ring-2 ring-ink-2 ring-offset-1 ring-offset-paper-2"
+                    : "opacity-60 hover:opacity-100"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <Avatar sage={s} initials={m.initials} size={24} title={m.name} />
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ModeTab({
+  label,
+  active,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      disabled={disabled}
+      className={`h-[24px] px-3 rounded-full text-[11.5px] font-medium font-sans cursor-pointer transition-all ${
+        active
+          ? "bg-paper text-ink-1 shadow-(--shadow-soft)"
+          : "bg-transparent text-ink-3 hover:text-ink-1"
+      } disabled:cursor-not-allowed disabled:opacity-40`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function FileInput({
+  onFile,
+  disabled,
+}: {
+  onFile: (file: File | null) => void;
+  disabled: boolean;
+}) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept=".txt,.md,text/plain,text/markdown"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0] ?? null;
+          void onFile(f);
+          if (ref.current) ref.current.value = "";
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        disabled={disabled}
+        className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-3 hover:text-ink-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Subir .txt / .md
+      </button>
+    </>
+  );
+}
+
+function SagePaneView({
+  pane,
+  onToggle,
+}: {
+  pane: SagePane;
+  onToggle: (idx: number) => void;
+}) {
+  const meta = SAGE_META[pane.sage];
+  return (
+    <div className="flex flex-col rounded-[8px] border border-rule-1 bg-paper min-h-0 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-rule-1 bg-paper-2 flex-none">
+        <Avatar
+          sage={pane.sage}
+          initials={meta.initials}
+          size={20}
+          title={meta.name}
+        />
+        <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-2">
+          {meta.name}
+        </span>
+        <span className="ml-auto font-mono text-[9px] text-ink-3 tracking-[0.06em]">
+          {phaseLabel(pane)}
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto thin-scroll p-3 text-[13px] leading-[1.55] font-serif text-ink-1">
+        <PaneBody pane={pane} onToggle={onToggle} />
+      </div>
+    </div>
+  );
+}
+
+function PaneBody({
+  pane,
+  onToggle,
+}: {
+  pane: SagePane;
+  onToggle: (idx: number) => void;
+}) {
+  if (pane.phase === "idle") {
     return (
-      <>
-        {raw}
-        <span className="inline-block w-[8px] h-[14px] bg-ink-2 ml-[2px] align-[-2px] animate-pulse" />
-      </>
+      <span className="font-serif italic text-ink-3 text-[12px]">
+        En espera.
+      </span>
     );
   }
-  const preguntas = parsePreguntas(raw);
+  if (pane.phase === "error") {
+    return (
+      <span className="font-mono text-[11px] text-err tracking-[0.04em]">
+        error · {pane.error ?? "desconocido"}
+      </span>
+    );
+  }
+  if (pane.phase === "running") {
+    return (
+      <span className="whitespace-pre-wrap">
+        {pane.raw}
+        <span className="inline-block w-[7px] h-[12px] bg-ink-2 ml-[2px] align-[-1px] animate-pulse" />
+      </span>
+    );
+  }
+  // done — parsed questions with checkboxes
+  const preguntas = parsePreguntas(pane.raw);
   return (
     <ol className="list-none p-0 m-0">
-      {preguntas.map((p, i) => (
-        <li key={i} className="flex gap-3 mb-3 last:mb-0">
-          <span className="font-mono text-[11px] text-ink-2 font-semibold mt-1">
-            {String(i + 1).padStart(2, "0")}
-          </span>
-          <span>{p}</span>
-        </li>
-      ))}
+      {preguntas.map((p, i) => {
+        const isOn = pane.checked[i] !== false;
+        return (
+          <li key={i} className="flex gap-2 mb-2 last:mb-0 items-start">
+            <input
+              type="checkbox"
+              checked={isOn}
+              onChange={() => onToggle(i)}
+              aria-label={`Pregunta ${i + 1}`}
+              className="mt-[3px] accent-ink-1 cursor-pointer"
+            />
+            <span className={isOn ? "" : "text-ink-3 line-through opacity-60"}>
+              {p}
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
+}
+
+function phaseLabel(pane: SagePane): string {
+  switch (pane.phase) {
+    case "idle":
+      return "espera";
+    case "running":
+      return "pensando…";
+    case "done":
+      return pane.costUsd !== undefined
+        ? `done · $${pane.costUsd.toFixed(4)}`
+        : "done";
+    case "error":
+      return "error";
+  }
+}
+
+function summarize(
+  panes: Record<Sage, SagePane>,
+  active: Sage[],
+): string {
+  let kept = 0;
+  let total = 0;
+  for (const s of active) {
+    const pane = panes[s];
+    if (pane.phase !== "done") continue;
+    const all = parsePreguntas(pane.raw);
+    total += all.length;
+    for (let i = 0; i < all.length; i++) {
+      if (pane.checked[i] !== false) kept += 1;
+    }
+  }
+  return `${kept} de ${total} preguntas seleccionadas`;
 }

@@ -74,12 +74,23 @@ function BoardPaneInner() {
   // Materialize sage interrogation results as post-its on the board
   // when the Lectura overlay finishes. The overlay dispatches the
   // event on `window` so we don't need to plumb the editor ref out.
+  //
+  // Two payload shapes are accepted:
+  //   { sage, preguntas }        — legacy single-sage flow
+  //   { batches: [{ sage, preguntas }, ...] } — council flow
   useEffect(() => {
     const handler = (e: Event) => {
-      const ce = e as CustomEvent<{ sage: Sage; preguntas: string[] }>;
+      const ce = e as CustomEvent<
+        | { sage: Sage; preguntas: string[] }
+        | { batches: { sage: Sage; preguntas: string[] }[] }
+      >;
       const ed = editorRef.current;
       if (!ed) return;
-      materializePreguntas(ed, ce.detail.sage, ce.detail.preguntas);
+      const batches =
+        "batches" in ce.detail
+          ? ce.detail.batches
+          : [{ sage: ce.detail.sage, preguntas: ce.detail.preguntas }];
+      materializePreguntas(ed, batches);
     };
     window.addEventListener("sage:materialize-preguntas", handler);
     return () =>
@@ -209,59 +220,128 @@ function BoardPaneInner() {
 }
 
 /**
- * Drop one note shape per pregunta, laid out in a grid centred on
- * the current viewport. Notes are tagged with `kind: "pregunta"` and
- * the sage as author, so they re-skin with the right colour + header
- * via PergaminoNoteShapeUtil.
+ * Drop one note shape per pregunta. Notes are tagged with
+ * `kind: "pregunta"` and the sage as author, so they re-skin with
+ * the right colour + header via PergaminoNoteShapeUtil.
+ *
+ * Layout:
+ *   - 1 sage  → cascade grid (≤3 cols × n rows), centred in viewport
+ *   - 2+ sages → one column per sage, side by side, anchored to the
+ *     left edge of the empty space to the right of the existing
+ *     content so multiple interrogations don't pile on top of each
+ *     other.
  */
 function materializePreguntas(
   editor: Editor,
-  sage: Sage,
-  preguntas: string[],
+  batches: { sage: Sage; preguntas: string[] }[],
 ) {
-  if (preguntas.length === 0) return;
-  const center = editor.getViewportPageBounds().center;
+  const nonEmpty = batches.filter((b) => b.preguntas.length > 0);
+  if (nonEmpty.length === 0) return;
+
   const W = 200;
   const H = 200;
-  const GAP = 24;
-  const cols = preguntas.length <= 3 ? preguntas.length : 3;
-  const rows = Math.ceil(preguntas.length / cols);
-  const totalW = cols * W + (cols - 1) * GAP;
-  const totalH = rows * H + (rows - 1) * GAP;
-  const startX = center.x - totalW / 2;
-  const startY = center.y - totalH / 2;
+  const GAP_X = 28;
+  const GAP_Y = 24;
   const now = Date.now();
-  const tilt = [-0.025, 0.018, -0.012, 0.022, -0.02]; // subtle radians
+  const tilt = [-0.025, 0.018, -0.012, 0.022, -0.02, 0.015, -0.018];
 
-  editor.createShapes(
-    preguntas.map((text, i) => {
+  // Pick a starting Y based on the viewport, and a starting X that
+  // lands either at viewport-left (when the board is empty) or
+  // just to the right of everything already there.
+  const viewport = editor.getViewportPageBounds();
+  const existing = editor.getCurrentPageShapes();
+  let startX = viewport.center.x - W * (nonEmpty.length > 1 ? nonEmpty.length : 1) / 2;
+  if (existing.length > 0) {
+    let rightmost = -Infinity;
+    for (const shape of existing) {
+      const b = editor.getShapePageBounds(shape.id);
+      if (b && b.maxX > rightmost) rightmost = b.maxX;
+    }
+    if (Number.isFinite(rightmost)) startX = rightmost + GAP_X * 2;
+  }
+  const startY = viewport.center.y - H * 1.2;
+
+  type ShapeArg = Parameters<Editor["createShapes"]>[0][number];
+  const shapes: ShapeArg[] = [];
+  let tiltIdx = 0;
+
+  if (nonEmpty.length === 1) {
+    // Cascade layout for a single sage.
+    const { sage, preguntas } = nonEmpty[0];
+    const cols = preguntas.length <= 3 ? preguntas.length : 3;
+    const rows = Math.ceil(preguntas.length / cols);
+    const totalW = cols * W + (cols - 1) * GAP_X;
+    const totalH = rows * H + (rows - 1) * GAP_Y;
+    const baseX =
+      existing.length > 0 ? startX : viewport.center.x - totalW / 2;
+    const baseY = viewport.center.y - totalH / 2;
+    preguntas.forEach((text, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const meta: PostItMeta = {
-        author: sage,
-        kind: "pregunta",
-        createdAt: now + i,
-      };
-      return {
-        id: createShapeId(),
-        type: "note" as const,
-        x: startX + col * (W + GAP),
-        y: startY + row * (H + GAP),
-        rotation: tilt[i % tilt.length] ?? 0,
-        props: {
-          richText: toRichText(text),
-          size: "s" as const,
-          align: "start" as const,
-          verticalAlign: "start" as const,
-        },
-        meta: {
-          author: meta.author,
-          kind: meta.kind,
-          createdAt: meta.createdAt,
-        },
-      };
-    }),
-  );
+      shapes.push(
+        buildNoteShape({
+          x: baseX + col * (W + GAP_X),
+          y: baseY + row * (H + GAP_Y),
+          tilt: tilt[tiltIdx++ % tilt.length] ?? 0,
+          sage,
+          text,
+          createdAt: now + shapes.length,
+        }),
+      );
+    });
+  } else {
+    // Council layout: one vertical column per sage.
+    nonEmpty.forEach((batch, colIdx) => {
+      const x = startX + colIdx * (W + GAP_X);
+      batch.preguntas.forEach((text, rowIdx) => {
+        shapes.push(
+          buildNoteShape({
+            x,
+            y: startY + rowIdx * (H + GAP_Y),
+            tilt: tilt[tiltIdx++ % tilt.length] ?? 0,
+            sage: batch.sage,
+            text,
+            createdAt: now + shapes.length,
+          }),
+        );
+      });
+    });
+  }
+
+  editor.createShapes(shapes);
+}
+
+function buildNoteShape(args: {
+  x: number;
+  y: number;
+  tilt: number;
+  sage: Sage;
+  text: string;
+  createdAt: number;
+}) {
+  const meta: PostItMeta = {
+    author: args.sage,
+    kind: "pregunta",
+    createdAt: args.createdAt,
+  };
+  return {
+    id: createShapeId(),
+    type: "note" as const,
+    x: args.x,
+    y: args.y,
+    rotation: args.tilt,
+    props: {
+      richText: toRichText(args.text),
+      size: "s" as const,
+      align: "start" as const,
+      verticalAlign: "start" as const,
+    },
+    meta: {
+      author: meta.author,
+      kind: meta.kind,
+      createdAt: meta.createdAt,
+    },
+  };
 }
 
 function recomputeCounts(
