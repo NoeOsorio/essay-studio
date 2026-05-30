@@ -43,9 +43,11 @@ test("'Interrogar' auto-shows the board when it was hidden", async ({
   await expect(page.locator(".tl-container")).toBeVisible();
 });
 
-test("council mode interrogates all four sages and materialises 20 notes on save", async ({
+test("council mode (academico default) runs 3 sages and materialises 9 notes on save", async ({
   page,
 }) => {
+  // Academico defaults to EM/SI/CR (no Práctico). PR can be added by
+  // the user clicking its avatar in the sage selector.
   await openNewEssay(page);
   await page.getByRole("button", { name: "Interrogar", exact: true }).click();
 
@@ -60,8 +62,8 @@ test("council mode interrogates all four sages and materialises 20 notes on save
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
 
-  // 4 sages × 5 preguntas = 20 checkboxes in the result panes.
-  await expect(page.locator("input[type=checkbox]")).toHaveCount(20);
+  // 3 sages (EM/SI/CR) × 3 preguntas = 9 checkboxes in the result panes.
+  await expect(page.locator("input[type=checkbox]")).toHaveCount(9);
 
   await overlay.getByRole("button", { name: /Guardar seleccionadas/ }).click();
   await page.waitForTimeout(400);
@@ -72,15 +74,14 @@ test("council mode interrogates all four sages and materialises 20 notes on save
     sage: string;
     preguntas: string[];
   }>;
-  // One entry per sage that produced kept questions (all four).
-  expect(interrogatorios).toHaveLength(4);
+  expect(interrogatorios).toHaveLength(3);
   const sages = interrogatorios.map((i) => i.sage).sort();
-  expect(sages).toEqual(["cri", "em", "pra", "sis"]);
+  expect(sages).toEqual(["cri", "em", "sis"]);
 
-  // 20 notes materialised on the board.
+  // 9 notes materialised on the board.
   await expect(
     page.locator('.tl-shape[data-shape-type="note"]'),
-  ).toHaveCount(20);
+  ).toHaveCount(9);
 });
 
 test("unchecking questions skips them from materialisation and persistence", async ({
@@ -101,12 +102,11 @@ test("unchecking questions skips them from materialisation and persistence", asy
     has: page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
-  await expect(page.locator("input[type=checkbox]")).toHaveCount(5);
+  await expect(page.locator("input[type=checkbox]")).toHaveCount(3);
 
-  // Uncheck questions 1 and 3 (indices 0 and 2). Keep 2, 4, 5.
+  // Uncheck question 1 (index 0). Keep 2 and 3.
   const checkboxes = page.locator("input[type=checkbox]");
   await checkboxes.nth(0).uncheck();
-  await checkboxes.nth(2).uncheck();
 
   await overlay.getByRole("button", { name: /Guardar seleccionadas/ }).click();
   await page.waitForTimeout(300);
@@ -116,11 +116,11 @@ test("unchecking questions skips them from materialisation and persistence", asy
     sage: string;
     preguntas: string[];
   }>)[0];
-  expect(entry.preguntas).toHaveLength(3);
+  expect(entry.preguntas).toHaveLength(2);
 
   await expect(
     page.locator('.tl-shape[data-shape-type="note"]'),
-  ).toHaveCount(3);
+  ).toHaveCount(2);
 });
 
 test("clicking a council avatar opens lectura in single mode for that sage", async ({
@@ -146,7 +146,7 @@ test("clicking a council avatar opens lectura in single mode for that sage", asy
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
 
-  await expect(page.locator("input[type=checkbox]")).toHaveCount(5);
+  await expect(page.locator("input[type=checkbox]")).toHaveCount(3);
 
   await overlay.getByRole("button", { name: /Guardar seleccionadas/ }).click();
   await page.waitForTimeout(300);
@@ -199,7 +199,10 @@ test("uploading a .txt file loads its contents into the textarea", async ({
       buffer: Buffer.from(fileBody, "utf-8"),
     });
 
-  await expect(page.getByPlaceholder(SOURCE_PLACEHOLDER)).toHaveValue(fileBody);
+  // After upload, the placeholder may switch (uploading also saves
+  // the file as a fuente in the library, which changes the empty-
+  // state text). Match the textarea by role instead.
+  await expect(page.locator("textarea").first()).toHaveValue(fileBody);
 });
 
 test("selecting text in the editor shows the sage bubble menu", async ({

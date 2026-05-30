@@ -128,36 +128,39 @@ export async function installTauriStub(page: Page) {
           case "sage_interrogate": {
             const id = String(args.id);
             const sage = String(args.sage);
+            const language = args.language as string | undefined;
+            // Surface the language to tests for assertion.
+            const winx2 = window as unknown as {
+              __E2E_LAST_INTERROGATE__?: Map<
+                string,
+                { sage: string; language?: string }
+              >;
+            };
+            if (!winx2.__E2E_LAST_INTERROGATE__)
+              winx2.__E2E_LAST_INTERROGATE__ = new Map();
+            winx2.__E2E_LAST_INTERROGATE__.set(sage, { sage, language });
             // Per-sage canned answers so the test can assert which
             // sage produced the questions without burning credits.
             const fakeAnswers: Record<string, string[]> = {
               em: [
                 "1. ¿En qué muestra se midió ese efecto y con qué N?",
                 "2. ¿La cita de Edmondson es del estudio original o de una review?",
-                "3. ¿En qué población se vuelve falso este argumento?",
-                "4. ¿Qué instrumento medible reemplazaría la frase \"rituales sostienen seguridad\"?",
-                "5. ¿Qué resultado te incomodaría descubrir aquí?",
+                "3. ¿Qué instrumento medible reemplazaría la frase \"rituales sostienen seguridad\"?",
               ],
               sis: [
                 "1. ¿Qué loop de retroalimentación sostiene este comportamiento?",
                 "2. ¿Estás explicando una dinámica estructural con causas individuales?",
                 "3. ¿Dónde está el punto de apalancamiento implícito?",
-                "4. ¿Qué delay hay entre causa y efecto en este argumento?",
-                "5. ¿Estás mezclando nivel individuo y nivel organización?",
               ],
               pra: [
                 "1. ¿Qué cambiaría un manager el lunes si esto fuera verdad?",
                 "2. ¿Quién implementa esto y qué se lo impide?",
-                "3. ¿Lo has visto funcionar en una org real?",
-                "4. ¿Cuál es el primer paso accionable concreto?",
-                "5. ¿Qué stakeholder no aparece en el modelo del autor?",
+                "3. ¿Cuál es el primer paso accionable concreto?",
               ],
               cri: [
                 "1. ¿Cuál sería el steelman del lado opuesto?",
                 "2. ¿Quién no aparece en esta historia?",
-                "3. ¿Es genuinamente novel o common sense disfrazado?",
-                "4. ¿Qué supuestos ideológicos asume el autor sin examinar?",
-                "5. ¿El autor escribe para tener razón o para encontrar la verdad?",
+                "3. ¿Qué supuestos ideológicos asume el autor sin examinar?",
               ],
             };
             const fakeAnswer = fakeAnswers[sage] ?? fakeAnswers.em;
@@ -181,8 +184,138 @@ export async function installTauriStub(page: Page) {
             });
             return id;
           }
+          case "sage_critique": {
+            const id = String(args.id);
+            const sage = String(args.sage);
+            const pase = String(args.pase);
+            const text = String(args.text ?? "");
+            // Surface the rubrica/fuentes/language payload to tests
+            // so we can assert that the renderer forwarded them. Map
+            // keeps the last call per pase for ergonomic lookup.
+            type RubricaPayload = { criterios: unknown[] } | undefined;
+            type FuentesPayload = unknown[] | undefined;
+            const winx = window as unknown as {
+              __E2E_LAST_CRITIQUE__?: Map<
+                string,
+                {
+                  sage: string;
+                  pase: string;
+                  rubrica: RubricaPayload;
+                  fuentes: FuentesPayload;
+                  language?: string;
+                }
+              >;
+            };
+            if (!winx.__E2E_LAST_CRITIQUE__)
+              winx.__E2E_LAST_CRITIQUE__ = new Map();
+            winx.__E2E_LAST_CRITIQUE__.set(pase, {
+              sage,
+              pase,
+              rubrica: args.rubrica as RubricaPayload,
+              fuentes: args.fuentes as FuentesPayload,
+              language: args.language as string | undefined,
+            });
+            // Pick three distinct anchors per pase so the three passes
+            // each land on different ranges — otherwise the same span
+            // would be marked three times. We carve the doc into ~9
+            // slots and pick three slots per pase.
+            const words = text.split(/\s+/).filter(Boolean);
+            const span = (offset: number, n: number): string =>
+              words.slice(offset, offset + n).join(" ");
+            const slots: Record<string, [number, number][]> = {
+              coherencia: [
+                [0, 4],
+                [Math.floor(words.length * 0.12), 4],
+                [Math.floor(words.length * 0.24), 4],
+              ],
+              estilo: [
+                [Math.floor(words.length * 0.36), 4],
+                [Math.floor(words.length * 0.48), 4],
+                [Math.floor(words.length * 0.6), 4],
+              ],
+              argumento: [
+                [Math.floor(words.length * 0.72), 3],
+                [Math.floor(words.length * 0.8), 3],
+                [Math.floor(words.length * 0.88), 3],
+              ],
+              apa: [
+                [Math.floor(words.length * 0.93), 3],
+                [Math.floor(words.length * 0.96), 2],
+                [Math.floor(words.length * 0.98), 2],
+              ],
+            };
+            const picks = slots[pase] ?? slots.coherencia;
+            const A = span(picks[0][0], picks[0][1]) || "fragmento uno";
+            const B = span(picks[1][0], picks[1][1]) || "fragmento dos";
+            const C = span(picks[2][0], picks[2][1]) || "fragmento tres";
+            // If a rubrica was sent, attach criterioId to one of the
+            // items so tests can verify the chip renders.
+            const rubricaArg = args.rubrica as
+              | { criterios?: { id?: unknown }[] }
+              | undefined;
+            const firstCriterio = rubricaArg?.criterios?.[0];
+            const linkedCriterioId =
+              firstCriterio && typeof firstCriterio.id === "string"
+                ? firstCriterio.id
+                : undefined;
+            // Canned anotaciones — one per pase per sage. Each is a
+            // valid JSON-line so parseAnotaciones picks it up.
+            const items: Record<string, unknown>[] = [
+              {
+                cita: A,
+                severidad: "alta",
+                mensaje: `[${sage}/${pase}] problema A detectado`,
+                sugerencia: "Reescribe la apertura con la evidencia delante.",
+                ...(linkedCriterioId
+                  ? { criterioId: linkedCriterioId }
+                  : {}),
+              },
+              {
+                cita: B,
+                severidad: "media",
+                mensaje: `[${sage}/${pase}] problema B detectado`,
+              },
+              {
+                cita: C,
+                severidad: "baja",
+                mensaje: `[${sage}/${pase}] problema C detectado`,
+                sugerencia: "Especifica un caso concreto.",
+              },
+            ];
+            queueMicrotask(() => {
+              dispatchEvent("sage://event", { id, type: "started" });
+              for (const it of items) {
+                const line = JSON.stringify(it) + "\n";
+                dispatchEvent("sage://event", {
+                  id,
+                  type: "token",
+                  delta: line,
+                });
+              }
+              dispatchEvent("sage://event", {
+                id,
+                type: "complete",
+                result: items.map((it) => JSON.stringify(it)).join("\n"),
+                costUsd: 0.0017,
+              });
+            });
+            return id;
+          }
           case "sage_ping":
             return String(args.id);
+          case "sage_status": {
+            // Default: pretend the sidecar is healthy so the
+            // SidecarBanner stays hidden. The dedicated banner spec
+            // (sidecar-banner.spec.ts) overrides by setting
+            // `__E2E_SIDECAR_STATUS__` before the app boots.
+            const winx = window as unknown as {
+              __E2E_SIDECAR_STATUS__?:
+                | { state: "up" }
+                | { state: "unknown" }
+                | { state: "down"; message: string };
+            };
+            return winx.__E2E_SIDECAR_STATUS__ ?? { state: "up" };
+          }
           default:
             return null;
         }
@@ -228,4 +361,46 @@ export async function dumpEssays(page: Page): Promise<EssayDump[]> {
     if (!win.__E2E_ESSAYS__) return [];
     return Array.from(win.__E2E_ESSAYS__.values());
   }) as Promise<EssayDump[]>;
+}
+
+type CritiqueCapture = {
+  sage: string;
+  pase: string;
+  rubrica?: { criterios: unknown[] };
+  fuentes?: unknown[];
+  language?: string;
+};
+
+/** Get the latest critique invocation per pase, as seen by the stub. */
+export async function dumpCritiques(
+  page: Page,
+): Promise<Record<string, CritiqueCapture>> {
+  return page.evaluate(() => {
+    const win = window as unknown as {
+      __E2E_LAST_CRITIQUE__?: Map<string, CritiqueCapture>;
+    };
+    const out: Record<string, CritiqueCapture> = {};
+    win.__E2E_LAST_CRITIQUE__?.forEach((v, k) => {
+      out[k] = v;
+    });
+    return out;
+  }) as Promise<Record<string, CritiqueCapture>>;
+}
+
+type InterrogateCapture = { sage: string; language?: string };
+
+/** Get the latest interrogate invocation per sage, as seen by the stub. */
+export async function dumpInterrogates(
+  page: Page,
+): Promise<Record<string, InterrogateCapture>> {
+  return page.evaluate(() => {
+    const win = window as unknown as {
+      __E2E_LAST_INTERROGATE__?: Map<string, InterrogateCapture>;
+    };
+    const out: Record<string, InterrogateCapture> = {};
+    win.__E2E_LAST_INTERROGATE__?.forEach((v, k) => {
+      out[k] = v;
+    });
+    return out;
+  }) as Promise<Record<string, InterrogateCapture>>;
 }
