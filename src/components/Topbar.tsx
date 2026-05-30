@@ -58,7 +58,6 @@ export function Topbar() {
           </span>
         </div>
         <SaveBadge />
-        <HistoryButton />
       </div>
 
       {/* Center — mode toggle + language toggle + council avatars */}
@@ -151,30 +150,6 @@ function FuentesButton() {
   );
 }
 
-function HistoryButton() {
-  const openHistory = useStore((s) => s.openHistory);
-  const count = useStore((s) => s.history.length);
-  // Sin glyph "H" para mantener el right column dentro de su ancho a
-  // 1440px de viewport — F/R sí lo tienen porque ya estaban antes y
-  // forman un patrón visual, pero la tercera columna desborda hacia
-  // las avatares del consejo si todos lo llevan.
-  return (
-    <button
-      type="button"
-      onClick={openHistory}
-      title="Historial de versiones del ensayo"
-      data-testid="topbar-history"
-      className="inline-flex items-center gap-1 h-[28px] px-2.5 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
-    >
-      Historial
-      {count > 0 ? (
-        <span className="font-mono text-[10px] tracking-[0.04em] text-ink-3">
-          · {count}
-        </span>
-      ) : null}
-    </button>
-  );
-}
 
 function RubricaButton() {
   const openRubrica = useStore((s) => s.openRubrica);
