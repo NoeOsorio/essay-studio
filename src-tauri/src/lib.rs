@@ -32,7 +32,9 @@ pub fn run() {
       storage::essay_write,
       storage::essay_delete,
       sidecar::sage_interrogate,
+      sidecar::sage_critique,
       sidecar::sage_ping,
+      sidecar::sage_status,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

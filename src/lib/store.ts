@@ -11,9 +11,13 @@ import {
 import type {
   BoardSnapshot,
   Essay,
+  EssayLanguage,
   EssayMeta,
   EssayMode,
+  Fuente,
   Interrogatorio,
+  Pase,
+  Rubrica,
   Sage,
 } from "@/lib/storage/types";
 
@@ -28,7 +32,7 @@ export type SaveStatus =
 
 export type View = "list" | "editor";
 
-export type Overlay = "lectura" | null;
+export type Overlay = "lectura" | "pluma" | "rubrica" | "fuentes" | null;
 
 /** How the Lectura overlay runs the interrogation. */
 export type LecturaMode = "single" | "council";
@@ -68,10 +72,16 @@ type State = {
   updateContent: (content: JSONContent, wordCount: number) => void;
   updateTitle: (title: string) => void;
   updateMode: (mode: EssayMode) => void;
+  updateLanguage: (language: EssayLanguage) => void;
   /** Update the tldraw board snapshot for the open essay. */
   updateBoard: (snapshot: BoardSnapshot | null) => void;
   /** Append an interrogatorio entry from a sage and flush. */
   addInterrogatorio: (entry: Interrogatorio) => void;
+  /** Snapshot the moment of the last Evaluar run. Called by EditorPane
+   *  right after applying anotaciones; `evaluadoEn` is synced to the
+   *  current `essay.updatedAt` so subsequent edits make the score
+   *  stale without false positives from the apply itself. */
+  recordEvaluacion: (pasadasCubiertas: Pase[]) => void;
   /** Open / close the lectura overlay. */
   setOverlay: (overlay: Overlay) => void;
   /** Open the Lectura overlay AND make sure the board pane is
@@ -87,6 +97,20 @@ type State = {
   ) => void;
   /** Change the sage selected in the Lectura overlay (single mode). */
   setLecturaSage: (sage: Sage) => void;
+  /** Open the Pluma Roja overlay for the current essay. */
+  openPlumaRoja: () => void;
+  /** Open the rubric editor overlay for the current essay. */
+  openRubrica: () => void;
+  /** Replace the current essay's rubric and flush. */
+  updateRubrica: (rubrica: Rubrica | undefined) => void;
+  /** Open the fuentes (sources library) overlay. */
+  openFuentes: () => void;
+  /** Append a fuente to the current essay; flush. */
+  addFuente: (fuente: Fuente) => void;
+  /** Patch an existing fuente by id; flush. */
+  updateFuente: (id: string, patch: Partial<Omit<Fuente, "id">>) => void;
+  /** Remove a fuente from the current essay; flush. */
+  removeFuente: (id: string) => void;
   /** Switch between single-sage and council modes inside the modal. */
   setLecturaMode: (mode: LecturaMode) => void;
   /** Show/hide the right-hand board pane. Force-flushes any pending
@@ -265,6 +289,14 @@ export const useStore = create<State>((set, get) => ({
     void get().flush();
   },
 
+  updateLanguage(language) {
+    const cur = get().current;
+    if (!cur) return;
+    const updated = { ...cur, language, updatedAt: nowIso() };
+    set({ current: updated, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
   updateBoard(snapshot) {
     const cur = get().current;
     if (!cur) return;
@@ -288,6 +320,23 @@ export const useStore = create<State>((set, get) => ({
       ...cur,
       interrogatorios: [...(cur.interrogatorios ?? []), entry],
       updatedAt: nowIso(),
+    };
+    set({ current: updated, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
+  recordEvaluacion(pasadasCubiertas) {
+    const cur = get().current;
+    if (!cur) return;
+    // Sync `evaluadoEn` to the current updatedAt so the apply itself
+    // doesn't immediately register as "stale". Any *subsequent* edit
+    // bumps updatedAt past evaluadoEn and surfaces the stale flag.
+    const updated: Essay = {
+      ...cur,
+      evaluacionMeta: {
+        evaluadoEn: cur.updatedAt,
+        pasadasCubiertas: [...pasadasCubiertas],
+      },
     };
     set({ current: updated, saveStatus: { kind: "dirty" } });
     void get().flush();
@@ -317,6 +366,99 @@ export const useStore = create<State>((set, get) => ({
 
   setLecturaSage(sage) {
     set({ lecturaSage: sage });
+  },
+
+  openPlumaRoja() {
+    set({ overlay: "pluma" });
+  },
+
+  openRubrica() {
+    set({ overlay: "rubrica" });
+  },
+
+  openFuentes() {
+    set({ overlay: "fuentes" });
+  },
+
+  addFuente(fuente) {
+    const cur = get().current;
+    if (!cur) return;
+    const updated: Essay = {
+      ...cur,
+      fuentes: [...(cur.fuentes ?? []), fuente],
+      updatedAt: nowIso(),
+    };
+    // Debounce — typing-driven fields use the autosave timer like
+    // updateContent / updateRubrica.
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      void get().flush();
+    }, AUTOSAVE_MS);
+    set({
+      current: updated,
+      saveStatus: { kind: "dirty" },
+      _autosaveTimer: timer,
+    });
+  },
+
+  updateFuente(id, patch) {
+    const cur = get().current;
+    if (!cur?.fuentes) return;
+    const updated: Essay = {
+      ...cur,
+      fuentes: cur.fuentes.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+      updatedAt: nowIso(),
+    };
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      void get().flush();
+    }, AUTOSAVE_MS);
+    set({
+      current: updated,
+      saveStatus: { kind: "dirty" },
+      _autosaveTimer: timer,
+    });
+  },
+
+  removeFuente(id) {
+    const cur = get().current;
+    if (!cur?.fuentes) return;
+    const next = cur.fuentes.filter((f) => f.id !== id);
+    const updated: Essay = {
+      ...cur,
+      // Drop the field entirely if no fuentes remain — keep the JSON clean.
+      fuentes: next.length > 0 ? next : undefined,
+      updatedAt: nowIso(),
+    };
+    set({ current: updated, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
+  updateRubrica(rubrica) {
+    const cur = get().current;
+    if (!cur) return;
+    const updated: Essay = {
+      ...cur,
+      // Drop the field entirely if there are no criterios left, so the
+      // JSON file stays clean.
+      rubrica:
+        rubrica && rubrica.criterios.length > 0 ? rubrica : undefined,
+      updatedAt: nowIso(),
+    };
+    // Debounce like updateContent — the editor is keystroke-driven.
+    // Force-flush happens on modal close (see RubricaOverlay onClose).
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      void get().flush();
+    }, AUTOSAVE_MS);
+    set({
+      current: updated,
+      saveStatus: { kind: "dirty" },
+      _autosaveTimer: timer,
+    });
   },
 
   setLecturaMode(mode) {

@@ -20,6 +20,26 @@ pub struct Essay {
     /// Cumulative interrogations by sages. Opaque to Rust beyond serde.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interrogatorios: Option<serde_json::Value>,
+    /// Optional rubric (criterios) the council uses for critiques.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rubrica: Option<serde_json::Value>,
+    /// Saved sources for this essay; Pluma Roja injects them into the
+    /// critique prompt, and Lectura lets the user pick from them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuentes: Option<serde_json::Value>,
+    /// Snapshot of the last Evaluar run on this essay (timestamp +
+    /// pasadas that were covered). Drives the Benchmark's empty /
+    /// partial-coverage / stale states.
+    #[serde(
+        default,
+        rename = "evaluacionMeta",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub evaluacion_meta: Option<serde_json::Value>,
+    /// Language the user is writing the essay in. Optional for legacy
+    /// essays (treated as "es" by the renderer when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
     pub mode: String,
     #[serde(rename = "wordCount", default)]
     pub word_count: u32,
@@ -167,6 +187,10 @@ mod tests {
             }),
             board: None,
             interrogatorios: None,
+            rubrica: None,
+            fuentes: None,
+            evaluacion_meta: None,
+            language: None,
             mode: "academico".to_string(),
             word_count: 3,
             created_at: "2026-05-09T20:00:00Z".to_string(),
@@ -266,6 +290,73 @@ mod tests {
         write_in(&dir, &essay).unwrap();
         let read = read_in(&dir, "with-board").unwrap();
         assert_eq!(read.board, essay.board);
+    }
+
+    #[test]
+    fn round_trip_preserves_optional_fuentes() {
+        let dir = make_dir();
+        let mut essay = sample_essay("with-fuentes", "2026-05-09T20:30:00Z");
+        essay.fuentes = Some(json!([
+            {
+                "id": "f1",
+                "nombre": "Edmondson 1999",
+                "cita": "Edmondson, A. (1999). Psychological safety and learning behavior.",
+                "contenido": "Texto íntegro del estudio…",
+                "origen": "texto",
+                "agregadoEn": "2026-05-09T20:00:00Z"
+            }
+        ]));
+        write_in(&dir, &essay).unwrap();
+        let read = read_in(&dir, "with-fuentes").unwrap();
+        assert_eq!(read.fuentes, essay.fuentes);
+    }
+
+    #[test]
+    fn round_trip_preserves_optional_language() {
+        let dir = make_dir();
+        let mut essay = sample_essay("with-lang", "2026-05-28T20:30:00Z");
+        essay.language = Some("en".to_string());
+        write_in(&dir, &essay).unwrap();
+        let read = read_in(&dir, "with-lang").unwrap();
+        assert_eq!(read.language, Some("en".to_string()));
+    }
+
+    #[test]
+    fn round_trip_preserves_optional_evaluacion_meta() {
+        let dir = make_dir();
+        let mut essay = sample_essay("with-eval", "2026-05-19T20:30:00Z");
+        essay.evaluacion_meta = Some(json!({
+            "evaluadoEn": "2026-05-19T20:30:00Z",
+            "pasadasCubiertas": ["coherencia", "estilo", "argumento", "apa"]
+        }));
+        write_in(&dir, &essay).unwrap();
+        let read = read_in(&dir, "with-eval").unwrap();
+        assert_eq!(read.evaluacion_meta, essay.evaluacion_meta);
+    }
+
+    #[test]
+    fn round_trip_preserves_optional_rubrica() {
+        let dir = make_dir();
+        let mut essay = sample_essay("with-rubrica", "2026-05-09T20:30:00Z");
+        essay.rubrica = Some(json!({
+            "criterios": [
+                {
+                    "id": "c1",
+                    "nombre": "Claridad del argumento",
+                    "peso": 5,
+                    "descripcion": "La tesis se enuncia en los primeros tres párrafos."
+                },
+                {
+                    "id": "c2",
+                    "nombre": "Calidad de la evidencia",
+                    "peso": 4,
+                    "descripcion": "Cada afirmación empírica viene con cita y N."
+                }
+            ]
+        }));
+        write_in(&dir, &essay).unwrap();
+        let read = read_in(&dir, "with-rubrica").unwrap();
+        assert_eq!(read.rubrica, essay.rubrica);
     }
 
     #[test]
