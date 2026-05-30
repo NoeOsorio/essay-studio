@@ -8,7 +8,7 @@
 // first (kind="before-restore") so the user can always undo the
 // restore itself.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
 import type { Snapshot, SnapshotKind, SnapshotMeta } from "@/lib/storage/types";
@@ -63,21 +63,48 @@ function HistoryInner({
   onRestore: (takenAt: string) => void;
   onClose: () => void;
 }) {
+  // 4-estado discriminado: idle (nada cargado) / loading / ready /
+  // error. Antes era `preview: Snapshot | null` lo que confundía "aún
+  // no cargué" con "falló la lectura" — el bug que detectaste mostraba
+  // el mensaje de error al abrir el panel cuando en realidad nunca
+  // habíamos pedido la lectura todavía.
+  type PreviewState =
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "ready"; snapshot: Snapshot }
+    | { kind: "error" };
+
   const [selected, setSelected] = useState<SnapshotMeta | null>(
     history[0] ?? null,
   );
-  const [preview, setPreview] = useState<Snapshot | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
 
   const selectRow = async (meta: SnapshotMeta) => {
     setSelected(meta);
-    setPreview(null);
-    setPreviewLoading(true);
+    setPreview({ kind: "loading" });
     const snap = await onPreview(meta.takenAt);
-    setPreview(snap);
-    setPreviewLoading(false);
+    setPreview(snap ? { kind: "ready", snapshot: snap } : { kind: "error" });
   };
+
+  // Auto-load la versión más reciente al montar el panel, así el
+  // usuario ve contenido inmediatamente en vez de el bucket de error
+  // (que antes aparecía porque selected estaba pre-seteado pero
+  // preview no había sido pedido). Si history está vacía, selected
+  // es null y caemos en el estado "Picá una versión".
+  //
+  // queueMicrotask defiere el primer setState de selectRow fuera del
+  // cuerpo síncrono del effect — React 19 strict no permite setState
+  // síncrono en effects. Mismo patrón que recordEvaluacion en
+  // EditorPane.
+  useEffect(() => {
+    if (history.length > 0) {
+      queueMicrotask(() => void selectRow(history[0]));
+    }
+    // Solo en mount — el panel se monta fresh cada vez que el overlay
+    // abre (parent check `if (overlay !== "history") return null`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
@@ -159,25 +186,27 @@ function HistoryInner({
 
         {/* Preview */}
         <div className="overflow-y-auto thin-scroll bg-paper">
-          {!selected ? (
+          {!selected || preview.kind === "idle" ? (
             <div className="px-8 py-12 text-center text-ink-3 font-sans text-[12px]">
               Picá una versión a la izquierda para verla.
             </div>
-          ) : previewLoading ? (
+          ) : preview.kind === "loading" ? (
             <div className="px-8 py-12 text-center text-ink-3 font-sans text-[12px]">
               Cargando…
             </div>
-          ) : !preview ? (
+          ) : preview.kind === "error" ? (
             <div className="px-8 py-12 text-center text-err font-sans text-[12px]">
               No se pudo leer esta versión.
             </div>
           ) : (
             <PreviewPanel
-              snapshot={preview}
-              isPendingRestore={pendingRestore === preview.takenAt}
-              onAskRestore={() => setPendingRestore(preview.takenAt)}
+              snapshot={preview.snapshot}
+              isPendingRestore={pendingRestore === preview.snapshot.takenAt}
+              onAskRestore={() =>
+                setPendingRestore(preview.snapshot.takenAt)
+              }
               onConfirmRestore={() => {
-                onRestore(preview.takenAt);
+                onRestore(preview.snapshot.takenAt);
                 setPendingRestore(null);
                 onClose();
               }}

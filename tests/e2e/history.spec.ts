@@ -136,6 +136,36 @@ test("restaurar una versión vieja reemplaza el editor y agrega before-restore",
   );
 });
 
+test("abrir el panel con history pre-existente auto-carga la versión más reciente (no flash de error)", async ({
+  page,
+}) => {
+  await openNewEssay(page, "academico");
+  await page.locator(".tiptap-content").click();
+  await page.keyboard.type("Contenido inicial del ensayo.");
+  await page.waitForTimeout(900);
+
+  // Snapshot manual para tener una versión guardada.
+  await openHistoryViaMenu(page);
+  await page.getByTestId("history-snapshot-now").click();
+  await expect(page.locator("[data-testid^='history-row-']")).toHaveCount(1);
+
+  // Cerrar el overlay y reabrirlo desde cero — el bug que Noé encontró
+  // era que se mostraba 'No se pudo leer esta versión' al reabrir,
+  // porque seleccionábamos la primera fila pero no cargábamos preview.
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await openHistoryViaMenu(page);
+
+  // El estado de error NUNCA debe aparecer cuando hay history válido.
+  await expect(
+    page.getByTestId("history-overlay"),
+  ).not.toContainText("No se pudo leer");
+  // Y el preview de la versión más reciente debe haberse cargado con
+  // su texto (auto-load on mount).
+  await expect(page.getByTestId("history-preview-text")).toContainText(
+    "Contenido inicial del ensayo.",
+  );
+});
+
 test("cerrar el ensayo añade un snapshot kind='close'", async ({ page }) => {
   await openNewEssay(page, "academico");
   await page.locator(".tiptap-content").click();
