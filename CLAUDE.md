@@ -650,7 +650,45 @@ Snapshots append-only por ensayo con políticas honestas (retención + restaurac
 - **Auto-snapshot por tiempo + condición de "cambió desde" > polling agresivo.** El ref-based check evita el patrón degenerate "100 snapshots vacíos durante una sesión de lectura". Hace que la política sea "snapshot si y solo si hay novedad", no "snapshot every N".
 - **El topbar a 1440 está al borde. Cada nueva acción tiene que pagar su sitio.** Llevamos 5 botones en el right column + 4 avatares en el centro + breadcrumb + savebadge a la izquierda. Antes de añadir un sexto botón en el row de acciones, hay que considerar: (a) ¿es realmente una acción del consejo o es metadata del ensayo? (b) ¿cuál es el budget de ancho disponible? La respuesta de hoy fue mover Historial al row de metadata izquierdo — no shrinking, no reflow responsive.
 
-## Sesión 13 (próxima) — TBD
+## Qué quedó hecho en sesión 13 — Menú nativo + Historial fuera de la UI (Fase 2.7 del ROADMAP)
+
+Noé observó que el botón Historial saturaba el topbar: "Ya que esta es una app desktop, podemos hacer uso de las funciones nativas de menu? Para no tener el boton de historial en la UI ya que no es tan importante y no quiero saturar." Trasladamos Historial al menú nativo de macOS bajo `View > Historial de versiones…` con accelerator `⌘⇧H`, y aprovechamos para montar la infraestructura base que sesiones siguientes pueden expandir sin trabajo extra de plomería.
+
+Implementación:
+
+- **`src-tauri/src/menu.rs` nuevo** — construye la estructura completa via `tauri::menu::*`: app submenu (About + Services + Hide/Hide Others/Show All + Quit), `Archivo` (Nuevo ensayo ⌘N, Cerrar ensayo ⌘W), `Edición` (Undo/Redo/Cut/Copy/Paste/Select All — todos predefinidos), `Vista` (Historial ⌘⇧H), `Ventana` (Minimize/Maximize/Close). Help se difiere a una sesión futura cuando tengamos contenidos reales que enlazar.
+- **Custom items siguen el scheme `surface:action`** (`file:new`, `file:close`, `view:history`) — fácil de filtrar y de extender; un nuevo item es 4 líneas en Rust + 1 case en TS.
+- **`lib.rs` setup** instala el menú con `app.set_menu(menu::build(...))` y registra `on_menu_event` que emite `app:menu` event con el id del item activado. Los items predefinidos (cut/copy/quit/etc.) no pasan por ahí — Tauri los maneja a nivel plataforma.
+- **`src/lib/menu/bridge.ts` nuevo** — `useNativeMenuBridge()` listen al `app:menu` event y dispatcha al store action correspondiente. Skip si no hay `__TAURI_INTERNALS__` (dev en browser puro). Items desconocidos son no-op silencioso, así que añadir un id en Rust sin wiring en renderer no rompe nada.
+- **HistoryButton removido del topbar** + el código del botón borrado. Sin pieza UI redundante; el único punto de entrada al historial es el menú nativo (manteniéndose la `openHistory` store action porque eventos del bridge la usan).
+- **Spec `history.spec.ts` ajustado** — nuevo helper `openHistoryViaMenu(page)` emite el `app:menu` event directamente via `__E2E_DISPATCH`. Mismo path que producción; lo único que skip-eamos es el chrome del system menu (Playwright no puede driverlo). El test "nuevo ensayo no muestra count" se renombró a "muestra estado vacío en el overlay" porque el count ya no existe; aserta que `topbar-history` testid tiene 0 elementos como guard contra reintroducción accidental.
+
+**96/96 E2E + 28/28 Rust + lint limpio.**
+
+## Decisiones de la sesión 13
+
+| Decisión | Por qué |
+|---|---|
+| **Menú nativo completo, no sólo "Vista > Historial"** | El costo marginal de construir File/Edit/View/Window de una vez fue tiny (5 minutos extras de código predefinido) y nos da una base coherente. Un menú con sólo "Vista" + items defaults a su lado se ve incompleto y como si lo hubiéramos hackeado. Mejor un esqueleto serio con un solo custom item, expandible. |
+| **Skip de `Ayuda` en esta sesión** | Help sin contenido real (About con metadata, enlace al ROADMAP, About Essay Studio que abre el PDF, etc.) es ruido. Cuando tengamos cosas que ofrecer ahí, lo ponemos completo en una sola pasada. |
+| **`app:menu` event con id en payload, no un event por item** | Una sola subscripción en el renderer, un switch por id. Añadir un item nuevo no requiere registrar otro listener. Trade-off: el bridge no es type-safe sobre ids — la mitigación es que el bridge ignora ids desconocidos, y el test sweep + lint detectan typos. |
+| **Items predefinidos (cut/copy/paste/undo/redo/quit) no emiten al renderer** | Tauri ya los wirea a nivel plataforma — Cut va a la selección activa, Quit cierra la app, Undo invoca el undo stack del DOM (que TipTap consume nativamente). Forzar que pasen por nuestro bridge sería trabajo extra para ningún beneficio. |
+| **`file:new` usa el mode del current essay si existe, default `academico`** | Es el comportamiento menos sorprendente: si estoy en blog y hago ⌘N, prefiero otro blog. Si vengo de la lista (no current), el default cubre el caso vacío. |
+| **`file:close` no-op si no hay current essay** | El item visible en el menú no se desactiva contextualmente (Tauri 2 lo permite pero requiere recompilar el menú; lo dejamos para más adelante si nos molesta). Mientras tanto, el bridge ignora la activación. |
+| **`openHistoryViaMenu` helper en lugar de mockear el sistema menu** | Playwright no puede driver el menú nativo de macOS. Emitir el `app:menu` event manualmente recorre el mismo bridge que producción — la única diferencia es el origen del trigger. Coverage real, no mocking. |
+| **Quitar HistoryButton, no esconderlo con feature flag** | La intención del usuario fue clara: el botón satura. Esconderlo bajo un flag haría que reapareciera al menor descuido. Borrarlo cierra la decisión. Si en algún futuro queremos un trigger UI (p.ej. en un settings panel), lo reconstruimos. |
+| **`surface:action` scheme en los ids** | Patrón limpio para crecer. Cuando añadamos `view:scorebar`, `sabio:interrogar`, etc., el bridge sigue siendo un switch único, y los ids se auto-documentan en lectura. |
+| **Bridge skipea sin Tauri (`__TAURI_INTERNALS__`)** | Iterar UI en el browser tradicional no tiene menú nativo, y suscribirse a un event que nunca vendrá sólo añade ruido en consola. La misma defensa que `useSidecarStatus` hace en sesión 11. |
+
+## Aprendido en sesión 13
+
+- **La UI cargada es ansiedad acumulada.** Cinco chips en el topbar derecho + cuatro avatares en el centro + breadcrumb + save status + lang + mode pill son MUCHA información para procesar visualmente. Mover una sola pieza al menú nativo (que vive fuera del foco del editor) baja la temperatura del topbar sin perder funcionalidad. Es la lección de "respect the medium": una app desktop tiene afordances nativas que una webapp no, y vale la pena usarlas.
+- **Construir el esqueleto del menú una vez paga durante toda la app.** La estructura File/Edit/View/Window que armé hoy es la misma estructura que cualquier sesión futura va a necesitar para añadir un item. El costo marginal de cada item nuevo es ahora ~5 líneas — Rust (item + accelerator + push al submenu) + TS (case en el switch del bridge). Es el patrón infra-once-features-many que vale la pena adelantarse.
+- **El payload con id stringificado es el contrato más simple posible.** Es tentador hacer `app:menu:<id>` como event name distinto por item para "más type safety", pero termina siendo cantidad de cosas a registrar sin beneficio real. Un solo event + un switch escala mejor.
+- **Tauri 2's `PredefinedMenuItem` es underrated.** Cut/Copy/Paste/Undo/Redo/Quit/Hide funcionan con la plataforma sin que escribamos ni una línea de handler. Para un `Edit` menu, 95% del trabajo lo hace Tauri. Cuando lo único que añadimos es un par de items custom (uno por sesión), la curva de costo es muy plana.
+- **Helper `openHistoryViaMenu` en tests > mock del native menu.** Cuando una capa es untestable directamente (system UI), el test cleaner es ejercer la capa siguiente con el mismo input que recibiría. Esto generaliza: para cualquier feature que dependa de algo native-only, una función helper que emite el evento del bridge cubre el comportamiento real.
+
+## Sesión 14 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
