@@ -164,7 +164,11 @@ pub fn essay_write(app: AppHandle, essay: Essay) -> Result<(), String> {
 
 #[tauri::command]
 pub fn essay_delete(app: AppHandle, id: String) -> Result<(), String> {
-    delete_in(&essays_dir(&app)?, &id)
+    let dir = essays_dir(&app)?;
+    // Wipe the history file alongside the essay so a deleted essay
+    // doesn't leak its version history to disk.
+    let _ = crate::history::delete_in(&dir, &id);
+    delete_in(&dir, &id)
 }
 
 // --------- Tests ---------

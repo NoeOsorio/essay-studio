@@ -1,3 +1,4 @@
+mod history;
 mod sidecar;
 mod storage;
 
@@ -31,6 +32,9 @@ pub fn run() {
       storage::essay_read,
       storage::essay_write,
       storage::essay_delete,
+      history::history_list,
+      history::history_read,
+      history::history_append,
       sidecar::sage_interrogate,
       sidecar::sage_critique,
       sidecar::sage_ping,

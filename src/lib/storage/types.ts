@@ -164,3 +164,48 @@ export type EssayMeta = Omit<
   | "fuentes"
   | "evaluacionMeta"
 >;
+
+/**
+ * Why we took a snapshot. Decoupling the trigger lets us prune autos
+ * aggressively while keeping explicit user actions forever.
+ *
+ *   - "auto"           — passive heartbeat while editing (every 10min
+ *                        if updatedAt advanced since last snapshot).
+ *   - "close"          — when the user closes the essay (closeEssay).
+ *   - "manual"         — user clicked "Guardar versión ahora".
+ *   - "before-restore" — implicit safety net: we snapshot the current
+ *                        state right before applying a restore so the
+ *                        user can always undo the restore itself.
+ *
+ * Retention rule (history_prune in Rust): autos older than the most
+ * recent 20 get dropped; everything else stays. That keeps the panel
+ * readable for daily editors without ever losing an explicit save.
+ */
+export type SnapshotKind = "auto" | "close" | "manual" | "before-restore";
+
+/**
+ * One historical version of an essay. Full snapshot of the Essay value
+ * at the time it was taken, plus the trigger. Persisted as one
+ * JSON-line in `<id>.history.jsonl`.
+ */
+export type Snapshot = {
+  /** ISO 8601 timestamp; doubles as the version's stable id. */
+  takenAt: string;
+  kind: SnapshotKind;
+  essay: Essay;
+};
+
+/**
+ * What we show in the history panel without paying the cost of the
+ * full TipTap doc per row. `history_list` in Rust streams the jsonl
+ * and returns only these meta fields.
+ */
+export type SnapshotMeta = {
+  takenAt: string;
+  kind: SnapshotKind;
+  /** Word count of the essay at the time of the snapshot. */
+  wordCount: number;
+  /** Essay title at the time of the snapshot. Useful when the user
+   *  renamed the essay between versions. */
+  title: string;
+};
