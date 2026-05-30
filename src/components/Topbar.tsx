@@ -58,6 +58,7 @@ export function Topbar() {
           </span>
         </div>
         <SaveBadge />
+        <HistoryButton />
       </div>
 
       {/* Center — mode toggle + language toggle + council avatars */}
@@ -90,7 +91,7 @@ export function Topbar() {
       {/* Right — actions. Future-session features stay in source but
           gated by `FEATURES.*`. `whitespace-nowrap` on the row prevents
           any child's text from wrapping under pressure. */}
-      <div className="flex items-center justify-end gap-2 min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">
+      <div className="flex items-center justify-end gap-1.5 min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">
         <BoardToggle />
         <FuentesButton />
         <RubricaButton />
@@ -137,10 +138,35 @@ function FuentesButton() {
       onClick={openFuentes}
       title="Biblioteca de fuentes del ensayo"
       data-testid="topbar-fuentes"
-      className="inline-flex items-center gap-1.5 h-[28px] px-3 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
+      className="inline-flex items-center gap-1 h-[28px] px-2.5 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
     >
       <span className="font-serif italic text-[14px]">F</span>
       Fuentes
+      {count > 0 ? (
+        <span className="font-mono text-[10px] tracking-[0.04em] text-ink-3">
+          · {count}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function HistoryButton() {
+  const openHistory = useStore((s) => s.openHistory);
+  const count = useStore((s) => s.history.length);
+  // Sin glyph "H" para mantener el right column dentro de su ancho a
+  // 1440px de viewport — F/R sí lo tienen porque ya estaban antes y
+  // forman un patrón visual, pero la tercera columna desborda hacia
+  // las avatares del consejo si todos lo llevan.
+  return (
+    <button
+      type="button"
+      onClick={openHistory}
+      title="Historial de versiones del ensayo"
+      data-testid="topbar-history"
+      className="inline-flex items-center gap-1 h-[28px] px-2.5 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
+    >
+      Historial
       {count > 0 ? (
         <span className="font-mono text-[10px] tracking-[0.04em] text-ink-3">
           · {count}
@@ -159,7 +185,7 @@ function RubricaButton() {
       onClick={openRubrica}
       title="Editar la rúbrica de evaluación del ensayo"
       data-testid="topbar-rubrica"
-      className="inline-flex items-center gap-1.5 h-[28px] px-3 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
+      className="inline-flex items-center gap-1 h-[28px] px-2.5 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
     >
       <span className="font-serif italic text-[14px]">R</span>
       Rúbrica
