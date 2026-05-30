@@ -14,6 +14,7 @@ import { FuentesOverlay } from "@/components/lectura/FuentesOverlay";
 import { HistoryOverlay } from "@/components/lectura/HistoryOverlay";
 import { useStore } from "@/lib/store";
 import { FEATURES } from "@/lib/features";
+import { useNativeMenuBridge } from "@/lib/menu/bridge";
 
 /** Heartbeat interval for auto snapshots. 10min strikes the balance
  *  between granularity and panel noise (sesión 12 decision). */
@@ -26,6 +27,10 @@ export default function Page() {
   const loadList = useStore((s) => s.loadList);
   const snapshotNow = useStore((s) => s.snapshotNow);
   const currentId = useStore((s) => s.current?.id ?? null);
+
+  // Native menu bridge — `app:menu` events from Rust dispatch to store
+  // actions. See `src/lib/menu/bridge.ts`.
+  useNativeMenuBridge();
 
   // Initial: load the essay list once the app boots.
   useEffect(() => {
