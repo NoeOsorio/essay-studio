@@ -12,7 +12,7 @@ Para el log de qué se hizo en cada sesión y por qué, ver [CLAUDE.md](CLAUDE.m
 
 > `npm run tauri:build:full` produce un `.app` con sidecar + prompts empacados que funciona fuera de dev.
 
-- ✅ **0.1 Sidecar en el bundle** — `tauri.conf.json` declara `bundle.resources`; Rust resuelve via `BaseDirectory::Resource` con walk-up como fallback de dev y env vars como override universal.
+- ✅ **0.1 Sidecar en el bundle** — `tauri.conf.json` declara `bundle.resources` (sidecar/dist + sidecar/node_modules + sidecar/package.json + prompts); Rust resuelve via `BaseDirectory::Resource` con walk-up como fallback de dev y env vars como override universal. Costo: `.app` 272 MB / `.dmg` 210 MB (mayormente el binario `claude` de la SDK). Optimización de tamaño pasa a Fase 3.
 - ✅ **0.2 Mensaje claro si el sidecar no arranca** — `sage://status` Down + banner rojo arriba del editor con detalle del error y hint "verificá `node` + Claude Code".
 - ✅ **0.3 Requisitos documentados** — README sección "Requisitos del usuario final" con macOS / Node / Claude Code.
 - ✅ **0.4 Smoke checklist** — en el README, paso a paso para validar el `.app` distribuible la primera vez.

@@ -102,11 +102,15 @@ Genera el bundle nativo en `src-tauri/target/release/bundle/`:
 
 ### Qué se empaca dentro del bundle
 
-`tauri.conf.json` declara como `bundle.resources`:
-- `sidecar/dist/sage.js` → queda en `Essay Studio.app/Contents/Resources/_up_/sidecar/dist/sage.js`
-- `prompts/*.md` → personas de los cuatro sabios
+`tauri.conf.json` declara como `bundle.resources` (paths relativos a `src-tauri/`):
+- `../sidecar/dist/sage.js` → el binario JS del consejo
+- `../sidecar/package.json` → necesario para que Node respete `type: "module"`
+- `../sidecar/node_modules/**/*` → la SDK del consejo y todas sus deps, incluyendo el binario nativo `claude` (~197 MB en `darwin-arm64`) que la SDK usa internamente para hacer las queries
+- `../prompts/*.md` → las personas de los cuatro sabios
 
-En runtime, Rust resuelve esos paths via `app.path().resolve(..., BaseDirectory::Resource)`. Fallback de dev: walk-up desde `cwd` (busca `sidecar/dist/sage.js` y `prompts/` en el repo). Override manual: env vars `SAGE_SIDECAR_PATH` y `SAGE_PROMPTS_DIR`.
+Todo termina en `Essay Studio.app/Contents/Resources/_up_/`. En runtime, Rust resuelve los paths via `app.path().resolve(..., BaseDirectory::Resource)`. Fallback de dev: walk-up desde `cwd` (busca `sidecar/dist/sage.js` y `prompts/` en el repo). Override manual: env vars `SAGE_SIDECAR_PATH` y `SAGE_PROMPTS_DIR`.
+
+**Tamaño esperado del bundle:** `.app` ~272 MB · `.dmg` ~210 MB. El 90% es el binario nativo de la Claude Agent SDK. Es comparable a un Electron app típico (Slack, Notion, Discord). Si en algún momento querés distribuir, hay margen de optimización (esbuild + reusar el `claude` global del usuario en vez del bundled — Fase 3.2 del ROADMAP).
 
 ### Requisitos del usuario final (la primera vez que corre el `.app`)
 
