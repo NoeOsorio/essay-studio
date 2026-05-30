@@ -32,6 +32,8 @@
     "targets": "all",
     "resources": [
       "../sidecar/dist/sage.js",
+      "../sidecar/package.json",
+      "../sidecar/node_modules/**/*",
       "../prompts/*.md"
     ],
     "icon": [
