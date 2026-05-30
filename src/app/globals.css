@@ -241,6 +241,14 @@ body::before {
 }
 .sage-pulse { animation: sage-pulse 1.4s infinite; }
 
+/* Flash a mark when the Benchmark drilldown scrolls it into view. */
+@keyframes anno-flash {
+  0%   { box-shadow: 0 0 0 0   rgba(178,58,42,0.45); }
+  40%  { box-shadow: 0 0 0 6px rgba(178,58,42,0.18); }
+  100% { box-shadow: 0 0 0 0   rgba(178,58,42,0); }
+}
+.anno-flash { animation: anno-flash 1.6s ease-out; border-radius: 2px; }
+
 /* ---------------------------------------------------------
    TipTap editor — prose styles (.tiptap-content is the class
    we attach to the ProseMirror node). Match the Pergamino
