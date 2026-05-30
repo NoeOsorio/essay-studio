@@ -285,9 +285,337 @@ Implementación:
 - `materializePreguntas(editor, batches)` ahora acepta un array de batches. 1 batch → cascada, n batches → columnas. La X de inicio busca el `maxX` de las shapes existentes para encadenar interrogaciones sin pisarse.
 - E2E ampliado a **29/29**: council (20 notes), checkboxes (3 de 5 quedan), file upload, modes/tabs.
 
-## Sesión 6 (próxima) — Pluma Roja
+## Qué quedó hecho en sesión 6 — Pluma Roja
 
-Por el plan original. Revisión multi-pasada del ensayo completo con anotaciones inline color-coded en el texto + comentarios al margen. 3 pasadas: Coherencia (SI), Estilo (EM/PR según modo), Argumento (CR).
+- **Tres pasadas en paralelo** sobre el ensayo completo, una por sabio:
+  - **Coherencia** → SI (loops, niveles, atribuciones individuales vs sistémicas)
+  - **Estilo** → EM en `modo: academico`, PR en `modo: blog` (registro, voz, precisión)
+  - **Argumento** → CR (steelman, supuestos, retórica)
+- **Protocolo `critique`** nuevo en el sidecar (`sidecar/src/sage.ts`): user prompt pide JSON-lines estrictos `{cita, severidad, mensaje, sugerencia?}`. Persona del sabio queda intacta como system prompt; el formato es task-specific en el user prompt. Sentinel `{"vacio":true}` cuando un sabio no encuentra nada en su dominio.
+- **Rust:** `sage_critique` añadido junto a `sage_interrogate` — mismo bridge stdin/stdout-events `sage://event` para streaming token a token.
+- **Frontend:**
+  - `critique({sage, pase, text})` en `src/lib/agents/index.ts`; comparte la maquinaria de listen/invoke con `interrogate` vía `runSidecarCommand`.
+  - `parseAnotaciones(raw)` tolera fences markdown y JSON parcial.
+  - `buildAnotacion(raw, sage, pase, generadoEn)` añade `id` (uuid) + metadata.
+  - **Annotation mark de TipTap** (`src/components/editor/extensions/Annotation.ts`): `Mark.create` con attrs `{id, sage, pase, severidad, mensaje, sugerencia}`. Render: `<span class="anno anno-{em|sis|pra|cri}" data-by="XX" data-anno-id="..." data-*="...">`. Comandos: `setAnnotation`, `removeAnnotationById`, `clearAllAnnotations`.
+  - **`findCitaRange(editor, cita, skip)`** en `src/lib/editor/findCita.ts`: aplana el doc a texto normalizado (whitespace colapsado) con un mapa paralelo a posiciones PM, indexOf, traduce de vuelta. Soporta `skip` para que dos anotaciones con la misma cita resuelvan a ocurrencias distintas.
+  - **`PlumaRojaOverlay`** modal (`src/components/lectura/PlumaRojaOverlay.tsx`): 3 paneles 1:1:1 con streaming + per-anotación cards (severidad dot, cita en italics + border-left, mensaje, sugerencia opcional, checkbox).
+  - **`AnnotationPopover`** flotante (`src/components/editor/AnnotationPopover.tsx`): click en `.anno` lo abre con sage/pase/severidad/mensaje/sugerencia + botón "Descartar" (`removeAnnotationById`). Cierra en mousedown fuera o scroll.
+- **Store:** `Overlay = "lectura" | "pluma" | null`. Acción `openPlumaRoja()`.
+- **Topbar:** flag `FEATURES.plumaRoja = true`. Botón `seal` rojo con `data-testid="topbar-pluma-roja"`.
+- **E2E:** stub `sage_critique` deriva 3 citas distintas del texto real por pase para que 3×3 anotaciones siempre resuelvan a 9 ranges. `tests/e2e/pluma-roja.spec.ts` cubre: overlay abre con 3 paneles, 9 anotaciones tras run, apply produce 9 `.anno` inline, click anno abre popover + descartar elimina la mark, uncheck excluye del apply. **34/34 verde** (5 nuevos + 29 previos).
+
+## Decisiones de la sesión 6
+
+| Decisión | Por qué |
+|---|---|
+| **JSON-lines como formato del modelo** (no markdown estructurado) | Parser robusto, tolera ruido, una línea = una anotación. El modelo no tiene que pelear con escapes complejos. |
+| **Cita literal en vez de offsets PM** | El modelo no tiene forma confiable de calcular offsets de ProseMirror. Que copie un fragmento literal es ergonómico y verificable; el frontend resuelve la posición. |
+| **`findCitaRange` con whitespace normalizado** | El modelo puede insertar espacios extras o NBSPs; colapsar a un solo espacio en ambos lados hace match con tolerancia sin perder el mapa de posiciones. |
+| **Marks de TipTap en vez de `essay.anotaciones[]`** | Las marks viajan con el doc — abrir el ensayo re-renderiza las anotaciones for free. Un campo paralelo se desincroniza. |
+| **Estilo = EM/PR según `mode`** | Académico necesita rigor + evidencia (EM); blog necesita claridad + aplicabilidad (PR). El registro de la pasada cambia con el del ensayo. |
+| **Apply event en window, no en el store** | El overlay no necesita conocer al editor; dispatch + listen mantiene el editor desacoplado del flujo del modal. Mismo patrón que `sage:materialize-preguntas`. |
+| **Sin "aplicar sugerencia" automático en v1** | Reescribir el texto del usuario es destructivo y necesita preview. v1 muestra la sugerencia en el popover; en una sesión futura agregamos el botón con diff visible antes de aplicar. |
+| **Sin margin notes en v1** | Layout no trivial (necesita columna paralela al editor con anclaje por línea). Empezamos con popover-on-click — más simple, no compite por espacio. |
+
+## Qué quedó hecho en sesión 7 — Rúbrica + APA
+
+Decisión de producto (Noé, 2026-05-18): Benchmark se posterga; antes hay que dejar que el usuario defina los **criterios reales** de evaluación (los que pide el profesor) en lugar de inventar dimensiones genéricas. La rúbrica del ensayo se vuelve el modelo de datos compartido entre Pluma Roja y el Benchmark futuro.
+
+- **Modelo:** `Criterio { id, nombre, peso (1-5), descripcion }`, `Rubrica { criterios[] }`, opcional en `Essay`. `Pase` extendido con `"apa"`. `Anotacion` gana `criterioId?`. Round-trip Rust test añadido (`round_trip_preserves_optional_rubrica`).
+- **`RubricaOverlay`** (`src/components/lectura/RubricaOverlay.tsx`) — modal CRUD: add/edit/delete inline, peso por select 1-5, sin draft local (cada keystroke commitea al store que debounce 800ms). Flush forzado al cerrar el modal para no perder edits.
+- **Store:** `Overlay = "lectura" | "pluma" | "rubrica" | null`. `openRubrica()` + `updateRubrica(rubrica)` con autosave debounceado (mismo patrón que `updateContent`).
+- **Topbar:** botón `Rúbrica` con `data-testid="topbar-rubrica"` + contador `· N` cuando hay criterios.
+- **Inyección en Pluma Roja:** `critique({sage, pase, text, rubrica})` reenvía la rúbrica vía Tauri → sidecar. El sidecar formatea la rúbrica como bloque legible en el user prompt y le pide al sabio que adjunte `"criterioId"` cuando una anotación se alinee con un criterio. `buildAnotacion()` valida que el id devuelto exista en la rúbrica (descarta ids fantasma).
+- **Pasada APA:** cuarta pasada propietaria de la Empirista, sólo en `mode=academico`. Toggle "Revisar APA" en el header del modal (default ON en académico). Prompt instruye a revisar exclusivamente formato APA 7: paréntesis, coma, página en citas textuales, "et al." con 3+ autores, `&` dentro del paréntesis. El grid de paneles es ahora dinámico (`gridTemplateColumns: repeat(N, 1fr)`) — 3 columnas con APA off, 4 con APA on.
+- **Chips de criterio:** cada anotación con `criterioId` muestra un chip "criterio · {nombre}" en el card de Pluma Roja y en el popover inline del editor (con `title={descripcion}` para el tooltip largo).
+- **E2E:** stub `sage_critique` captura cada invocación en `window.__E2E_LAST_CRITIQUE__` (sage, pase, rubrica) para que los tests puedan asertar forwarding. Si llega rúbrica, el stub pone `criterioId` al primer item de cada pase. Slots de citas reorganizados para acomodar 4 pasadas sin solaparse. Nuevo `dumpCritiques(page)` helper. Spec `rubrica.spec.ts` (7 tests) cubre: CRUD, persistencia, count badge, APA visible en académico / oculto en blog / toggleable, rúbrica forwarded a cada pase, chip en card y popover. Spec `pluma-roja.spec.ts` ajustado para desactivar APA en los tests que esperaban 3 pasadas. **41/41 verde** + **9/9 Rust** (incluye round-trip rúbrica).
+
+## Decisiones de la sesión 7
+
+| Decisión | Por qué |
+|---|---|
+| **Rúbrica antes que Benchmark** | Los criterios reales del profesor deben definir las dimensiones del Benchmark; construir Benchmark con dimensiones fijas y refittear después era trabajo desperdiciado. La rúbrica también informa Pluma Roja de inmediato — doble valor del mismo modelo. |
+| **Peso 1-5 (no %)** | Más simple de capturar para Noé y para el Benchmark futuro (suma de pesos como denominador implícito). Si hace falta %, lo derivamos. |
+| **Sin draft local en el modal** | React 19 lint prohíbe `setState` sincrónico en `useEffect`. Con debounce en el store + flush-on-close el draft es redundante. Cada keystroke commitea al store; el modal lee siempre del current essay. |
+| **APA como pasada separada, no enriquecer Estilo** | Outputs distintos: estilo juzga voz/registro, APA juzga formato técnico. Mezclarlos diluye ambos. Pasada separada permite además toggle (no siempre quieres correr APA en cada revisión). |
+| **APA dueña: Empirista** | "Calidad de la evidencia" incluye que las fuentes estén bien citadas. Persona ya tiene la disposición correcta (rigor, formalismo). Práctico no tiene foco en formato; Crítico no es su dominio. |
+| **`criterioId` validado en frontend** | El modelo puede inventar ids. `buildAnotacion` descarta cualquier `criterioId` que no esté en la rúbrica real del ensayo. Defensa en profundidad. |
+| **Cita literal en JSON-lines, sin offsets PM** (sigue) | Mismo patrón que sesión 6. El stub deriva 3 citas distintas por pase (12 totales con APA) para que no se pisen. |
+| **Grid dinámico en el modal** | `repeat(N, 1fr)` se acomoda solo cuando APA on/off cambia el conteo de panes. Layout estable. |
+
+## Qué quedó hecho en sesión 7.5 — Fuentes + 3 preguntas
+
+Decisión de producto (Noé, 2026-05-18): cinco preguntas saturan; tres bien escogidas pegan más fuerte. Y el usuario no debería re-subir las fuentes cada vez que quiere interrogar — la biblioteca vive con el ensayo.
+
+- **5 → 3 preguntas por sabio.** Persona MDs actualizadas con "tres preguntas *poderosas*", sidecar prompt pide "tres preguntas poderosas". Stub E2E recortado a 3 por sabio; tests ajustados (consejo: 4×3 = 12 notes, antes 20).
+- **`Fuente { id, nombre, cita?, contenido, origen, archivoNombre?, agregadoEn }`** y `essay.fuentes?: Fuente[]`. Round-trip Rust test añadido (`round_trip_preserves_optional_fuentes`).
+- **`FuentesOverlay`** (`src/components/lectura/FuentesOverlay.tsx`) — modal CRUD: nombre, cita APA opcional, contenido, peso visual del archivo vs manual, contador "X palabras". Botones "+ Subir .txt / .md" y "+ Añadir manual". Sin draft local (commit por keystroke + debounce 800ms + flush-on-close).
+- **Store:** `Overlay += "fuentes"`. Acciones `openFuentes`, `addFuente`, `updateFuente`, `removeFuente`. Las tres primeras usan el autosave debounceado; `removeFuente` flush directo. Cuando no quedan fuentes el campo se borra del JSON (null cleanup).
+- **Topbar:** botón `Fuentes` con `data-testid="topbar-fuentes"` + badge `· N`.
+- **Lectura ↔ biblioteca:**
+  - Chip-row arriba del textarea con cada fuente guardada; click → carga su `contenido` al textarea y resalta el chip. Tooltip muestra la cita APA si existe. Editar el textarea desactiva el highlight (la fuente activa "se ensucia").
+  - El upload de archivo `.txt`/`.md` ahora también **guarda en la biblioteca** además de cargar al textarea — no más re-subir. La fuente subida queda con `origen: "archivo"` y `archivoNombre` original.
+- **Pluma Roja ↔ biblioteca:**
+  - `critique({sage, pase, text, rubrica, fuentes})` agregado fuentes al payload Tauri → Rust → sidecar (todo opcional, omitido si vacío).
+  - Sidecar formatea las fuentes como bloque `FUENTES DEL AUTOR:` en el user prompt, con instrucción explícita de leerlas como contexto y, en pasada APA, cruzar las citas formales con las referencias del borrador.
+  - Header del modal muestra un chip `Fuentes · N` cuando hay fuentes (al lado del chip de rúbrica).
+- **E2E:** stub `sage_critique` ahora captura también el payload de fuentes en `__E2E_LAST_CRITIQUE__`. `dumpCritiques()` lo retorna. Spec `fuentes.spec.ts` (7 tests) cubre: CRUD + persistencia + count badge, upload en Fuentes y en Lectura (ambos salvan en biblioteca), chip picker en Lectura, forwarding a las 4 pasadas de Pluma Roja, y la reducción 5→3 en interrogatorio. Spec sage ajustado (1 test: cambio de placeholder al subir → usa selector más estable). **48/48 verde** + **10/10 Rust**.
+
+## Decisiones de la sesión 7.5
+
+| Decisión | Por qué |
+|---|---|
+| **Biblioteca per-ensayo (no global)** | El 90% de las fuentes son específicas a un trabajo. Una biblioteca global cross-essays cambia el flow (autoría, búsqueda, dedup). Si Noé pide cross-essays, lo armamos como capa opcional encima — pero por ahora una sola fuente de verdad: el JSON del ensayo. |
+| **Upload en Lectura también guarda** | Era la queja directa: subir cada vez es fricción. Mismo gesto, doble valor: carga al textarea + persiste en biblioteca. La fuente queda disponible para próximas interrogaciones y para Pluma Roja. |
+| **Cita APA como campo separado** | Permite que la pasada APA pueda cruzar referencias del texto con la cita formal de cada fuente. También es legible en el chip-tooltip. |
+| **`.txt`/`.md` por ahora; PDF/Word deferred** | Parsear PDFs en cliente requiere otra dep o un parser propio. Hasta que el flujo se sienta sólido, mejor TXT/MD y un toast para los otros formatos. |
+| **Fuentes auto-inyectadas en Pluma Roja (no opt-in)** | El usuario ya las guardó deliberadamente; tener un toggle para incluirlas-o-no metería un paso extra cada vez. Si crece el prompt al punto de doler, agregamos un selector ahí (no aquí). |
+| **Tres preguntas por sabio** | Cinco saturan; las dos últimas casi siempre son variaciones. Forzar a elegir las tres *poderosas* sube la calidad. Aplica a todas las personas en el `Interrogatorio inicial`; otras fases no cambian. |
+| **Sidecar formatea las fuentes (no el frontend)** | El frontend pasa fuentes como array; el sidecar conoce el shape del prompt. Mantiene la separación: el cliente envía datos, el sidecar arma el system+user message. |
+
+## Qué quedó hecho en sesión 8 — Selector de sabios/pasadas por modo
+
+Decisión de producto (Noé, 2026-05-19): no todos los sabios aportan lo mismo en un ensayo académico vs un post de blog, y el usuario debe poder skipear voces para ahorrar tokens. Además: cinco sabios siempre era saturación; con selectores aplicas la voz justa.
+
+- **Helper `src/lib/sages.ts`** centraliza los defaults:
+  - `defaultSagesForMode("academico")` → `["em","sis","cri"]` (EM aporta evidencia/método; SI estructura; CR steelman; PR queda fuera porque la pregunta práctica suele sacar al académico del marco).
+  - `defaultSagesForMode("blog")` → `["sis","pra","cri"]` (PR es central — el blog vive de aplicabilidad; EM puede ser pedante).
+  - `defaultPasesForMode("academico")` → 4 pasadas (incluye APA).
+  - `defaultPasesForMode("blog")` → 3 pasadas (APA n/a).
+  - Exporta `ALL_SAGES` y `ALL_PASES` como source of truth para iterar en UI.
+- **Lectura — selector de sabios en modo consejo:**
+  - `LecturaInner` recibe `essayMode` y arranca con `selectedSages = defaultSagesForMode(mode)`.
+  - El header en consejo ahora muestra **4 avatares como checkboxes** (`role="checkbox"`, `aria-checked`, `data-active`). Activos con ring; inactivos con `grayscale + opacity-35`.
+  - El botón "Interrogar" se deshabilita cuando `selectedSages.length === 0`.
+  - Subtitle dinámico: `${N} ${N===1?"voz":"voces"} sobre el mismo texto`.
+  - Grid del panel derecho se acomoda al conteo: 1 col, 2 cols, 3 cols, o 2×2 con 4. (Para 4 mantengo el 2×2 que ya conocía la UI; para 1-3 uso lineal.)
+  - State vive solo en el modal (no persistido). Cada apertura reaplica los defaults.
+- **Evaluar — selector de pasadas:**
+  - Reemplacé el `apaOn: boolean` por `selectedPases: Pase[]` inicializado vía `defaultPasesForMode(mode)`.
+  - **Quité el toggle APA del header.** En su lugar, una franja `PaseSelector` debajo del header con chips clickables (uno por pasada). Cada chip muestra el avatar del sabio responsable + nombre de la pasada. Activo: borde sólido + paper fill; inactivo: opacidad reducida.
+  - `availablePases` filtra fuera APA en modo blog (la pasada no aplica conceptualmente).
+  - Botón "Iniciar revisión" se deshabilita con `selectedPases.length === 0`; aparece un empty-state hint en el grid: "Selecciona al menos una pasada arriba para empezar."
+  - El sabio gobernante de cada pasada **no es reasignable** (Coherencia=SI, Estilo=EM/PR según modo, Argumento=CR, APA=EM). Mantiene coherencia conceptual.
+- **Tests actualizados:**
+  - El test "council mode interrogates all four sages and materialises 12 notes" → "council mode (academico default) runs 3 sages and materialises 9 notes" (EM/SI/CR, sin PR).
+  - 4 tests de `pluma-roja.spec.ts` que usaban `pluma-apa-toggle.uncheck()` → ahora `pluma-pase-toggle-apa.click()`.
+  - Tres tests de `rubrica.spec.ts` para APA migrados al nuevo selector + assertion vía `data-active`.
+  - Nuevo `selectors.spec.ts` (8 tests): defaults por modo en Lectura y Evaluar, toggle on/off, empty-state disable en ambos, "solo 2 pasadas" runs the selected. **56/56 verde** + **10/10 Rust** intactos.
+
+## Decisiones de la sesión 8
+
+| Decisión | Por qué |
+|---|---|
+| **Mapeo de defaults por modo** | El mapeo nació de leer cada persona en clave del registro de cada modo: EM rinde en académico, sufre en blog; PR es lo opuesto; SI y CR funcionan transversal. No es arbitrario — sigue la voz que cada sabio carga. |
+| **Selector por pasada en Evaluar, por sabio en Lectura** | Lectura es interrogación de un texto: lo que importa es qué *voz* lo cuestiona. Evaluar es revisión por dimensiones (estructura, voz, argumento, formato): la unidad conceptual es la pasada, no el sabio. Cada flujo expone su unidad natural. |
+| **No reasignable: el sabio de una pasada es fijo** | Argumento es voz del Crítico por diseño; meter PR ahí sería diluir la pasada. La rotación EM↔PR en Estilo es la única excepción justificada (registro académico vs blog) y ya existía. |
+| **No persistir la selección por ensayo (de momento)** | Defaults sensatos por modo cubren el 90% de casos; persistir agregaría estado y complicaría la UX. Si Noé termina reconfigurando cada vez, lo persistimos en una sesión futura. |
+| **Empty-state explícito + botón disabled** | Si dejas 0 sabios o 0 pasadas, no se silencia — el botón se deshabilita y el panel muestra un hint. Evita corridas accidentales sin sentido. |
+| **State del modal, no del store** | El selector es parte de la "intención de esta corrida", no del documento. Convertirlo en state del store implicaría reset-on-close manual. State local es más simple. |
+| **Indicadores visuales (`data-active`)** | Uso atributo `data-active` en los toggles. Es mejor que `aria-checked` para tests (más predecible que `.toBeChecked()` que requiere un `<input>` nativo) y queda compatible con CSS attribute selectors si después quiero estilarlos vía `[data-active="true"]`. |
+| **Quitar `pluma-apa-toggle` (breaking de tests)** | Migré los 7 tests existentes al nuevo selector. La API anterior estaba diseñada para una sola opción (APA). El nuevo selector es la generalización natural. |
+
+## Qué quedó hecho en sesión 9 — Benchmark derivado de las anotaciones
+
+Decisión de producto (Noé, 2026-05-19): "el benchmark debe ser real y coherente — un 10/10 significa que no hay nada más que arreglarle." Eso descartó la arquitectura obvia (pedirle al modelo "puntúa 0-10") porque ese número es ruido — hoy te da 8, mañana 7, el 10/10 nunca se siente perfecto. La arquitectura que SÍ cumple el contrato:
+
+**El score se deriva determinísticamente de las anotaciones que el consejo encontró en Evaluar. No se le pregunta al modelo.**
+
+- 0 anotaciones contra un criterio → 10/10 (literalmente: el consejo no tiene nada que decirte).
+- Cada anotación resta según severidad: `alta -2`, `media -1`, `baja -0.5` (calibración "suave", anima a iterar).
+- Descartar una anotación en el editor / drilldown → el score sube automáticamente.
+- Per-criterio: solo cuentan anotaciones con `criterioId` que matchea. Overall: promedio ponderado por `peso`, con un bucket "general" (peso=1) para las anotaciones huérfanas.
+- Sin anotaciones (no has corrido Evaluar): overall = `null`, UI muestra "—" y CTA "Corre Evaluar para puntuar". No mentimos con un 10/10 prematuro.
+
+Implementación:
+
+- **`src/lib/benchmark/score.ts`** — módulo puro:
+  - `extractAnotacionesFromContent(content)`: walker sobre el TipTap doc que pulla cada `annotation` mark + dedupe por id (las marks pueden repetirse en text-node splits).
+  - `computeBenchmark(anotaciones, rubrica)`: agrupa por `criterioId`, score por criterio con `max(0, 10 − ΣpenaltyBySeveridad)`, overall = weighted avg por peso + bucket general (peso 1 si hay huérfanas).
+  - Resultado con flags `hasRubrica` / `hasAnotaciones` para que la UI elija estado.
+  - Sin React, sin store. Testeable directo.
+- **`Scorebar.tsx`** — reemplazado el mock por el renderer real:
+  - Overall ring + N rings per-criterio (uno por criterio en la rúbrica) + opcional ring "Sin criterio" cuando hay huérfanas.
+  - Color del ring per-criterio tinta hacia el sabio dominante de sus anotaciones (EM ámbar, SI teal, PR coral, CR morado).
+  - Tres estados manejados: sin anotaciones (— + CTA), con anotaciones sin rúbrica (overall + nudge "Define una rúbrica"), con ambos (rings completos).
+  - CTA contextual a la derecha: "Evaluar" (si nunca corrió) / "Re-evaluar" (refrescar).
+- **`BenchmarkDrilldown.tsx`** — panel que sube desde el Scorebar cuando clickeas un ring. Lista las anotaciones de ese criterio con sage chip, severidad dot, mensaje, sugerencia, botón Descartar.
+  - Click en una card → `scrollIntoView` de la mark en el editor + flash CSS (`@keyframes anno-flash` con sombra seal pulsando 1.6s).
+  - Descartar → dispatch `pluma-roja:dismiss` con el id → EditorPane escucha y ejecuta `removeAnnotationById` (mismo path TipTap que ya usa el popover inline). Doc = single source of truth, Scorebar recompute automático.
+  - Cierra con × o Esc.
+- **Feature flag `FEATURES.benchmark = true`.** El Scorebar ahora vive en `page.tsx` para ensayos en modo editor.
+- **Tests:**
+  - **`score.spec.ts` (9 tests puros)** — penalties calibradas, null cuando no hay datos, severidad escalonada, weighted overall, floor en 0, anotaciones sin criterioId solo cuentan en overall, walker dedupea splits.
+  - **`benchmark.spec.ts` (6 E2E)** — empty state, sin rúbrica → nudge, rings reales tras Evaluar, click ring → drilldown, Descartar baja count + sube score, click en card aplica `.anno-flash`, dismiss-all vuelve a estado vacío. **71/71 verde** + **10/10 Rust**.
+
+## Decisiones de la sesión 9
+
+| Decisión | Por qué |
+|---|---|
+| **Score derivado de anotaciones, no pedido al modelo** | Es lo que hace que un 10/10 signifique algo. El número no flota — está atado a hallazgos visibles que puedes ver, dismissear o resolver. Pedir al modelo "puntúa esto" es introducir ruido sin acción. |
+| **Penalty `alta -2 / media -1 / baja -0.5` (suave)** | Calibración tal que un ensayo con 2-3 problemas medios pueda llegar a 7-8 (anima a iterar). Una alta sola te deja en 8 — duele, pero no es brutal. Constants exportadas para que el día que cambien sean un solo touch. |
+| **Anotaciones sin criterioId van solo al overall** | Per-criterio queda exclusivo de hallazgos atados a ese criterio. Distribuirlos sería inventarse de dónde vienen. La opción "bucket general visible" la dejamos como ring opcional cuando aplica — visible pero separado. |
+| **Empty state honesto (`—` no `10`)** | Sin haber corrido Evaluar, no tenemos derecho a decir 10/10. El "—" + CTA es más honesto. Esto requirió que `overall` sea `number \| null`. |
+| **Drilldown como subir-panel, no modal** | El Scorebar es ambient (vive abajo). El drilldown sube desde ahí — el usuario sigue viendo el editor, puede scrollear, puede dismissear sin perder contexto. Modal sería forzar foco y romper el flujo. |
+| **`removeAnnotationById` desde el drilldown vía event window** | El editor tiene la autoridad sobre el doc. Drilldown emite un event, EditorPane lo recibe y aplica. Mismo patrón que `pluma-roja:apply`. Mantiene la única fuente de verdad. |
+| **`scrollIntoView` + flash CSS sobre la mark** | Diagnóstico → acción directa. Click en una anotación del drilldown → te lleva al texto y lo resalta 1.6s. El usuario no tiene que buscar manualmente. |
+| **Color del ring por sabio dominante de sus anotaciones** | El color comunica algo: "este criterio lo está jodiendo principalmente el Crítico" se ve a simple vista (ring morado). Mejor que un color uniforme. |
+| **Sin tests con Vitest / Jest** | El módulo es puro pero Playwright también lo puede importar y testear. Una dep menos. Para nivel benchmark v1 alcanza. |
+
+## Aprendido en sesión 9
+
+- **Anclar la métrica a una acción real cambia su naturaleza.** Un score-pedido-al-modelo es opinable; un score derivado de hallazgos concretos es accionable. La diferencia se siente en la UX: el usuario no se pelea con el número, se pelea con las anotaciones que están detrás.
+- **Empty states honestos > defaults optimistas.** Mostrar 10/10 antes de haber corrido Evaluar habría sido tentador, pero rompía el contrato "10 = perfecto". Un "—" es UI más fea pero verdadera.
+- **`box-shadow` animado funciona en marks inline mejor que `outline`.** outline corta en bordes de línea; box-shadow se mantiene continuo con `display: inline`.
+- **TipTap marks como single source of truth ahorra storage paralelo.** El score se computa fresh sobre el doc; no hay que sincronizar dos estados.
+
+## Qué quedó hecho en sesión 9.5 — Estados honestos del Benchmark
+
+Decisión de producto (Noé, 2026-05-19): "Que va a pasar cuando ya tengo correcciones pero no evaluación?" El bug conceptual: el Scorebar no distinguía entre **"nunca evaluado"** y **"evaluado y descartaste todo"**. Ambos terminaban en "—" + CTA "Corre Evaluar", lo cual es **incorrecto** para el segundo caso — eso ES el 10/10 que el usuario quería. Mi propio test "perfect-essay flow" delataba el problema (asertaba "—" cuando el nombre prometía 10.0). Tu pregunta apuntó exactamente a ese hueco.
+
+Implementación:
+
+- **`EvaluacionMeta { evaluadoEn: ISO, pasadasCubiertas: Pase[] }`** persistida en `essay.evaluacionMeta?`. Rust storage + round-trip test (11/11 Rust verde). `EssayMeta` la omite (no viaja en la lista).
+- **`recordEvaluacion(pasadasCubiertas)`** en el store: sincroniza `evaluadoEn` con `essay.updatedAt` actual para que la aplicación misma no marque stale. Llamada vía `queueMicrotask` desde EditorPane después de que las marks settlearon.
+- **`pluma-roja:apply` event extendido** con `pasadasCubiertas` en el detail. PlumaRojaOverlay siempre dispatcha (incluso con 0 anotaciones) — un consejo limpio sigue siendo una evaluación válida.
+- **`computeBenchmark({...})` refactorizado** a args con objeto. Devuelve además `wasEvaluated`, `pasadasCubiertas`, `pasadasDisponibles`, `missingPasadas`, `coverageRatio`, `isStale`.
+- **`PENALTY_PER_MISSING_PASADA = 1`**: cada pasada no corrida resta 1 punto del overall. Honra la regla "no 10/10 si no corriste todas". Per-criterio queda intacto.
+- **Estados del Scorebar** (5 ahora, no 3):
+  - **Nunca evaluado**: ring punteado en `—` + "Sin datos del consejo todavía" + CTA **Evaluar**.
+  - **Evaluado + clean + cobertura completa**: ring en **10.0** (ok green) + "Sin pendientes — el consejo no tiene nada que decir" + CTA **Re-evaluar**.
+  - **Evaluado + clean + cobertura parcial**: ring capped por penalty (10 − missing×1) + "Sin pendientes en lo revisado · cobertura 3/4 · faltan {pasadas}" + CTA Re-evaluar.
+  - **Evaluado + con issues**: score real + breakdown + chip de cobertura si parcial + CTA Re-evaluar.
+  - **Stale** (sobre cualquiera de los anteriores): pill `· stale` al lado del label "Benchmark" + ring tinta ámbar + tooltip en CTA "el ensayo cambió desde la última revisión".
+- **`isStale`** se calcula con `essay.updatedAt > evaluacionMeta.evaluadoEn`. Sincronizar evaluadoEn a updatedAt en `recordEvaluacion` evita falso positivo del apply.
+- **Tests:** 13 unit tests en `score.spec.ts` (incluyen los 5 estados nuevos, partial coverage, isStale, false-positive negative) + 4 nuevos E2E en `benchmark.spec.ts` (perfect-state-real-10, never-evaluated, partial-cap-9, stale-indicator). **81/81 verde**.
+
+## Decisiones de la sesión 9.5
+
+| Decisión | Por qué |
+|---|---|
+| **`recordEvaluacion` vía `queueMicrotask`** | Las marks se aplican vía `editor.chain().setAnnotation().run()` que dispara `onUpdate` síncrono → `updateContent` → nuevo `updatedAt`. Diferir el `recordEvaluacion` un microtask asegura leer el `updatedAt` final, no uno intermedio. |
+| **Sync `evaluadoEn = cur.updatedAt`** en `recordEvaluacion` | Si usara `nowIso()`, habría drift contra el `updatedAt` del último onUpdate. Sincronizar elimina el falso positivo "stale right after apply". |
+| **Penalty plano por pasada faltante** (1 punto) | Más simple que ratio multiplicativo. Honra tu regla "no 10/10 sin cobertura completa" en lo justo: 1 missing → 9, 2 missing → 8, etc. Coherente con la escala de severidades. |
+| **Dispatch del event incluso con 0 anotaciones** | Una corrida limpia (consejo no encontró nada) es información valiosa: es el 10/10. Antes hacía `if (out.length === 0) onClose()` y se perdía. |
+| **Ring color por estado** (ok green / ámbar stale / seal red) | Cada estado tiene una lectura visual instantánea. Verde = perfecto. Ámbar = el dato está caduco. Rojo = hay trabajo. |
+| **Per-criterio no se penaliza por cobertura** | Los criterios miden dimensiones del ensayo independientes de qué pasadas corriste. Penalizar per-criterio mezclaría dos cosas. La cobertura es propiedad del overall. |
+| **Stale es banner, no bloqueo** | El usuario sigue viendo el score; solo se le advierte que el dato puede estar caduco. No le ocultamos el número (sería paternalista). Decide él si re-evalúa. |
+| **Test del bug original conservado, ahora aserta 10.0** | El "perfect-essay flow" original pasaba pero mintiéndose en el comentario ("aquí cae a —, intencional"). Ahora aserta exactamente lo que el usuario pidió. La inconsistencia que tú notaste queda lock-eada en el test suite. |
+
+## Aprendido en sesión 9.5
+
+- **Tests amigables que pasan pero mienten son peligrosos.** El "perfect-essay flow" pasaba pero el comentario contradecía el nombre. Cuando el usuario pregunta algo aparentemente inocente, vale la pena revisar dónde hicimos paz con una inconsistencia.
+- **Distinguir "ausencia de dato" de "dato significativo igual a cero".** "Sin evaluar" y "evaluado perfecto" no son lo mismo; usar `null` para uno y `0` para el otro permite UI honesta. Más en general: no colapsar estados conceptualmente distintos en el mismo valor.
+- **`queueMicrotask` para esperar a que termine un side-effect síncrono pero recursivo.** Mejor que `setTimeout(0)` porque mantiene el ordering predecible dentro del mismo tick.
+- **Estados se acumulan; mapearlos antes de codear.** Pasamos de 3 a 5 estados del Scorebar — el ejercicio de listarlos en tabla antes de codear hizo que la implementación fuera mecánica.
+
+## Qué quedó hecho en sesión 10 — Idioma, click-to-apply, polish del topbar
+
+Dos features de usabilidad pedidas por Noé en uso real + un pulido visual:
+
+### A. Selector de idioma (ES / EN)
+
+- `Essay.language?: "es" | "en"` (opcional para compatibilidad con ensayos viejos; default "es" en el renderer cuando ausente).
+- Persistencia: Rust storage gana `pub language: Option<String>` con round-trip test (`round_trip_preserves_optional_language`).
+- Store action `updateLanguage(language)` con flush inmediato (mismo patrón que `updateMode`).
+- **Toggle en el topbar** al lado del Mode pill — pill compacto ES/EN con `data-active` para tests + `data-testid="topbar-language-{es|en}"`. Centro del topbar ahora aloja Mode + Language + Council.
+- **Sidecar:** `interrogate` y `critique` aceptan `language?: "es" | "en"`. Validado en Rust (`unknown language: ...`) antes de forwardear.
+- **Prompts:** nueva función `languageDirective(lang)` que inyecta una instrucción explícita al inicio del user prompt: "Respondé en español" / "Respond in English". Las personas (`prompts/*.md`) se quedan en español — definen voz y disposición; el modelo traduce el carácter al idioma de salida. Proper nouns (Edmondson, Meadows, etc.) se mantienen.
+- **Ejemplo localizado:** `exampleLineFor(lang)` da el ejemplo JSON con valores `mensaje`/`sugerencia` en el idioma de destino. Las llaves (cita/severidad/mensaje/sugerencia/criterioId) se quedan en español porque son schema técnico.
+- **Frontend:** `interrogate({language})` + `critique({language})` lo forwardean. `LecturaInner` y `PlumaInner` reciben `essayLanguage` como prop y lo propagan a cada llamada del sabio.
+- **E2E:** stub captura `language` en `__E2E_LAST_INTERROGATE__` + `__E2E_LAST_CRITIQUE__`. `dumpInterrogates()` helper nuevo. Spec `language.spec.ts` (4 tests): default ES persiste, toggle a EN persiste, interrogate forwardea language, critique forwardea language a las 4 pasadas, persiste al cerrar/reabrir el ensayo.
+
+### B. Click-to-apply en sugerencias
+
+Antes: la sugerencia del sabio era texto read-only en el popover. El usuario tenía que copiarla y reemplazar manualmente. Ahora: un click reemplaza el texto subrayado por la sugerencia y quita la mark. El Scorebar recomputa automático.
+
+- **Nuevo comando TipTap** `applyAnnotationSuggestion(id, sugerencia)` en `Annotation.ts`:
+  1. Walk el doc por marks con ese id, capturar `firstFrom` y `lastTo`.
+  2. Detectar si la mark cruza bloques (paragraph/heading) — heurística con la posición del último block boundary visto. Si cruza → `return false` (no rompe párrafos al merge).
+  3. `tr.insertText(sugerencia, firstFrom, lastTo)` reemplaza el rango.
+  4. `tr.removeMark(firstFrom, firstFrom + sugerencia.length, this.type)` — el texto insertado hereda marks del borde izquierdo; las quitamos explícito para que la anotación desaparezca.
+- **Popover (`AnnotationPopover.tsx`):** botón "Aplicar sugerencia" cuando la anotación tiene `sugerencia`. Si la mark cruza bloques → `window.alert("La sugerencia cruza varios bloques (párrafo/heading). Aplícala manualmente.")`.
+- **Drilldown (`BenchmarkDrilldown.tsx`):** mismo botón en cada card. Dispatcha `pluma-roja:apply-suggestion` event con `{id, sugerencia}`. `EditorPane` escucha y aplica via el comando — mismo path que el popover.
+- **Undo:** `⌘Z` revierte naturalmente (es una transacción TipTap normal).
+- **E2E:** spec `apply-suggestion.spec.ts` (4 tests): popover apply reemplaza texto + quita mark; "Aplicar" se oculta cuando no hay sugerencia; drilldown apply funciona idéntico; Scorebar overall recomputa después.
+
+### C. Polish del topbar (overflow a anchos pequeños)
+
+Captura de Noé mostró que el topbar se rompía a anchos chicos: el badge "guardado · 5m" hacía wrap a dos líneas, había un botón "Benchmark" placeholder sobrante, y los gaps eran amplios.
+
+- **Quité el botón "Benchmark ⌘B"** del topbar — era placeholder de sesión 1 sin handler. El benchmark real es el Scorebar siempre visible al fondo.
+- **`Badge.tsx`** ahora tiene `whitespace-nowrap` + `flex-none` (el badge ni el dot interno se rompen).
+- **Layout más resistente:** grid `minmax(0,1fr)_auto_minmax(0,1fr)` (antes `1fr_auto_1fr` no comprimía bajo el contenido). Padding `px-7 → px-5`, gap `gap-6 → gap-4`, internos `gap-2.5 → gap-2`. Recupera ~30px horizontales.
+- **Breadcrumb del título** ahora usa `truncate min-w-0 flex-1` (sin el `max-w-[280px]` fijo) — se ajusta al espacio real. Las palabras fijas ("ensayos" / slash) tienen `whitespace-nowrap` + `flex-none` para que solo el título recortable se trunque.
+- **Sección derecha:** `flex-nowrap overflow-hidden` — si en algún futuro un botón nuevo no cabe, se clipea (no wraps feo). Hoy con los 4 botones (Board · Fuentes · Rúbrica · Interrogar · Evaluar) cabe holgado.
+
+**89/89 E2E verde** + **12/12 Rust verde**.
+
+## Decisiones de la sesión 10
+
+| Decisión | Por qué |
+|---|---|
+| **Personas en español, traducción en runtime** | Las personas son voz curada — cambiar idioma literal a inglés exigiría re-curar la voz entera. El modelo traduce *carácter* al idioma destino de manera natural. Si en uso real la voz EN se siente débil, hacemos variantes EN explícitas como sesión aparte. |
+| **Llaves JSON en español aunque el idioma sea EN** | Las llaves son schema técnico (cita/severidad/mensaje/sugerencia/criterioId) — el frontend las parsea con esos nombres. Cambiarlas por idioma significaría tener dos parsers. Los valores SÍ se traducen, que es lo único que el usuario ve. |
+| **Click-to-apply respeta block boundaries** | Si la mark cruza un paragraph/heading boundary, `tr.insertText` haría merge de los bloques. Mejor que el comando refuse y muestre un toast, que romper la estructura del doc silenciosamente. v2 puede manejar este caso con split inteligente. |
+| **Apply remueve el mark, no lo deja pegado** | `insertText` hace que el texto nuevo herede marks del borde izquierdo (incluyendo la anotación). Sin el `removeMark` después, la sugerencia quedaría subrayada como si todavía hubiera issue. Lo más natural es: aplicar = el issue se resolvió = mark se va. |
+| **Botón "Aplicar" oculto sin sugerencia** | No todas las anotaciones traen sugerencia (el modelo puede decidir solo señalar sin proponer arreglo). Mostrar un botón disabled era confuso; ocultarlo es honesto. |
+| **Quitar el Benchmark del topbar (breaking de mock)** | El Scorebar al fondo cubre la misma necesidad y vive siempre visible. Tener dos surfaces para lo mismo (botón + bar) era ruido. |
+| **`minmax(0, 1fr)` en lugar de `1fr` en grid** | `1fr` se expande al contenido; `minmax(0, 1fr)` permite comprimir. Necesario para que las columnas con `truncate` realmente trunquen y no estiren el grid. |
+
+## Qué quedó hecho en sesión 11 — Build distribuible (Fase 0 del ROADMAP)
+
+El bloqueador único para que `npm run tauri:build` produjera un `.app` funcional fuera de dev: el sidecar Node y los prompts vivían fuera del bundle, así que en producción Rust no los encontraba (cwd en `/`, walk-up fallaba) y el sidecar nunca arrancaba. Resultado: Interrogar / Evaluar colgados en "el consejo piensa…" para siempre.
+
+Implementación:
+
+- **`bundle.resources` en `tauri.conf.json`** declara `../sidecar/dist/sage.js` y `../prompts/*.md`. Tauri los copia a `Resources/_up_/sidecar/dist/sage.js` y `Resources/_up_/prompts/*.md` dentro del `.app`.
+- **`src-tauri/src/sidecar.rs`** ahora resuelve en tres pasos (en orden): (1) env var explícita (`SAGE_SIDECAR_PATH` / `SAGE_PROMPTS_DIR`), (2) `app.path().resolve(..., BaseDirectory::Resource)` — el path de producción, (3) walk-up desde `cwd` — el fallback de dev. `sidecar_path()` y `prompts_dir()` aceptan `&AppHandle`; el helper `find_walking_up(start, segments, max_hops)` está extraído para que los tests lo puedan ejercer sin mockear `AppHandle`.
+- **`SidecarStatus { Unknown / Up / Down{message} }`** — serializado con `tag = "state"` para que el renderer haga `switch(status.state)`. Se cachea en `SidecarState.status` (`Mutex<SidecarStatus>`) y se emite por `sage://status` cada vez que cambia. La task que reaperea al child también marca Down si el proceso muere después de un spawn exitoso — y limpia el `stdin` para que las siguientes llamadas a `sage_interrogate`/`sage_critique` fallen rápido con error claro en vez de colgar.
+- **Comando `sage_status`** registrado en `lib.rs` para que el renderer pueda consultar el estado actual al mount (cubre la race "el evento Down ya se emitió antes de que mi listener se enganchara").
+- **Mensajes de error legibles** sustituyen los técnicos. Spawn-fail: "No pudimos arrancar el consejo (¿está `node` en el PATH?). Detalle: …". Resource-missing: "No encontramos `sage.js` — reconstruí la app con `npm run tauri:build:full`". Exit inesperado: "El consejo cerró inesperadamente (…). Reiniciá la app."
+- **Frontend:** `src/lib/sidecar/status.ts` expone `useSidecarStatus()` (skip en dev sin Tauri para no confundir UI iteration). `src/components/SidecarBanner.tsx` se muestra solo cuando `state === "down"` — pill rojo arriba del editor con el detalle y un hint "verificá que `node` esté en el PATH y Claude Code esté instalado y logueado". Montado entre Topbar y el área principal (grid de page.tsx pasa a 4 filas; cuando el banner es null la fila colapsa a 0).
+- **Sin auto-respawn aún** (Fase 1.2 del ROADMAP). El path de recuperación es "Reiniciá la app", honesto y simple.
+- **`tauri:build:full` en `package.json`**: `npm run sidecar:build && tauri build`. Es el comando recomendado para release; si solo corres `tauri:build` y olvidaste rebuildear el sidecar, el `.app` se construye con la versión vieja (o vacía). Documentado en README + ROADMAP.
+- **README** actualizado: estado a sesión 11, requisitos del usuario final (macOS 12+ / Node 20+ / Claude Code logueado), explicación de qué se empaca dentro del `.app` y dónde aterriza (`Contents/Resources/_up_/…`), comportamiento del banner rojo, smoke test checklist post-build.
+
+**Tests:** 5 unit tests nuevos en `sidecar::tests` — `walks_up_to_find_target_one_hop`, `walks_up_finds_target_at_start`, `returns_none_when_target_missing`, `stops_after_max_hops`, `sidecar_status_serializes_with_state_tag` (locks la shape JSON que el frontend espera). **17/17 Rust verde**. Y `tests/e2e/sidecar-banner.spec.ts` (3 nuevos): banner oculto cuando `up`, banner visible al boot con `sage_status` Down, banner reactivo a un `sage://status` Down post-mount via `__E2E_DISPATCH`. El stub ahora respeta un override `__E2E_SIDECAR_STATUS__` para forzar el estado deseado por test. **92/92 E2E verde** (89 anteriores + 3 nuevos). Lint limpio. Playwright corrido contra el `next dev` ya en :3000 con un `playwright.config.session11.ts` temporal (Next 16 bloquea dos instancias del mismo proyecto, así que el `:3100` del config default no podía levantar). Anotado para Fase 1 — el harness de tests debería detectar y matar `next dev` huérfanos.
+
+## Decisiones de la sesión 11
+
+| Decisión | Por qué |
+|---|---|
+| **3 capas de resolución (env > Resource > walk-up)** en lugar de detectar dev/prod | Más robusto que `cfg!(debug_assertions)`: la env var es escape hatch universal (CI, devs con setup raro); Resource es el camino de producción declarativo en `tauri.conf.json`; walk-up es el fallback de dev sin tener que recordar configurar nada. Cada capa cae a la siguiente si no aplica — no hay "modo" que pueda equivocarse. |
+| **Mantener walk-up incluso en builds release** | Si por alguna razón el resource no resuelve (corrupción del bundle, custom build), tener un fallback honesto evita un `.app` muerto. Costo: 6 stats de filesystem en boot — invisible. |
+| **`SidecarStatus` con `tag = "state"`** | El renderer hace `switch(status.state)` para discriminar las variantes. La forma `{ state: "down", message: "..." }` es JSON predecible. El test serde-shape la fija para que un refactor del enum no rompa silenciosamente la UI. |
+| **Cachear el último status en `SidecarState`** + emitir evento | El renderer puede montar después del primer emit (especialmente al abrir el `.app` por primera vez), así que necesita poder *preguntar*. Si solo emitiéramos, una race ocasional dejaría el banner sin aparecer. |
+| **Banner es read-only por ahora (sin Reintentar)** | Para llamar a `sidecar::spawn` desde un Tauri command necesitaríamos refactorizar la signatura (recibir state como argument, lockear stdin con safety). Es trabajo para Fase 1.2. v1: "Reiniciá la app" — fricción real pero honesta. |
+| **Banner skipped en dev sin Tauri (`npm run dev`)** | Iterar UI en el browser tradicional no usa el sidecar; mostrar un banner rojo en ese contexto sería falsa alarma constante. Detectamos `__TAURI_INTERNALS__`. |
+| **`tauri:build:full` separado de `tauri:build`** en vez de añadir `prebuild` al script existente | Hace explícito que rebuildear el sidecar es parte del release. Un dev que quiere iterar el build del `.app` sin tocar el sidecar (debugging del bundling, p.ej.) tiene `tauri:build` puro disponible. Compromiso entre "magia que olvida pasos" y "tipear demasiado". |
+| **`set_status` también marca Down en el reap** | Sin esto, si el child crashea después de spawn, el banner nunca aparece pero las llamadas siguen fallando con "sidecar is not running" en cada invoke. Detectar el crash en el wait y reflejarlo en UI cierra el loop. |
+| **`find_walking_up` extraído como helper puro** | El `AppHandle` es prácticamente intesteable sin levantar Tauri runtime. Pulled la lógica pura del walk-up afuera; los tests de unit la ejercen contra directorios tmp reales. |
+| **Empacar `prompts/*.md` aunque sean assets del Node sidecar** | Las personas viven en `prompts/` y el sidecar las lee por FS (no las bundleamos en el `sage.js`). Empacarlas como resource del Tauri bundle es coherente: ambas viven en `Contents/Resources/` y el sidecar las encuentra via `SAGE_PROMPTS_DIR` que Rust setea con el path resuelto. |
+
+## Aprendido en sesión 11
+
+- **Las tres capas (env > Resource > walk-up) son un patrón limpio para "funciona en dev sin configurar nada, en prod via el bundle, y siempre se puede forzar via env".** Es el mismo patrón que ya usabamos en una sola función (env > walk-up); añadir la capa de Resource sin perder dev fue solo encadenar.
+- **`SAGE_PROMPTS_DIR` que ya existía es exactamente lo que necesitábamos.** El sidecar Node lee esa env desde Rust. Bastó hacer que Rust la resuelva via Resource en prod — ningún cambio del lado de Node. Las APIs cross-language pequeñas, bien pensadas, escalan.
+- **Falla rápida con mensaje legible > silencio infinito.** Ver "el consejo piensa…" para siempre en producción habría sido el infierno de UX. Spawn-fail + banner rojo desde el segundo 1 hace que el usuario sepa qué arreglar antes de tocar ningún botón.
+- **Cachear estado + emitir evento cubre las races de mounting.** Es un patrón general: cualquier estado de boot importante necesita ambos. Solo evento → race window al inicio. Solo cache → no hay reactividad. Ambos → robusto.
+- **Las "fixtures de archivo" para tests de walk-up son baratísimas con `tempdir`.** No vale la pena mockear FS; usar directorios temporales reales hace los tests más fieles y siguen siendo rápidos (<1ms cada uno).
+- **El `playwright.config.session11.ts` temporal es un workaround OK, no una solución.** Cuando Next 16 bloquea dos instancias del mismo proyecto, lo correcto es hacer que el script de tests detecte y kill el `next dev` huérfano, o usar un puerto distinto y un proyecto distinto. Anotado para Fase 1 cuando refactoremos el harness de tests.
+
+## Sesión 12 (próxima) — TBD
+
+Algunas posibilidades con el sistema ya estable:
+- **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
+- **Export** (markdown / PDF con o sin anotaciones).
+- **Anotaciones por sabio en Lectura** (que las preguntas también puedan tagearse a un criterio y entren al benchmark si el usuario decide).
+- **Comparador de ensayos** (dos benchmarks lado a lado).
+- **PDF/Word como tipo de fuente** (parseo cliente o vía sidecar).
+
+Esperar a que Noé use el flujo unos días antes de decidir.
 
 ## Aprendido en sesión 3
 
