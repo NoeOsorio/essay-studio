@@ -13,7 +13,8 @@
     "sidecar:install": "npm --prefix sidecar install",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:full": "npm run sidecar:build && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
