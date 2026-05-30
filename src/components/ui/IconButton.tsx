@@ -16,7 +16,7 @@ export function IconButton({
   return (
     <button
       type="button"
-      className={`${dim} grid place-items-center bg-transparent text-ink-2 border border-transparent hover:bg-paper-3 hover:text-ink-1 hover:border-rule-1 transition-colors cursor-pointer ${className}`}
+      className={`${dim} flex-none grid place-items-center bg-transparent text-ink-2 border border-transparent hover:bg-paper-3 hover:text-ink-1 hover:border-rule-1 transition-colors cursor-pointer ${className}`}
       {...rest}
     >
       {children}

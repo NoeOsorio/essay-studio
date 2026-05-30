@@ -29,11 +29,11 @@ export function Badge({
 }: BadgeProps) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-full font-mono text-[11px] font-medium tracking-[0.04em] border ${toneStyles[tone]} ${className}`}
+      className={`inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-full font-mono text-[11px] font-medium tracking-[0.04em] border whitespace-nowrap flex-none ${toneStyles[tone]} ${className}`}
       {...rest}
     >
       <span
-        className={`w-1.5 h-1.5 rounded-full ${dotColor ?? dotByTone[tone]}`}
+        className={`w-1.5 h-1.5 rounded-full flex-none ${dotColor ?? dotByTone[tone]}`}
       />
       {children}
     </span>

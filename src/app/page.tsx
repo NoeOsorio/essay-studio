@@ -2,11 +2,15 @@
 
 import { useEffect } from "react";
 import { Topbar } from "@/components/Topbar";
+import { SidecarBanner } from "@/components/SidecarBanner";
 import { EditorPane } from "@/components/editor/EditorPane";
 import { BoardPane } from "@/components/canvas/BoardPane";
 import { Scorebar } from "@/components/Scorebar";
 import { EssayList } from "@/components/EssayList";
 import { LecturaOverlay } from "@/components/lectura/LecturaOverlay";
+import { PlumaRojaOverlay } from "@/components/lectura/PlumaRojaOverlay";
+import { RubricaOverlay } from "@/components/lectura/RubricaOverlay";
+import { FuentesOverlay } from "@/components/lectura/FuentesOverlay";
 import { useStore } from "@/lib/store";
 import { FEATURES } from "@/lib/features";
 
@@ -31,8 +35,9 @@ export default function Page() {
   }, [flush]);
 
   return (
-    <div className="relative z-[1] grid grid-rows-[auto_1fr_auto] h-screen">
+    <div className="relative z-[1] grid grid-rows-[auto_auto_1fr_auto] h-screen">
       <Topbar />
+      <SidecarBanner />
       {view === "list" ? (
         <EssayList />
       ) : boardOpen ? (
@@ -43,14 +48,20 @@ export default function Page() {
         </main>
       ) : (
         // Board hidden: editor takes the full main column, centered.
+        // Same `grid` layout as the open branch so the EditorPane gets
+        // an explicit height from its cell (otherwise its inner
+        // `overflow-y-auto` has no constraint and scroll dies).
         // We keep BoardPane unmounted; its snapshot lives in the
         // essay JSON, so toggling back hydrates from scratch.
-        <main className="min-h-0 overflow-hidden">
+        <main className="grid min-h-0 overflow-hidden">
           <EditorPane />
         </main>
       )}
       {view === "editor" && FEATURES.benchmark ? <Scorebar /> : null}
       <LecturaOverlay />
+      <PlumaRojaOverlay />
+      <RubricaOverlay />
+      <FuentesOverlay />
     </div>
   );
 }

@@ -23,7 +23,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`inline-flex items-center gap-2 h-8 px-4 rounded-[8px] font-sans text-[12.5px] font-medium border cursor-pointer transition-all ${variantStyles[variant]} ${className}`}
+      className={`inline-flex items-center gap-2 h-8 px-4 rounded-[8px] font-sans text-[12.5px] font-medium border cursor-pointer transition-all whitespace-nowrap flex-none ${variantStyles[variant]} ${className}`}
       {...rest}
     >
       {children}

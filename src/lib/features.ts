@@ -11,10 +11,10 @@
 export const FEATURES = {
   /** Mesa Redonda — sage threaded conversation (sesión 5). */
   mesaRedonda: false,
-  /** Pluma Roja — multi-pass critique with inline annotations (sesión 7). */
-  plumaRoja: false,
-  /** Benchmark — dimension scoring + score strip at the bottom (sesión 8). */
-  benchmark: false,
+  /** Pluma Roja — multi-pass critique with inline annotations (sesión 6). */
+  plumaRoja: true,
+  /** Benchmark — score strip at the bottom, derived from anotaciones (sesión 9). */
+  benchmark: true,
   /** Generic "más" / overflow actions menu in the topbar. */
   topbarMore: false,
   /** Board "group" tool — currently aliases to select; real grouping is future. */
