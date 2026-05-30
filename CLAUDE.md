@@ -606,7 +606,51 @@ Implementación:
 - **Las "fixtures de archivo" para tests de walk-up son baratísimas con `tempdir`.** No vale la pena mockear FS; usar directorios temporales reales hace los tests más fieles y siguen siendo rápidos (<1ms cada uno).
 - **El `playwright.config.session11.ts` temporal es un workaround OK, no una solución.** Cuando Next 16 bloquea dos instancias del mismo proyecto, lo correcto es hacer que el script de tests detecte y kill el `next dev` huérfano, o usar un puerto distinto y un proyecto distinto. Anotado para Fase 1 cuando refactoremos el harness de tests.
 
-## Sesión 12 (próxima) — TBD
+## Qué quedó hecho en sesión 12 — Historial de versiones (Fase 2.2 del ROADMAP)
+
+Snapshots append-only por ensayo con políticas honestas (retención + restauración con red de seguridad). Pasos del flow:
+
+- Tipos en `src/lib/storage/types.ts`: `SnapshotKind = "auto" | "close" | "manual" | "before-restore"`, `Snapshot { takenAt, kind, essay }`, `SnapshotMeta { takenAt, kind, wordCount, title }`. La política está codificada en el kind: `auto` rota agresivo, los demás se preservan para siempre.
+- Rust `src-tauri/src/history.rs` nuevo: `<id>.history.jsonl` append-only al lado del `<id>.json` del ensayo. `append_in` es idempotente sobre `takenAt`. `prune_in` rewrite atómico (tmp + rename) que mantiene los últimos `MAX_AUTO_SNAPSHOTS = 20` autos y *todos* los demás. `history_append` Tauri command corre append + prune juntos. `essay_delete` también borra el `.history.jsonl` para que un ensayo borrado no leak historia. **11 unit tests** (round-trip, idempotency, prune cap, kind validation, corrupt line skip, invalid id rejection).
+- TS bindings en `src/lib/storage/index.ts`: `listHistory`, `readSnapshot`, `appendSnapshot`. Store gana `history: SnapshotMeta[]`, `restoreNonce: number`, y acciones `openHistory`, `loadHistory`, `snapshotNow(kind)`, `previewSnapshot`, `restoreVersion`. `openEssay` autocarga la historia al boot para que el count del topbar sea honesto desde el primer render.
+- `closeEssay` toma un snapshot `kind="close"` antes del flush final (best-effort: si falla, igual cierra para no atrapar al usuario).
+- Heartbeat auto-snapshot en `src/app/page.tsx`: cada 10 min, si `current.updatedAt` avanzó desde el último auto, snapshotea. Usa una ref para no reiniciar el timer en cada keystroke. Sólo activo mientras hay essay abierto.
+- `restoreVersion` flow: (1) snapshot `kind="before-restore"` automático, (2) read del target, (3) merge `target.essay` con `id/createdAt` de la live + `updatedAt: now`, (4) bump `restoreNonce` para forzar remount del editor, (5) flush + reload history.
+- `EditorPane` ahora compone el wrapper key como `${essayId}#${restoreNonce}`. TipTap no es reactivo sobre `content` después del mount, así que un cambio en `restoreNonce` mounta el subtree completo con el doc restaurado.
+- `HistoryOverlay.tsx` nuevo (overlay modal estilo Rúbrica/Fuentes): split list/preview a 300px+1fr. Lista DESC con `formatAgo` ("hace 3 días"/"ayer"/etc) + KindChip + word count. Preview read-only en flat text — deliberadamente sin TipTap para hacer obvio que es un snapshot. Restore pide confirm inline antes de aplicar.
+- Topbar gana `HistoryButton` con count badge. **Movido al lado IZQUIERDO** del topbar (junto al SaveBadge), no al row de acciones derecho, porque el right column ya estaba al borde de overflow a 1440px de viewport (con Historial añadido, 33px de overflow → BoardToggle se metía DETRÁS del avatar del Crítico). El placement es semánticamente correcto: Historial es metadata del ensayo (junto al título y al estado de guardado), no una acción del consejo.
+- Stub Tauri (`tests/e2e/setup.ts`) gana `history_list`/`history_read`/`history_append` con el mismo retention rule que Rust. `__E2E_HISTORIES__` expuesto en window para introspección de specs. Drive-by fix: el tipo `EssayDump` recuperó `rubrica`/`fuentes`/`evaluacionMeta`/`language` (estaba desactualizado desde sesiones 7-10).
+- **`tests/e2e/history.spec.ts`** (4 specs): nuevo ensayo sin count; manual snapshot añade row con kind="manual"; restaurar reemplaza editor + inyecta `before-restore`; closeEssay añade `close`.
+
+**96/96 E2E + 28/28 Rust verdes.** Lint limpio. Workaround `playwright.config.session12.ts` removido tras la corrida.
+
+## Decisiones de la sesión 12
+
+| Decisión | Por qué |
+|---|---|
+| **Append-only `.history.jsonl` por ensayo, no DB** | Mismo modelo que `<id>.json` — un archivo por unit, fácil de inspeccionar/respaldar/borrar/migrar. Append es atómico a nivel POSIX para escrituras pequeñas. Lectura/prune leen todo el archivo (acceptable hasta cientos de versiones; un ensayo activo de un año = ~6/h × 8h × 5d × 50w ≈ 12k, todavía MB-scale en JSON, no GB). Si en algún momento duele, migramos a SQLite. |
+| **Retención: últimos 20 autos + todos los explícitos** | Distingue "estado pasado pasivo" (descartable) de "lo que el usuario eligió guardar" (intocable). Un editor activo de un día tendría ~6 autos y N manuales/close — el panel se mantiene legible sin perder nunca un save explícito. |
+| **Prune corre en cada `history_append`** | Acoplar prune al append evita que el archivo crezca sin límite incluso si el usuario nunca abre el panel. Es O(N) en líneas pero N siempre <= MAX_AUTO + small constant. |
+| **Snapshot `before-restore` automático antes del restore** | Red de seguridad asimétrica: el restore es la única operación destructiva del flow (sobreescribe el current state). Forzar un snapshot inmediatamente antes hace que `⌘Z` no funcione (TipTap reset) pero "restaurar el before-restore desde el panel" siempre funciona. Cero forma de perder trabajo aceptando un restore. |
+| **`restoreNonce` en lugar de event-based content swap** | El patrón ya existente de "remontar TipTap al cambiar essay id" se extiende limpio: incluir el nonce en el key del wrapper. Más simple que añadir un listener `editor:set-content` + manejar imperativamente `editor.commands.setContent`. Costo: pierdes el undo stack del TipTap (correcto comportamiento — restaurar no debería ser undeable como un keystroke). |
+| **Auto-snapshot cada 10 min, no cada N keystrokes** | Tiempo es la métrica honesta. 10 min de edición real ≈ varios cambios sustantivos. Por keystroke sería ruidoso (1 línea = 80+ snapshots). El timer no se reinicia en cada edit (ref-based check), así que el costo de 1 snapshot/10min es predecible. |
+| **`updatedAt` advanced check antes de auto-snapshot** | Sin esto, un usuario que abre el ensayo, lee 10min sin editar, recibiría un snapshot vacío idéntico al anterior. Diferir condicionalmente respeta la promesa de "los autos son cambios reales". |
+| **`closeEssay` toma `kind="close"` best-effort** | Si snapshot falla (disk full, FS read-only), igual debemos cerrar el ensayo — atrapar al usuario en el editor por un fallo de IO sería peor que perder ese snapshot. El `try/catch + warn` es honest. |
+| **Preview en flat text, no TipTap** | El preview es read-only y conceptualmente "un fotografía de otro tiempo". Renderizarlo en TipTap haría que se sienta editable y que el usuario tenga que adivinar por qué no escribe. Texto plano + serif italic comunica "esto es un snapshot inmutable" sin documentación. |
+| **HistoryButton a la IZQUIERDA del topbar** | Tres razones: (1) tracking de tamaños — el right column ya overflow-eaba a 1440px con la chip extra (BoardToggle terminaba 30px DETRÁS de la columna, detrás del avatar del Crítico, intercept de pointer events); (2) semántica — Fuentes/Rúbrica/Historial son properties del ensayo, no acciones de consejo, así que conviven con título/save badge; (3) future-proof — moverlas a la izquierda libera right column para crecer con nuevas acciones del consejo sin renegociar layout. |
+| **`__E2E_HISTORIES__` expuesto como `__E2E_ESSAYS__`** | Mismo patrón que para essays — permite a specs inspeccionar el estado del stub sin reverse-engineering del DOM. Las specs no lo usan hoy pero queda para sesiones futuras (p.ej. tests de retention policy). |
+| **Drive-by fix de `EssayDump` con rubrica/fuentes/etc** | Encontré el tipo desactualizado al typecheckear. Fix de 6 líneas que destrababa lint cleanup. La regla "no preventive refactors" se respeta — esto era trabajo activamente bloqueante, no especulativo. |
+
+## Aprendido en sesión 12
+
+- **Retention diferenciada por kind > expiry uniforme.** Tratar todos los snapshots igual significa que el usuario pierde un save manual con el mismo criterio que un heartbeat. Marcar la intención (manual / close / before-restore vs. auto) en el dato mismo permite políticas que respeten lo que la persona quiso guardar.
+- **Las redes de seguridad asimétricas pagan por sí solas.** Un snapshot extra antes de un restore es ~unas KBs y nunca le va a dolor al usuario. Sin él, un restore mal pulsado destruye trabajo. La asimetría costo/beneficio dice "siempre haz el snapshot, nunca lo pidas".
+- **Layout overflow ≠ `scrollWidth`.** Cuando un flex container con `justify-end` desborda, los items extienden HACIA LA IZQUIERDA fuera del contenedor, pero `scrollWidth` puede igualar `clientWidth` (Chrome no contabiliza el overflow negativo). El diagnóstico real fue posición x del primer hijo vs. position x del contenedor — el delta negativo era el overflow real.
+- **Mount-key chain es un patrón limpio para "remountéa cuando X o Y cambia".** `${essayId}#${restoreNonce}` se lee como "una identidad por (essay × estado del restore)". Cualquier prop o estado adicional que necesite forzar remount se compone igual.
+- **Auto-snapshot por tiempo + condición de "cambió desde" > polling agresivo.** El ref-based check evita el patrón degenerate "100 snapshots vacíos durante una sesión de lectura". Hace que la política sea "snapshot si y solo si hay novedad", no "snapshot every N".
+- **El topbar a 1440 está al borde. Cada nueva acción tiene que pagar su sitio.** Llevamos 5 botones en el right column + 4 avatares en el centro + breadcrumb + savebadge a la izquierda. Antes de añadir un sexto botón en el row de acciones, hay que considerar: (a) ¿es realmente una acción del consejo o es metadata del ensayo? (b) ¿cuál es el budget de ancho disponible? La respuesta de hoy fue mover Historial al row de metadata izquierdo — no shrinking, no reflow responsive.
+
+## Sesión 13 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").

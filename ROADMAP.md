@@ -2,7 +2,7 @@
 
 Lo que falta para que la app pase de "demo funcional en dev" a "instalable que usas a diario sin frustración", ordenado por dolor real cuando lo veas en uso. Cada fase es independiente: termina la 0 y ya tienes un .app usable; sigue las demás cuando duela.
 
-Última actualización: **2026-05-28** (sesión 11 cerrada — Fase 0 completada, `tauri:build:full` produce un `.app` funcional).
+Última actualización: **2026-05-30** (sesión 12 cerrada — Fase 2.2 Historial de versiones).
 
 Para el log de qué se hizo en cada sesión y por qué, ver [CLAUDE.md](CLAUDE.md).
 
@@ -58,17 +58,9 @@ Pequeño dot en topbar (verde / ámbar / rojo) que muestra si el sidecar está v
 - Opción: incluir anotaciones inline como `<!-- COMENTARIO: ... -->` o como notas al pie
 - Save dialog nativo de Tauri
 
-### 2.2 Historial de versiones (snapshots)
-**Por qué:** hoy si editas algo y te arrepientes, no hay rollback. Tampoco hay forma de comparar "cómo estaba este ensayo hace 3 días".
+### ✅ 2.2 Historial de versiones (snapshots) — cerrada en sesión 12
 
-**Scope v1:**
-- Auto-snapshot al cerrar ensayo (los últimos 10 estados)
-- Auto-snapshot opcional cada N minutos durante edición
-- Vista "Historial" en sidebar / topbar: lista versiones con timestamp + wordCount
-- Click → preview read-only
-- "Restaurar esta versión" → reemplaza el current state (el actual queda como un snapshot más antes de hacerlo)
-
-**No-scope v1:** diff inline, branching de versiones, sync entre dispositivos.
+`<id>.history.jsonl` append-only por ensayo. Auto-snapshot cada 10 min con cambios + al cerrar el ensayo. Manual "Guardar versión ahora". Restore inyecta un `before-restore` automático antes de aplicar. Retención: últimos 20 autos + todos los explícitos. Panel overlay modal en el topbar (lado izquierdo, junto al save badge). Detalle: [CLAUDE.md → sesión 12](CLAUDE.md). **No-scope v1 confirmado:** diff inline, branching, sync entre dispositivos.
 
 ### 2.3 Abrir último ensayo al startup
 Hoy siempre caes en la lista. Si trabajas en el mismo ensayo por días, son 2 clicks innecesarios cada vez.
