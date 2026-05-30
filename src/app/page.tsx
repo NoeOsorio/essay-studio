@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Topbar } from "@/components/Topbar";
 import { SidecarBanner } from "@/components/SidecarBanner";
 import { EditorPane } from "@/components/editor/EditorPane";
@@ -11,14 +11,21 @@ import { LecturaOverlay } from "@/components/lectura/LecturaOverlay";
 import { PlumaRojaOverlay } from "@/components/lectura/PlumaRojaOverlay";
 import { RubricaOverlay } from "@/components/lectura/RubricaOverlay";
 import { FuentesOverlay } from "@/components/lectura/FuentesOverlay";
+import { HistoryOverlay } from "@/components/lectura/HistoryOverlay";
 import { useStore } from "@/lib/store";
 import { FEATURES } from "@/lib/features";
+
+/** Heartbeat interval for auto snapshots. 10min strikes the balance
+ *  between granularity and panel noise (sesión 12 decision). */
+const AUTO_SNAPSHOT_MS = 10 * 60 * 1000;
 
 export default function Page() {
   const view = useStore((s) => s.view);
   const boardOpen = useStore((s) => s.boardOpen);
   const flush = useStore((s) => s.flush);
   const loadList = useStore((s) => s.loadList);
+  const snapshotNow = useStore((s) => s.snapshotNow);
+  const currentId = useStore((s) => s.current?.id ?? null);
 
   // Initial: load the essay list once the app boots.
   useEffect(() => {
@@ -33,6 +40,27 @@ export default function Page() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [flush]);
+
+  // Auto-snapshot heartbeat: every AUTO_SNAPSHOT_MS while an essay is
+  // open, take a snapshot iff updatedAt advanced since the last one we
+  // took. `snapshotNow` flushes first so the snapshot reflects what's
+  // on disk. We track the last seen updatedAt in a ref to avoid
+  // restarting the timer on every keystroke.
+  const lastSnapshottedUpdatedAt = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentId) {
+      lastSnapshottedUpdatedAt.current = null;
+      return;
+    }
+    const id = setInterval(() => {
+      const cur = useStore.getState().current;
+      if (!cur) return;
+      if (cur.updatedAt === lastSnapshottedUpdatedAt.current) return;
+      lastSnapshottedUpdatedAt.current = cur.updatedAt;
+      void snapshotNow("auto");
+    }, AUTO_SNAPSHOT_MS);
+    return () => clearInterval(id);
+  }, [currentId, snapshotNow]);
 
   return (
     <div className="relative z-[1] grid grid-rows-[auto_auto_1fr_auto] h-screen">
@@ -62,6 +90,7 @@ export default function Page() {
       <PlumaRojaOverlay />
       <RubricaOverlay />
       <FuentesOverlay />
+      <HistoryOverlay />
     </div>
   );
 }

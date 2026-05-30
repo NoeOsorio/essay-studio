@@ -3,9 +3,12 @@
 import { create } from "zustand";
 import type { JSONContent } from "@tiptap/core";
 import {
+  appendSnapshot,
   deleteEssay,
   listEssays,
+  listHistory,
   readEssay,
+  readSnapshot,
   writeEssay,
 } from "@/lib/storage";
 import type {
@@ -19,6 +22,9 @@ import type {
   Pase,
   Rubrica,
   Sage,
+  Snapshot,
+  SnapshotKind,
+  SnapshotMeta,
 } from "@/lib/storage/types";
 
 const AUTOSAVE_MS = 800;
@@ -32,7 +38,13 @@ export type SaveStatus =
 
 export type View = "list" | "editor";
 
-export type Overlay = "lectura" | "pluma" | "rubrica" | "fuentes" | null;
+export type Overlay =
+  | "lectura"
+  | "pluma"
+  | "rubrica"
+  | "fuentes"
+  | "history"
+  | null;
 
 /** How the Lectura overlay runs the interrogation. */
 export type LecturaMode = "single" | "council";
@@ -117,6 +129,31 @@ type State = {
    *  save before hiding so unmounting tldraw doesn't lose work. */
   toggleBoard: () => void;
 
+  /** Sesión 12 — version history. */
+
+  /** Metas of every snapshot for `current`, DESC by takenAt. Reloaded
+   *  whenever the user opens the history overlay (lazy). */
+  history: SnapshotMeta[];
+  /** Bumped every time `restoreVersion` succeeds. EditorPane includes
+   *  it in its wrapper key so a restore force-remounts the title +
+   *  TipTap subtree (their state is mount-time only — the content
+   *  prop isn't reactive after mount). */
+  restoreNonce: number;
+  /** Open the history overlay; auto-loads the list. */
+  openHistory: () => void;
+  /** Force-fetch the history for `current`. Called by openHistory and
+   *  after any snapshot mutation. */
+  loadHistory: () => Promise<void>;
+  /** Append a snapshot of `current` with the given kind. Flushes any
+   *  pending autosave first so the snapshot captures the persisted
+   *  state, not a transient one. */
+  snapshotNow: (kind: SnapshotKind) => Promise<void>;
+  /** Fetch the full snapshot for preview (without applying it). */
+  previewSnapshot: (takenAt: string) => Promise<Snapshot | null>;
+  /** Restore an older version. Snapshots the current state first
+   *  (kind="before-restore") so the user can always undo. */
+  restoreVersion: (takenAt: string) => Promise<void>;
+
   /** Force-flush any pending save. */
   flush: () => Promise<void>;
 };
@@ -162,6 +199,8 @@ export const useStore = create<State>((set, get) => ({
   lecturaSage: "em",
   lecturaMode: "council",
   lecturaPrefill: "",
+  history: [],
+  restoreNonce: 0,
   _autosaveTimer: null,
 
   async loadList() {
@@ -210,7 +249,11 @@ export const useStore = create<State>((set, get) => ({
         current: essay,
         view: "editor",
         saveStatus: { kind: "saved", at: Date.parse(essay.updatedAt) },
+        // Reset; loadHistory below repopulates with metas for the
+        // freshly opened essay so the topbar count is honest.
+        history: [],
       });
+      void get().loadHistory();
     } catch (err) {
       console.error("openEssay failed", err);
       set({
@@ -223,6 +266,15 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async closeEssay() {
+    // Take a "close" snapshot before tearing down. Best-effort — if it
+    // fails (sidecar down, disk full), we still close the essay so the
+    // user isn't trapped. The snapshot also runs `flush()` internally
+    // so the saved state is consistent on disk.
+    try {
+      await get().snapshotNow("close");
+    } catch (err) {
+      console.warn("close snapshot failed", err);
+    }
     await get().flush();
     const timer = get()._autosaveTimer;
     if (timer) clearTimeout(timer);
@@ -230,6 +282,7 @@ export const useStore = create<State>((set, get) => ({
       current: null,
       view: "list",
       saveStatus: { kind: "idle" },
+      history: [],
       _autosaveTimer: null,
     });
     await get().loadList();
@@ -471,6 +524,90 @@ export const useStore = create<State>((set, get) => ({
     // in-flight gets dropped when BoardPane unmounts.
     if (!next) void get().flush();
     set({ boardOpen: next });
+  },
+
+  openHistory() {
+    set({ overlay: "history" });
+    void get().loadHistory();
+  },
+
+  async loadHistory() {
+    const cur = get().current;
+    if (!cur) {
+      set({ history: [] });
+      return;
+    }
+    try {
+      const list = await listHistory(cur.id);
+      set({ history: list });
+    } catch (err) {
+      console.error("loadHistory failed", err);
+      set({ history: [] });
+    }
+  },
+
+  async snapshotNow(kind) {
+    // Flush first so the snapshot reflects what's persisted on disk,
+    // not a transient typing state. recordEvaluacion uses the same
+    // pattern (queueMicrotask) for the same reason.
+    await get().flush();
+    const cur = get().current;
+    if (!cur) return;
+    const snapshot: Snapshot = {
+      takenAt: nowIso(),
+      kind,
+      essay: cur,
+    };
+    try {
+      await appendSnapshot(snapshot);
+      await get().loadHistory();
+    } catch (err) {
+      console.error("snapshotNow failed", err);
+    }
+  },
+
+  async previewSnapshot(takenAt) {
+    const cur = get().current;
+    if (!cur) return null;
+    try {
+      return await readSnapshot(cur.id, takenAt);
+    } catch (err) {
+      console.error("previewSnapshot failed", err);
+      return null;
+    }
+  },
+
+  async restoreVersion(takenAt) {
+    const cur = get().current;
+    if (!cur) return;
+    // 1) Snapshot the current state as a safety net.
+    await get().snapshotNow("before-restore");
+    // 2) Read the target snapshot.
+    let target: Snapshot;
+    try {
+      target = await readSnapshot(cur.id, takenAt);
+    } catch (err) {
+      console.error("restoreVersion: read failed", err);
+      return;
+    }
+    // 3) Apply: replace the current essay's mutable fields with the
+    //    snapshot's. We keep id/createdAt from the live essay (those
+    //    are identity), but everything else comes from the target.
+    //    updatedAt becomes now so the autosave layer treats it as a
+    //    fresh edit (downstream Benchmark stale flag, etc.).
+    const restored: Essay = {
+      ...target.essay,
+      id: cur.id,
+      createdAt: cur.createdAt,
+      updatedAt: nowIso(),
+    };
+    set((s) => ({
+      current: restored,
+      saveStatus: { kind: "dirty" },
+      restoreNonce: s.restoreNonce + 1,
+    }));
+    await get().flush();
+    await get().loadHistory();
   },
 
   async flush() {

@@ -26,10 +26,15 @@ export function EditorPane() {
   const boardOpen = useStore((s) => s.boardOpen);
   const updateContent = useStore((s) => s.updateContent);
   const updateTitle = useStore((s) => s.updateTitle);
+  const restoreNonce = useStore((s) => s.restoreNonce);
 
   // Mounting key — when the user opens a different essay, fully
-  // remount the TipTap editor instead of trying to swap content.
+  // remount the TipTap editor instead of trying to swap content. We
+  // also bump on `restoreNonce` so restoring a version forces a fresh
+  // mount with the restored content (TipTap's `content` prop isn't
+  // reactive after mount).
   const essayId = current?.id ?? "none";
+  const subtreeKey = `${essayId}#${restoreNonce}`;
 
   if (!current) return null;
 
@@ -45,7 +50,7 @@ export function EditorPane() {
       {/* Single key on the wrapper: when the user opens a different
           essay, the whole subtree (title + editor + meta) remounts
           with the new initial values. */}
-      <div key={essayId} className={innerClass}>
+      <div key={subtreeKey} className={innerClass}>
         <TitleInput
           initialValue={current.title === "Sin título" ? "" : current.title}
           onChange={updateTitle}
