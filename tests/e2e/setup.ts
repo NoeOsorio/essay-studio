@@ -25,6 +25,33 @@ export async function installTauriStub(page: Page) {
     };
 
     const essays = new Map<string, EssayLike>();
+    // Sesión 12: in-memory history per essay. Mirrors what `history.rs`
+    // persists: append-only list of full Snapshot objects, keyed by
+    // essay id. The stub's history_append also implements the retention
+    // rule (20 newest autos + all explicit kinds).
+    type SnapshotLike = {
+      takenAt: string;
+      kind: string;
+      essay: EssayLike;
+    };
+    const histories = new Map<string, SnapshotLike[]>();
+    const MAX_AUTO = 20;
+    const pruneHistory = (id: string) => {
+      const list = histories.get(id);
+      if (!list) return;
+      const autos = list.filter((s) => s.kind === "auto");
+      if (autos.length <= MAX_AUTO) return;
+      const dropCount = autos.length - MAX_AUTO;
+      // Drop the oldest autos by takenAt ASC.
+      const sortedAutos = [...autos].sort((a, b) =>
+        a.takenAt.localeCompare(b.takenAt),
+      );
+      const dropSet = new Set(sortedAutos.slice(0, dropCount).map((s) => s.takenAt));
+      histories.set(
+        id,
+        list.filter((s) => !dropSet.has(s.takenAt)),
+      );
+    };
     const callbacks = new Map<number, (msg: unknown) => void>();
     let callbackId = 0;
     // event name -> set of {id, handlerId} subscriptions
@@ -48,9 +75,11 @@ export async function installTauriStub(page: Page) {
       __TAURI_INTERNALS__: unknown;
       __TAURI_EVENT_PLUGIN_INTERNALS__: unknown;
       __E2E_ESSAYS__: Map<string, EssayLike>;
+      __E2E_HISTORIES__: Map<string, SnapshotLike[]>;
       __E2E_DISPATCH: (name: string, payload: unknown) => void;
     };
     win.__E2E_ESSAYS__ = essays;
+    win.__E2E_HISTORIES__ = histories;
     win.__E2E_DISPATCH = dispatchEvent;
 
     // Tauri's event package uses this side-namespace for direct
@@ -106,7 +135,39 @@ export async function installTauriStub(page: Page) {
             return null;
           }
           case "essay_delete": {
-            essays.delete(String(args.id));
+            const id = String(args.id);
+            essays.delete(id);
+            histories.delete(id);
+            return null;
+          }
+          case "history_list": {
+            const id = String(args.id);
+            const list = histories.get(id) ?? [];
+            return [...list]
+              .map((s) => ({
+                takenAt: s.takenAt,
+                kind: s.kind,
+                wordCount: s.essay.wordCount,
+                title: s.essay.title,
+              }))
+              .sort((a, b) => b.takenAt.localeCompare(a.takenAt));
+          }
+          case "history_read": {
+            const id = String(args.id);
+            const takenAt = String(args.takenAt);
+            const list = histories.get(id) ?? [];
+            const found = list.find((s) => s.takenAt === takenAt);
+            if (!found) throw new Error(`snapshot not found: ${takenAt}`);
+            return found;
+          }
+          case "history_append": {
+            const snap = args.snapshot as SnapshotLike;
+            const id = snap.essay.id;
+            const cur = histories.get(id) ?? [];
+            // Idempotent on takenAt — same as Rust.
+            if (cur.some((s) => s.takenAt === snap.takenAt)) return null;
+            histories.set(id, [...cur, snap]);
+            pruneHistory(id);
             return null;
           }
           case "plugin:event|listen": {
@@ -352,6 +413,10 @@ type EssayDump = {
   content: unknown;
   board?: unknown;
   interrogatorios?: unknown[];
+  rubrica?: { criterios: unknown[] };
+  fuentes?: unknown[];
+  evaluacionMeta?: unknown;
+  language?: string;
 };
 
 /** Get the in-memory essays map as visible from the page. */
