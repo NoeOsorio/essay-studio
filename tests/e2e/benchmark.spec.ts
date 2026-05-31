@@ -31,17 +31,16 @@ test.beforeEach(async ({ page }) => {
   await installTauriStub(page);
 });
 
-test("empty essay shows '—' + 'Corre Evaluar' CTA, not a fake 10/10", async ({
+test("empty essay: Scorebar is hidden (no fake 10/10, no '—' placeholder)", async ({
   page,
 }) => {
+  // Sesión 13b decision: instead of showing a "—" placeholder Scorebar
+  // for unevaluated essays, hide the bar entirely. Empty placeholder
+  // wasted vertical space and the dashed "DE 10" ring looked like a
+  // broken state. Once Evaluar runs, the bar appears — covered by the
+  // sibling tests below. Lo único que sigue invariante: NUNCA fake 10/10.
   await openNewEssay(page);
-  const scorebar = page.getByTestId("scorebar");
-  await expect(scorebar).toBeVisible();
-  await expect(page.getByTestId("scorebar-overall")).toContainText("—");
-  await expect(
-    page.getByText(/Sin datos del consejo todavía/),
-  ).toBeVisible();
-  await expect(page.getByText(/Corre Evaluar para puntuar/)).toBeVisible();
+  await expect(page.getByTestId("scorebar")).toHaveCount(0);
 });
 
 test("essay with anotaciones but no rúbrica → overall ring + nudge to define rúbrica", async ({
@@ -241,14 +240,18 @@ test("perfect-essay flow: Descartar everything → real 10.0 (NOT '—')", async
   await expect(page.getByText(/Sin pendientes/)).toBeVisible();
 });
 
-test("never-evaluated essay → '—' (NOT a fake 10.0)", async ({ page }) => {
+test("never-evaluated essay with content: Scorebar still hidden (NOT a fake 10.0)", async ({
+  page,
+}) => {
   await openNewEssay(page, "academico");
   // Type some content but never run Evaluar.
   await page.locator(".tiptap-content").click();
   await page.keyboard.type("Texto cualquiera para que el ensayo no esté vacío.");
 
-  await expect(page.getByTestId("scorebar-overall")).toContainText("—");
-  await expect(page.getByText(/Sin datos del consejo todavía/)).toBeVisible();
+  // Sesión 13b: bar stays hidden until the user actually evaluates.
+  // The honest signal (no fake 10/10) is preserved by absence, not
+  // by a placeholder.
+  await expect(page.getByTestId("scorebar")).toHaveCount(0);
 });
 
 test("partial coverage Evaluar (3 of 4 pasadas) + clean → caps at 9.0, NOT 10.0", async ({

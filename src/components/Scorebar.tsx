@@ -28,9 +28,16 @@ const SAGE_COLOR: Record<string, string> = {
  * `lib/benchmark/score.ts`). 10/10 means the council has nothing left
  * to flag; descartar an anotación lifts the relevant score directly.
  *
- * Three states:
- *   - no anotaciones      → "—" + CTA "Corre Evaluar"
- *   - anotaciones, no rúbrica → overall ring + nudge "Define una rúbrica para puntuar por criterio"
+ * Visibility: only renders when there's something real to show. A
+ * brand-new essay has no evaluation and no anotaciones — showing a
+ * "DE 10" placeholder ring with "—" wastes vertical space and looks
+ * like a broken empty state (Noé, sesión 13). Once the user runs
+ * Evaluar at least once (or there are anotaciones from a previous
+ * run), the strip appears and stays.
+ *
+ * Three displayed states (when shown):
+ *   - evaluated, perfect / partial / with issues  → real ring
+ *   - anotaciones, no rúbrica → overall ring + nudge
  *   - anotaciones + rúbrica   → overall ring + one ring per criterio
  */
 export function Scorebar() {
@@ -72,6 +79,12 @@ export function Scorebar() {
   const [drill, setDrill] = useState<DrillTarget>(null);
 
   if (!current) return null;
+
+  // Hide entirely until there's a real signal to show — either a
+  // completed evaluation, or anotaciones still standing from a
+  // previous one. New / unevaluated essays get the editor's full
+  // height instead of a placeholder strip.
+  if (!result.wasEvaluated && !result.hasAnotaciones) return null;
 
   return (
     <div className="relative">
