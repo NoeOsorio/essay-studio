@@ -44,6 +44,38 @@ test("typing into the title and body autosaves under the same id", async ({
   expect(essays[0].wordCount).toBeGreaterThan(0);
 });
 
+test("editor + board pane fill the viewport height (no dead empty space below)", async ({
+  page,
+}) => {
+  // Sesión 13b: con grid-rows + null-rendering siblings, CSS Grid
+  // auto-placement metía main en el track equivocado y el editor sólo
+  // ocupaba ~430px de los 900px del viewport. Pasamos a flexbox columna
+  // donde flex-1 siempre aplica a main sin importar cuántos siblings
+  // (SidecarBanner, Scorebar, overlays) rendericen null. Este test
+  // asserta que main ocupa al menos el 80% de la altura del viewport.
+  await page.goto("/");
+  await page.getByRole("button", { name: /Nuevo académico/i }).click();
+  await page.getByRole("textbox", { name: "Título del ensayo" }).waitFor();
+
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("no viewport");
+
+  const mainBox = await page.locator("main").first().boundingBox();
+  if (!mainBox) throw new Error("main has no box");
+
+  // En 900px de viewport con Topbar ~70px, main debería ser >= ~720px.
+  // Usamos 80% como umbral generoso para no ser frágil con Topbars
+  // ligeramente más altos en el futuro.
+  const minExpected = viewport.height * 0.8;
+  if (mainBox.height < minExpected) {
+    throw new Error(
+      `main fills only ${Math.round(mainBox.height)}px of ${viewport.height}px viewport ` +
+        `(expected >= ${Math.round(minExpected)}px). Likely a CSS Grid auto-placement ` +
+        `regression — see page.tsx and the sesión 13b commit.`,
+    );
+  }
+});
+
 test("topbar toggle hides and re-shows the board pane", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /Nuevo académico/i }).click();

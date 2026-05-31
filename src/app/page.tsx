@@ -67,35 +67,45 @@ export default function Page() {
     return () => clearInterval(id);
   }, [currentId, snapshotNow]);
 
+  // Layout — flexbox columna en vez de grid-rows. Razón: con CSS Grid
+  // auto-placement, los hijos null (SidecarBanner cuando está up,
+  // Scorebar cuando no hay eval) no crean tracks y los visibles se
+  // ubican en los PRIMEROS tracks del template, no en los que les
+  // tocarían. Con `grid-rows-[auto_auto_1fr_auto]` y sólo Topbar + main
+  // renderizados, main caía en row 2 (auto) en vez de row 3 (1fr),
+  // así que no se expandía. Flexbox no tiene ese problema: flex-1
+  // siempre aplica a main sin depender de cuántos hermanos rendericen.
+  // Overlays (todos `fixed inset-0`) salen del flex flow — los mueven
+  // afuera del wrapper para que su contar como hijos no importe.
   return (
-    <div className="relative z-[1] grid grid-rows-[auto_auto_1fr_auto] h-screen">
-      <Topbar />
-      <SidecarBanner />
-      {view === "list" ? (
-        <EssayList />
-      ) : boardOpen ? (
-        <main className="grid grid-cols-[1fr_1px_1fr] min-h-0">
-          <EditorPane />
-          <div className="bg-rule-1" />
-          <BoardPane />
-        </main>
-      ) : (
-        // Board hidden: editor takes the full main column, centered.
-        // Same `grid` layout as the open branch so the EditorPane gets
-        // an explicit height from its cell (otherwise its inner
-        // `overflow-y-auto` has no constraint and scroll dies).
-        // We keep BoardPane unmounted; its snapshot lives in the
-        // essay JSON, so toggling back hydrates from scratch.
-        <main className="grid min-h-0 overflow-hidden">
-          <EditorPane />
-        </main>
-      )}
-      {view === "editor" && FEATURES.benchmark ? <Scorebar /> : null}
+    <>
+      <div className="relative z-[1] flex flex-col h-screen">
+        <Topbar />
+        <SidecarBanner />
+        {view === "list" ? (
+          <EssayList />
+        ) : boardOpen ? (
+          <main className="flex-1 min-h-0 grid grid-cols-[1fr_1px_1fr]">
+            <EditorPane />
+            <div className="bg-rule-1" />
+            <BoardPane />
+          </main>
+        ) : (
+          // Board hidden: editor takes the full main column. Mantenemos
+          // grid en main para que su único hijo (EditorPane) tenga su
+          // celda con altura definida — sin eso el overflow-y-auto
+          // interno del editor no scrollearía.
+          <main className="flex-1 min-h-0 grid overflow-hidden">
+            <EditorPane />
+          </main>
+        )}
+        {view === "editor" && FEATURES.benchmark ? <Scorebar /> : null}
+      </div>
       <LecturaOverlay />
       <PlumaRojaOverlay />
       <RubricaOverlay />
       <FuentesOverlay />
       <HistoryOverlay />
-    </div>
+    </>
   );
 }
