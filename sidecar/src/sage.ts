@@ -221,7 +221,7 @@ function languageDirective(lang: Language | undefined): string {
     return [
       "IMPORTANT LANGUAGE INSTRUCTION:",
       "Respond in English for everything you write TO the author — your questions, your `mensaje` explanations, your analysis. The persona description above is in Spanish but defines your voice and disposition — translate that character into English. Keep proper nouns (Edmondson, Meadows, Kahneman, etc.) and your name in their original form.",
-      "EXCEPTION — `sugerencia` (the literal replacement text): it MUST match the language of the `cita` it replaces, not your response language. If the cita is in Spanish, the sugerencia is in Spanish; if the cita is in English, the sugerencia is in English. The replacement is inserted into the user's document in place of the cita, so it has to read grammatically in the surrounding paragraph regardless of the user's interface language.",
+      "EXCEPTION — `reemplazo` (the literal replacement prose): it MUST match the language of the `cita` it replaces, not your response language. If the cita is in Spanish, the reemplazo is in Spanish; if the cita is in English, the reemplazo is in English. The replacement is inserted into the user's document in place of the cita, so it has to read grammatically in the surrounding paragraph regardless of the user's interface language.",
       "",
     ].join("\n");
   }
@@ -229,7 +229,7 @@ function languageDirective(lang: Language | undefined): string {
   return [
     "INSTRUCCIÓN DE IDIOMA:",
     "Respondé en español para todo lo que escribís AL autor — tus preguntas, tus `mensaje` con la explicación, tu análisis. Mantené los nombres propios (Edmondson, Meadows, Kahneman, etc.) como están.",
-    "EXCEPCIÓN — `sugerencia` (el texto literal de reemplazo): DEBE coincidir con el idioma de la `cita` que reemplaza, NO con tu idioma de respuesta. Si la cita está en inglés, la sugerencia va en inglés; si la cita está en español, la sugerencia va en español. El reemplazo se inserta en el documento del usuario en lugar de la cita, así que tiene que leerse gramaticalmente dentro del párrafo independientemente del idioma de la interfaz.",
+    "EXCEPCIÓN — `reemplazo` (la prosa literal que sustituye a la cita): DEBE coincidir con el idioma de la `cita` que reemplaza, NO con tu idioma de respuesta. Si la cita está en inglés, el reemplazo va en inglés; si la cita está en español, el reemplazo va en español. El reemplazo se inserta en el documento del autor en lugar de la cita, así que tiene que leerse gramaticalmente dentro del párrafo independientemente del idioma de la interfaz.",
     "",
   ].join("\n");
 }
@@ -322,21 +322,30 @@ async function runCritique(
     "Devolvé entre 3 y 8 anotaciones que pertenezcan a tu dominio en esta pasada.",
     "",
     "FORMATO ESTRICTO: una línea de JSON por anotación. Nada antes, nada después, sin envoltura markdown, sin numeración, sin comentarios. Cada línea es un objeto con las llaves exactas:",
-    "  \"cita\":       fragmento literal copiado del texto, entre 4 y 25 palabras, exacto carácter por carácter.",
+    "  \"cita\":       fragmento literal copiado del texto del autor, entre 4 y 25 palabras, exacto carácter por carácter. Es lo que el usuario verá subrayado.",
     "  \"severidad\":  una de \"alta\" | \"media\" | \"baja\".",
-    "  \"mensaje\":    explicación pedagógica de qué falla y por qué importa. Hasta 50 palabras. Educa al autor — no des órdenes secas, contá el razonamiento.",
-    "  \"sugerencia\": OPCIONAL — y SOLO el texto literal que reemplazaría la cita en el documento. NO uses imperativos como \"Reformula X\", \"Cita al autor\", \"Reescribe Y\" — eso va en mensaje. Si no podés dar un fragmento limpio listo para pegar, omití el campo. La interfaz tiene un botón \"Reemplazar\" que sustituye la cita literalmente por este valor, así que tiene que poder leerse bien en su lugar dentro del párrafo Y EN EL MISMO IDIOMA QUE LA CITA (no en tu idioma de respuesta — ver instrucción de idioma arriba).",
+    "  \"mensaje\":    diagnóstico pedagógico. ÚNICAMENTE explicás QUÉ está mal en la cita y POR QUÉ importa. Hasta 50 palabras. EL MENSAJE NUNCA INCLUYE EL TEXTO NUEVO. Si te encontrás escribiendo \"podrías decir...\", \"sería mejor que...\", \"reescribilo como...\", PARÁ — esa parte va en \"reemplazo\", no acá. El mensaje es de vos AL autor; el reemplazo es prosa que se inserta en su documento.",
+    "  \"reemplazo\":  OPCIONAL. El texto LITERAL, COMPLETO, listo para pegar EN LUGAR DE la cita en el documento del autor. Imaginá un botón que apreta el autor y reemplaza la cita por este valor — tiene que leerse gramaticalmente dentro de su párrafo. No es un mensaje al autor; es prosa de su documento. NO empieces con verbos como \"Reescribí:\", \"Reformulá:\", \"Cambia a:\", \"Mejor:\". El campo es ÚNICAMENTE la versión nueva — sin prefacios, sin dos puntos, sin meta-comentarios. Si no podés dar un fragmento limpio (a veces el problema es estructural y no hay un fragmento aislado que reemplace), OMITÍ el campo entero. Idioma: coincide con el idioma de la cita, no con tu idioma de respuesta.",
     "  \"criterioId\": opcional, sólo si la anotación se alinea con un criterio de la rúbrica de arriba.",
     "",
-    "Ejemplo de línea válida típico de tu pasada actual (notá cómo mensaje explica el porqué y sugerencia es texto listo para pegar — prosa real lista para reemplazar la cita, no una instrucción ni un imperativo):",
+    "⚠️ ANTI-PATRÓN A EVITAR — patrones que el modelo a veces produce y que rompen el documento al aplicar:",
+    "  ❌ MAL: {\"reemplazo\":\"Reescribí: la cultura emerge de loops de incentivos\"}  ← \"Reescribí:\" es un verbo dirigido al autor; el autor terminaría con esa palabra pegada en su documento.",
+    "  ❌ MAL: {\"reemplazo\":\"Mejor así: \\\"la transparencia tiene efecto sólo cuando...\\\"\"}  ← mete prefacio meta y comillas extras.",
+    "  ❌ MAL: {\"mensaje\":\"Atribución individual. Reescribilo como propiedad emergente sostenida por loops.\"}  ← el mensaje terminó conteniendo el reemplazo embutido. El reemplazo va en \"reemplazo\", el mensaje sólo diagnostica.",
+    "  ✅ BIEN: {\"mensaje\":\"Atribución individual de un fenómeno sistémico — borra los loops y rituales que sostienen la cultura.\",\"reemplazo\":\"la cultura emerge de loops de incentivos, rituales sostenidos y narrativas compartidas\"}",
+    "",
+    "Ejemplo válido típico de tu pasada actual (notá la separación entre mensaje = diagnóstico y reemplazo = prosa pura para pegar):",
     exampleLineFor(req.language, req.pase),
     "",
-    "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". Notá que mensaje sigue tu idioma de respuesta (el autor lo lee), pero sugerencia queda en el idioma del fragmento original del documento (se inserta en lugar de la cita y tiene que leerse gramaticalmente en su párrafo):",
+    "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". El mensaje sigue tu idioma de respuesta (el autor lo lee), pero el reemplazo queda en el idioma del fragmento original (se inserta en lugar de la cita y tiene que leerse gramaticalmente en su párrafo):",
     crossLingualExampleFor(req.language),
     "",
     "Si no encontrás nada interesante en tu dominio, devolvé una sola línea: {\"vacio\":true,\"razon\":\"...\"}",
     "",
-    "Recordá: las LLAVES del JSON (cita, severidad, mensaje, sugerencia, criterioId) son técnicas y van siempre en español tal como las defino. El VALOR de \"mensaje\" va en el idioma del ensayo indicado arriba (lo lee el autor). El VALOR de \"sugerencia\" coincide con el idioma de \"cita\" (se inserta en el documento del autor en lugar de la cita, así que tiene que leerse en el mismo idioma del párrafo de origen).",
+    "Recordá las dos reglas que más se rompen:",
+    "  1. \"mensaje\" es PURO DIAGNÓSTICO — el texto nuevo NUNCA va ahí. Si tu mensaje contiene la versión corregida, mové esa parte a \"reemplazo\".",
+    "  2. \"reemplazo\" es PURA PROSA — sin prefijos conversacionales ni meta-comentarios. Si arranca con un verbo dirigido al autor (\"Reescribí:\", \"Cambia a:\", \"Mejor:\"), está mal — sacale el prefijo.",
+    "Las LLAVES del JSON (cita, severidad, mensaje, reemplazo, criterioId) son técnicas y van siempre en español tal como las defino. El VALOR de \"mensaje\" va en el idioma del ensayo (lo lee el autor). El VALOR de \"reemplazo\" coincide con el idioma de \"cita\".",
   );
   await runSageTurn(req.id, req.sage, parts.join("\n"));
 }
@@ -357,26 +366,31 @@ function exampleLineFor(lang: Language | undefined, pase: Pase): string {
   return EXAMPLES_ES[pase];
 }
 
+// Sesión 16: notá que los `mensaje` ahora son ESTRICTAMENTE
+// diagnósticos (qué falla + por qué importa) — sin meter la versión
+// nueva embebida. La versión nueva vive ÚNICAMENTE en `reemplazo`.
+// Esto rompe el patrón del modelo de duplicar contenido entre los
+// dos campos.
 const EXAMPLES_ES: Record<Pase, string> = {
   coherencia:
-    '{"cita":"El liderazgo del CEO determina la cultura","severidad":"alta","mensaje":"Estás atribuyendo a una persona un fenómeno sistémico. La cultura emerge de los incentivos, rituales y narrativas que el equipo reproduce a diario — el CEO modula, pero no determina solo. Reformular como sistema deja ver dónde están las palancas reales.","sugerencia":"El liderazgo del CEO modula la cultura, pero ésta emerge de los incentivos, rituales y narrativas compartidas que cada miembro reproduce a diario"}',
+    '{"cita":"El liderazgo del CEO determina la cultura","severidad":"alta","mensaje":"Atribuís a una persona un fenómeno sistémico. La cultura no la \\"determina\\" nadie — emerge de loops de incentivos, rituales sostenidos y narrativas compartidas. Tratar al CEO como causa única borra las palancas reales del sistema.","reemplazo":"El liderazgo del CEO modula la cultura, pero ésta emerge de los incentivos, rituales y narrativas compartidas que cada miembro reproduce a diario"}',
   estilo:
-    '{"cita":"se observa que el equipo respondió de manera efectiva","severidad":"media","mensaje":"Voz pasiva sin agente más sustantivos abstractos borran al sujeto y a la medida. ¿Quién observó? ¿Qué significa \\"efectiva\\"? La frase suena institucional pero no dice nada que el lector pueda chequear. Reescribí en activa con un dato concreto.","sugerencia":"el equipo redujo el tiempo de respuesta a incidentes de 14 a 3 horas en seis semanas"}',
+    '{"cita":"se observa que el equipo respondió de manera efectiva","severidad":"media","mensaje":"Voz pasiva sin agente y sustantivos abstractos. ¿Quién observó? ¿\\"Efectiva\\" según qué métrica? La frase suena institucional pero no dice nada que el lector pueda verificar — es exactamente el tipo de prosa que erosiona confianza.","reemplazo":"el equipo redujo el tiempo de respuesta a incidentes de 14 a 3 horas en seis semanas"}',
   argumento:
-    '{"cita":"todos sabemos que la transparencia mejora la confianza","severidad":"media","mensaje":"Apelación al sentido común disfrazada de evidencia. \\"Todos sabemos\\" no es un argumento — es un atajo que esquiva la pregunta interesante: ¿bajo qué condiciones?, ¿con qué costos?, ¿cuándo se rompe? Reemplazá el cliché por un mecanismo concreto o un caso documentado.","sugerencia":"la transparencia reduce el costo de coordinación cuando el equipo confía en que la información compartida no se usa para sancionar errores honestos (Edmondson, 1999)"}',
+    '{"cita":"todos sabemos que la transparencia mejora la confianza","severidad":"media","mensaje":"Apelación al sentido común disfrazada de evidencia. \\"Todos sabemos\\" esquiva las preguntas que de verdad importan: ¿bajo qué condiciones?, ¿con qué costos?, ¿cuándo se rompe el efecto? Sin esas condiciones es un cliché, no un argumento.","reemplazo":"la transparencia reduce el costo de coordinación cuando el equipo confía en que la información compartida no se usa para sancionar errores honestos (Edmondson, 1999)"}',
   apa:
-    '{"cita":"(Edmondson 1999)","severidad":"baja","mensaje":"Falta la coma entre autor y año — APA 7 pide \\"Edmondson, 1999\\". Es desviación menor pero el lector que revisa referencias la nota inmediatamente y baja la confianza en el rigor del resto del aparato.","sugerencia":"(Edmondson, 1999)"}',
+    '{"cita":"(Edmondson 1999)","severidad":"baja","mensaje":"Falta la coma entre autor y año — APA 7 exige \\"Edmondson, 1999\\". Es desviación pequeña pero el lector que revisa referencias la nota inmediatamente y baja la confianza en el rigor del resto del aparato citacional.","reemplazo":"(Edmondson, 1999)"}',
 };
 
 const EXAMPLES_EN: Record<Pase, string> = {
   coherencia:
-    '{"cita":"the CEO\'s leadership determines the culture","severidad":"alta","mensaje":"You are attributing a systemic phenomenon to one person. Culture emerges from incentives, rituals, and the narratives the team reproduces daily — the CEO modulates but does not determine alone. Reframing as a system surfaces where the real levers live.","sugerencia":"the CEO\'s leadership modulates the culture, but the culture itself emerges from the incentives, rituals, and shared narratives every member reproduces daily"}',
+    '{"cita":"the CEO\'s leadership determines the culture","severidad":"alta","mensaje":"You are attributing a systemic phenomenon to one person. Culture is not \\"determined\\" by anyone — it emerges from feedback loops of incentives, sustained rituals, and shared narratives. Treating the CEO as sole cause erases the actual levers of the system.","reemplazo":"the CEO\'s leadership modulates the culture, but the culture itself emerges from the incentives, rituals, and shared narratives every member reproduces daily"}',
   estilo:
-    '{"cita":"it was observed that the team responded effectively","severidad":"media","mensaje":"Agentless passive plus abstract nouns erase both the subject and the measure. Who observed? What does \\"effectively\\" mean? The sentence sounds institutional but the reader can\'t check anything. Rewrite in active voice with a concrete datum.","sugerencia":"the team cut incident response time from 14 hours to 3 hours over six weeks"}',
+    '{"cita":"it was observed that the team responded effectively","severidad":"media","mensaje":"Agentless passive plus abstract nouns. Who observed? \\"Effectively\\" by what metric? The sentence sounds institutional but the reader can\'t check anything — exactly the kind of prose that quietly erodes trust.","reemplazo":"the team cut incident response time from 14 hours to 3 hours over six weeks"}',
   argumento:
-    '{"cita":"we all know that transparency improves trust","severidad":"media","mensaje":"Appeal to common sense disguised as evidence. \\"We all know\\" is not an argument — it is a shortcut that ducks the interesting question: under what conditions? at what cost? when does it break? Replace the cliché with a concrete mechanism or a documented case.","sugerencia":"transparency lowers the coordination cost when the team trusts that shared information will not be weaponized against honest mistakes (Edmondson, 1999)"}',
+    '{"cita":"we all know that transparency improves trust","severidad":"media","mensaje":"Appeal to common sense disguised as evidence. \\"We all know\\" sidesteps the questions that actually matter: under what conditions? at what cost? when does the effect break? Without those conditions it is a cliché, not an argument.","reemplazo":"transparency lowers the coordination cost when the team trusts that shared information will not be weaponized against honest mistakes (Edmondson, 1999)"}',
   apa:
-    '{"cita":"(Edmondson 1999)","severidad":"baja","mensaje":"Missing comma between author and year — APA 7 requires \\"Edmondson, 1999\\". Minor deviation, but a reader who checks references notices instantly and trust in the rest of the apparatus drops.","sugerencia":"(Edmondson, 1999)"}',
+    '{"cita":"(Edmondson 1999)","severidad":"baja","mensaje":"Missing comma between author and year — APA 7 requires \\"Edmondson, 1999\\". Minor deviation, but a reader checking references notices instantly and trust in the rest of the citation apparatus drops.","reemplazo":"(Edmondson, 1999)"}',
 };
 
 /** Cross-lingual example (sesión 15b): essay configured in one
@@ -389,12 +403,12 @@ const EXAMPLES_EN: Record<Pase, string> = {
 function crossLingualExampleFor(lang: Language | undefined): string {
   if (lang === "en") {
     // Author writing in English, but they quoted Edmondson in Spanish.
-    // Sugerencia stays in Spanish so it inserts back into the doc cleanly.
-    return '{"cita":"la seguridad psicológica es la creencia compartida","severidad":"media","mensaje":"You inserted an in-text claim that paraphrases Edmondson without a citation. Quotations and close paraphrases from her 1999 paper need attribution to support the claim and to make the reader trace it. Keep the Spanish quote as-is and add the parenthetical reference.","sugerencia":"la seguridad psicológica es la creencia compartida (Edmondson, 1999)"}';
+    // Reemplazo stays in Spanish so it inserts back into the doc cleanly.
+    return '{"cita":"la seguridad psicológica es la creencia compartida","severidad":"media","mensaje":"You paraphrased Edmondson\'s 1999 framing without a citation. Close paraphrases of attributable scholarship need an in-text reference — both to support the claim and to let the reader trace it.","reemplazo":"la seguridad psicológica es la creencia compartida (Edmondson, 1999)"}';
   }
   // Author writing in Spanish, but they quoted Tío Ben in English.
-  // Sugerencia stays in English so it inserts back into the doc cleanly.
-  return '{"cita":"with great power comes great responsibility","severidad":"alta","mensaje":"Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio aunque la cita sea conocida. Mantené la frase original en inglés (es como la pronuncia el personaje) y añadí la cita parentética justo después.","sugerencia":"with great power comes great responsibility (Uncle Ben, 2002)"}';
+  // Reemplazo stays in English so it inserts back into the doc cleanly.
+  return '{"cita":"with great power comes great responsibility","severidad":"alta","mensaje":"Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio aunque la cita sea conocida — la regla académica no hace excepciones por familiaridad cultural.","reemplazo":"with great power comes great responsibility (Uncle Ben, 2002)"}';
 }
 
 // --------- stdin loop ---------
