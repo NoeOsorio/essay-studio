@@ -328,10 +328,10 @@ async function runCritique(
     "  \"sugerencia\": OPCIONAL — y SOLO el texto literal que reemplazaría la cita en el documento. NO uses imperativos como \"Reformula X\", \"Cita al autor\", \"Reescribe Y\" — eso va en mensaje. Si no podés dar un fragmento limpio listo para pegar, omití el campo. La interfaz tiene un botón \"Reemplazar\" que sustituye la cita literalmente por este valor, así que tiene que poder leerse bien en su lugar dentro del párrafo Y EN EL MISMO IDIOMA QUE LA CITA (no en tu idioma de respuesta — ver instrucción de idioma arriba).",
     "  \"criterioId\": opcional, sólo si la anotación se alinea con un criterio de la rúbrica de arriba.",
     "",
-    "Ejemplo de línea válida (notá cómo mensaje explica el porqué y sugerencia es texto listo para pegar, no una instrucción):",
-    exampleLineFor(req.language),
+    "Ejemplo de línea válida típico de tu pasada actual (notá cómo mensaje explica el porqué y sugerencia es texto listo para pegar — prosa real lista para reemplazar la cita, no una instrucción ni un imperativo):",
+    exampleLineFor(req.language, req.pase),
     "",
-    "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". Notá que mensaje sigue tu idioma de respuesta (el autor lo lee), pero sugerencia queda en el idioma de la cita (se inserta en el documento del autor en lugar de la cita):",
+    "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". Notá que mensaje sigue tu idioma de respuesta (el autor lo lee), pero sugerencia queda en el idioma del fragmento original del documento (se inserta en lugar de la cita y tiene que leerse gramaticalmente en su párrafo):",
     crossLingualExampleFor(req.language),
     "",
     "Si no encontrás nada interesante en tu dominio, devolvé una sola línea: {\"vacio\":true,\"razon\":\"...\"}",
@@ -341,18 +341,43 @@ async function runCritique(
   await runSageTurn(req.id, req.sage, parts.join("\n"));
 }
 
-/** Example JSON line in the target language. Sesión 15: el ejemplo
- *  ahora muestra el split honesto — `mensaje` es la explicación
- *  pedagógica (el "por qué"), `sugerencia` es ÚNICAMENTE el texto
- *  que se pegaría en lugar de la cita. Antes ambos campos se
- *  confundían y la sugerencia terminaba siendo un imperativo
- *  ("Reformula X") que al "Aplicar" rompía el documento. */
-function exampleLineFor(lang: Language | undefined): string {
+/** Example JSON line typical of the current pase, in the target
+ *  language. Sesión 15c: un ejemplo por pasada para que el modelo
+ *  vea concretamente qué tipo de corrección le toca a cada una en
+ *  lugar de defaultear al caso de citación (que era el sesgo de
+ *  sesiones 15/15b). El campo `cita` cubre cualquier fragmento —
+ *  voz pasiva, claim vago, atribución equivocada, formato APA, lo
+ *  que el sabio crea que el autor debería corregir. Las severidades
+ *  y largos del mensaje varían a propósito para no entrenar al
+ *  modelo en un único registro. */
+function exampleLineFor(lang: Language | undefined, pase: Pase): string {
   if (lang === "en") {
-    return '{"cita":"with great power comes great responsibility","severidad":"alta","mensaje":"You are paraphrasing Uncle Ben without crediting the source. Quoting or paraphrasing famous lines without attribution is plagiarism, even when the line is iconic. Add the in-text citation right after the phrase.","sugerencia":"with great power comes great responsibility (Uncle Ben, 2002)"}';
+    return EXAMPLES_EN[pase];
   }
-  return '{"cita":"un gran poder conlleva una gran responsabilidad","severidad":"alta","mensaje":"Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio aunque la cita sea conocida — la regla académica no hace excepciones. Añadí la cita parentética justo después de la frase.","sugerencia":"un gran poder conlleva una gran responsabilidad (Tío Ben, 2002)"}';
+  return EXAMPLES_ES[pase];
 }
+
+const EXAMPLES_ES: Record<Pase, string> = {
+  coherencia:
+    '{"cita":"El liderazgo del CEO determina la cultura","severidad":"alta","mensaje":"Estás atribuyendo a una persona un fenómeno sistémico. La cultura emerge de los incentivos, rituales y narrativas que el equipo reproduce a diario — el CEO modula, pero no determina solo. Reformular como sistema deja ver dónde están las palancas reales.","sugerencia":"El liderazgo del CEO modula la cultura, pero ésta emerge de los incentivos, rituales y narrativas compartidas que cada miembro reproduce a diario"}',
+  estilo:
+    '{"cita":"se observa que el equipo respondió de manera efectiva","severidad":"media","mensaje":"Voz pasiva sin agente más sustantivos abstractos borran al sujeto y a la medida. ¿Quién observó? ¿Qué significa \\"efectiva\\"? La frase suena institucional pero no dice nada que el lector pueda chequear. Reescribí en activa con un dato concreto.","sugerencia":"el equipo redujo el tiempo de respuesta a incidentes de 14 a 3 horas en seis semanas"}',
+  argumento:
+    '{"cita":"todos sabemos que la transparencia mejora la confianza","severidad":"media","mensaje":"Apelación al sentido común disfrazada de evidencia. \\"Todos sabemos\\" no es un argumento — es un atajo que esquiva la pregunta interesante: ¿bajo qué condiciones?, ¿con qué costos?, ¿cuándo se rompe? Reemplazá el cliché por un mecanismo concreto o un caso documentado.","sugerencia":"la transparencia reduce el costo de coordinación cuando el equipo confía en que la información compartida no se usa para sancionar errores honestos (Edmondson, 1999)"}',
+  apa:
+    '{"cita":"(Edmondson 1999)","severidad":"baja","mensaje":"Falta la coma entre autor y año — APA 7 pide \\"Edmondson, 1999\\". Es desviación menor pero el lector que revisa referencias la nota inmediatamente y baja la confianza en el rigor del resto del aparato.","sugerencia":"(Edmondson, 1999)"}',
+};
+
+const EXAMPLES_EN: Record<Pase, string> = {
+  coherencia:
+    '{"cita":"the CEO\'s leadership determines the culture","severidad":"alta","mensaje":"You are attributing a systemic phenomenon to one person. Culture emerges from incentives, rituals, and the narratives the team reproduces daily — the CEO modulates but does not determine alone. Reframing as a system surfaces where the real levers live.","sugerencia":"the CEO\'s leadership modulates the culture, but the culture itself emerges from the incentives, rituals, and shared narratives every member reproduces daily"}',
+  estilo:
+    '{"cita":"it was observed that the team responded effectively","severidad":"media","mensaje":"Agentless passive plus abstract nouns erase both the subject and the measure. Who observed? What does \\"effectively\\" mean? The sentence sounds institutional but the reader can\'t check anything. Rewrite in active voice with a concrete datum.","sugerencia":"the team cut incident response time from 14 hours to 3 hours over six weeks"}',
+  argumento:
+    '{"cita":"we all know that transparency improves trust","severidad":"media","mensaje":"Appeal to common sense disguised as evidence. \\"We all know\\" is not an argument — it is a shortcut that ducks the interesting question: under what conditions? at what cost? when does it break? Replace the cliché with a concrete mechanism or a documented case.","sugerencia":"transparency lowers the coordination cost when the team trusts that shared information will not be weaponized against honest mistakes (Edmondson, 1999)"}',
+  apa:
+    '{"cita":"(Edmondson 1999)","severidad":"baja","mensaje":"Missing comma between author and year — APA 7 requires \\"Edmondson, 1999\\". Minor deviation, but a reader who checks references notices instantly and trust in the rest of the apparatus drops.","sugerencia":"(Edmondson, 1999)"}',
+};
 
 /** Cross-lingual example (sesión 15b): essay configured in one
  *  language but the author quoted text in the other. The mensaje
