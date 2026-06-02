@@ -771,7 +771,64 @@ Como drive-by: añadí `data-testid="lectura-overlay"` y `data-testid="pluma-ove
 - **Tests de "no-op silencioso" merecen su propio caso.** El test "ids desconocidos del menú son no-op silencioso" parece tonto, pero locka una garantía importante: añadir un item en Rust antes de wirear el bridge no rompe la app. Es lo que permite hacer sesiones cortas e incrementales (Rust primero, TS después) sin miedo.
 - **Convenciones de atajos de otras apps son shortcut intelectual.** No tuve que inventar `⌘\` ni explicar por qué — VS Code ya lo enseñó. Mismo con `⌘⇧E` (Evaluar / Export — convención de "shift = versión más fuerte"). Reutilizar el muscle memory del usuario en otras apps tiene un costo cero y un beneficio enorme.
 
-## Sesión 15 (próxima) — TBD
+## Qué quedó hecho en sesión 15 — Separar explicación pedagógica del reemplazo literal
+
+Bug conceptual reportado por Noé después de usar Evaluar:
+
+> "Una cosa es la sugerencia que me dan a mí, que puede mejorar para ser más clara; pero la otra es el texto a reemplazar. Ejemplo: la sugerencia puede ser 'tienes que citar al autor por esto o es plagio', el texto nuevo sería 'Un gran poder conlleva una gran responsabilidad (Tío Ben, 2002)'."
+
+El campo `sugerencia` hacía doble función — a veces era la explicación pedagógica del sabio (imperativos como "Reformula X", "Cita al autor"), a veces el texto literal del reemplazo. Cuando el usuario clickeaba "Aplicar sugerencia" en el primer caso, la cita en el doc se sustituía por un imperativo, rompiendo el texto.
+
+Fix sin migración (no rompemos anotaciones viejas):
+
+**Sidecar — `sage.ts`:**
+- `mensaje`: ampliado de 25 a **50 palabras**, con foco explícito en explicación pedagógica del "porqué", no órdenes secas.
+- `sugerencia`: OPCIONAL, redefinido como SOLO el texto literal de reemplazo. Prohibido usar imperativos. Si no hay un fragmento limpio para pegar, se omite.
+- Ejemplo de prompt actualizado en ambos idiomas usando el caso de Tío Ben:
+  - `mensaje`: "Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio…"
+  - `sugerencia`: "un gran poder conlleva una gran responsabilidad (Tío Ben, 2002)"
+
+**UI — `AnnotationPopover` y `BenchmarkDrilldown`:**
+- "Sugerencia" → **"Reemplazar por"** como header del bloque
+- Texto del reemplazo en bloque con borde + fondo distinto + comillas tipográficas — comunica visualmente "esto es texto literal del documento", no advice
+- Quitamos el italic (era estilo de advice; ahora es prosa real)
+- Botón "Aplicar sugerencia" → **"Reemplazar"** (corto, accionable)
+- Tooltip aclarado: "Sustituye el texto subrayado por el reemplazo que propone el sabio"
+- Nuevos testids `popover-reemplazo` y `drilldown-reemplazo`
+
+**Dos registros visuales para dos cosas conceptualmente distintas:**
+- Mensaje (explicación) → serif sin caja, texto humano del sabio
+- Reemplazo (literal) → en caja con borde, texto del documento
+
+**Tests:**
+- Stub actualizado: sugerencias derivan de la cita para ser texto pegable (no imperativos)
+- Mensajes del stub expandidos a "problema X — explicación pedagógica" para reflejar el ancho real
+- Nuevo spec en `apply-suggestion.spec.ts`: guard contra reintroducción del label viejo + verifica el bloque del reemplazo con su testid + asserta botón "Reemplazar"
+- Regex de `pluma-roja.spec.ts` aflojada de `/problema [ABC] detectado/` a `/problema [ABC]/` para tolerar la expansión pedagógica
+
+**106/106 E2E + 28/28 Rust + lint limpio.** La llave JSON `sugerencia` no cambió — anotaciones persistidas viejas siguen parseando sin migración.
+
+## Decisiones de la sesión 15
+
+| Decisión | Por qué |
+|---|---|
+| **Mantener la llave JSON `sugerencia`** en lugar de renombrar a `reemplazo` | Tres razones: (1) anotaciones existentes en docs persistidos siguen parseando sin migración; (2) breaking change al wire contract con el modelo no rinde valor real — la confusión era semántica, no nominal; (3) el nombre del campo no contamina la UI, que sí usa "Reemplazar". |
+| **Ampliar `mensaje` de 25 a 50 palabras** | El sabio necesita espacio para explicar el "porqué", no sólo el "qué". El caso de Tío Ben necesita ~30-40 palabras sólo para enunciar la regla académica con su excepción. 25 palabras forzaba telegrafías como "Plagio: cita". |
+| **`sugerencia` opcional explícito en el prompt** | A veces el problema es conceptual (un argumento débil) y no hay un fragmento limpio que reemplace la cita. Hacer obligatoria la `sugerencia` empujaba al modelo a inventar reemplazos forzados que el usuario después tenía que descartar. Mejor: "si no podés dar un fragmento limpio, omití el campo". |
+| **Comillas tipográficas en el bloque del reemplazo** | El glifo `"…"` lee instintivamente como "texto literal del documento". Es señalética micro pero cumple el rol de comunicar "este texto se pega tal cual" sin necesidad de un label adicional. |
+| **Quitar el italic** del bloque del reemplazo | El italic comunicaba "esto es advice / comentario", lo opuesto de lo que queremos. La prosa real del documento es regular serif. |
+| **Botón "Reemplazar"** en lugar de "Aplicar reemplazo" | Tres sílabas vs cinco; verbo en imperativo simple. El contexto del bloque "Reemplazar por: '...'" hace innecesario el sustantivo en el botón. |
+| **Stub deriva sugerencias de la cita** (`\${A} (referencia)`) | Refleja honesta el contrato del sidecar real. Antes el stub tenía sugerencias como "Reescribe la apertura con la evidencia delante" — imperativos justo de los que estamos sacando al sabio real. Los stubs deben mentir lo mínimo posible. |
+| **Sin migración de anotaciones viejas** | Las anotaciones persisten dentro del TipTap doc del ensayo. Una anotación vieja con `sugerencia: "Reformula X"` aplicada literalmente sí rompe el texto del usuario. Pero como cada `Aplicar` requiere acción manual y el usuario ve la sugerencia entes de cliquear, el daño es contenido. La alternativa (migración o stripping de sugerencias viejas) habría sido invasiva por un caso de borde. |
+
+## Aprendido en sesión 15
+
+- **Cuando un nombre de campo "hace dos cosas", la fix no es renombrar — es contar al productor del valor cuáles son las dos cosas que estás colapsando.** El campo `sugerencia` no estaba mal nombrado; estaba mal *instruido*. Apretar el prompt para que el modelo entienda la separación entre "advice" y "replacement text" arregla el bug sin tocar tipos ni wire contracts. La lección general: las APIs con shape liviana y prompts robustos > las APIs con shape rica y prompts permisivos.
+- **El mismo string puede comunicar cosas distintas según la tipografía y el contexto.** El bloque del reemplazo cambió 0 caracteres del valor mostrado — sólo añadimos comillas, borde, y un label. Pero ahora lee como "texto del documento" en vez de "advice del sabio". El framing visual hace gran parte del trabajo cognitivo.
+- **Stubs honestos pillan bugs que stubs ergonómicos no.** El stub viejo tenía sugerencias en imperativo, lo que enmascaraba el bug por meses — porque cuando un test las "aplicaba", lo único que se medía era que el reemplazo ocurría, no que el resultado se leía bien. El nuevo stub deriva sugerencias de la cita misma — más mecánico, pero refleja el contrato real. Si el contrato cambia, el stub falla en lugar de pasar silenciosamente.
+- **Bugs reportados por uso real son los más valiosos.** Ningún linter ni test type podía pillar esto — sólo un usuario haciendo el flujo real con un modelo real podía ver que la sugerencia era pedagógica y el "Aplicar" no le servía. Inversión en make-the-app-usable retroalimenta directo en calidad del producto.
+
+## Sesión 16 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
