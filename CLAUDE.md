@@ -828,6 +828,34 @@ Fix sin migración (no rompemos anotaciones viejas):
 - **Stubs honestos pillan bugs que stubs ergonómicos no.** El stub viejo tenía sugerencias en imperativo, lo que enmascaraba el bug por meses — porque cuando un test las "aplicaba", lo único que se medía era que el reemplazo ocurría, no que el resultado se leía bien. El nuevo stub deriva sugerencias de la cita misma — más mecánico, pero refleja el contrato real. Si el contrato cambia, el stub falla en lugar de pasar silenciosamente.
 - **Bugs reportados por uso real son los más valiosos.** Ningún linter ni test type podía pillar esto — sólo un usuario haciendo el flujo real con un modelo real podía ver que la sugerencia era pedagógica y el "Aplicar" no le servía. Inversión en make-the-app-usable retroalimenta directo en calidad del producto.
 
+## Sesión 15b — Idioma de la sugerencia coincide con la cita
+
+Refinamiento del contrato de sesión 15 reportado por Noé:
+
+> "El idioma del texto nuevo debe coincidir con el del texto original, aunque las sugerencias sean en español o en inglés dependiendo la configuración, el texto debe coincidir con el idioma del input."
+
+El caso real: ensayo configurado en español, pero el autor citó textualmente algo en inglés (común en académico — citar fuentes en su idioma original). Antes el contrato decía "todos los valores (mensaje y sugerencia) van en el idioma del ensayo", lo que forzaba al modelo a traducir el reemplazo y rompía gramaticalmente el párrafo de origen.
+
+Fix:
+
+**`languageDirective(lang)` en `sage.ts`** ahora separa explícito las dos reglas:
+- `mensaje` (explicación AL autor) → sigue el idioma de respuesta del sabio
+- `sugerencia` (reemplazo IN el doc) → SIEMPRE coincide con el idioma de la cita
+
+**El bullet point de `sugerencia` en el prompt** añade "Y EN EL MISMO IDIOMA QUE LA CITA".
+
+**Nuevo ejemplo cross-lingüe** `crossLingualExampleFor(lang)` mostrando un caso concreto donde mensaje y sugerencia están en idiomas distintos:
+- ES configurado → cita en inglés, mensaje en español, sugerencia en inglés (Tío Ben dentro de ensayo español)
+- EN configurado → cita en español, mensaje en inglés, sugerencia en español (Edmondson dentro de ensayo inglés)
+
+El prompt del sabio ahora muestra ambos ejemplos seguidos (el del mismo idioma primero, el cross-lingüe segundo) para que aprenda la separación entre "idioma del autor lector" y "idioma del documento source".
+
+**Decisión clave:** el caso cross-lingüe se enseña con ejemplo concreto, no sólo con instrucción negativa ("no traduzcas la cita"). LLMs aprenden mejor por demostración que por prohibición — el ejemplo donde mensaje y sugerencia VISIBLEMENTE están en idiomas distintos es más educativo que diez líneas de "no hagas X".
+
+**Lección general:** cuando un prompt da una regla con dos dimensiones ortogonales (idioma de respuesta × tipo de campo), no asumas que el modelo va a derivar la matriz correcta. Enseñá la matriz con ejemplos en cada cuadrante relevante.
+
+106/106 E2E + lint limpio.
+
 ## Sesión 16 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
