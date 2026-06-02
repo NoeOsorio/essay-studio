@@ -2,10 +2,12 @@ import { test, expect, type Page } from "@playwright/test";
 import { installTauriStub, openNewEssay } from "./setup";
 
 /**
- * "Aplicar sugerencia" click-to-apply coverage.
+ * "Reemplazar" click-to-apply coverage (originalmente "Aplicar
+ * sugerencia" hasta sesión 15 — relabel para distinguir explicación
+ * pedagógica del reemplazo literal).
  *
  * Both the inline popover (click an `.anno` in the editor) and the
- * Benchmark drilldown card expose an "Aplicar" button when the
+ * Benchmark drilldown card expose a "Reemplazar" button when the
  * anotación carries a `sugerencia`. Click → the text under the mark
  * is replaced by the sugerencia, the mark is removed, the score
  * recomputes, and the editor remains in a sane state.
@@ -185,4 +187,39 @@ test("after applying, the Scorebar overall recomputes", async ({ page }) => {
     const after = await page.getByTestId("scorebar-overall").innerText();
     expect(after).not.toBe(overallBefore);
   }).toPass({ timeout: 2000 });
+});
+
+test("popover muestra 'Reemplazar por' como bloque literal separado del mensaje (sesión 15)", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  await runEvaluarApply(page);
+
+  const editor = page.locator(".tiptap-content");
+  const annos = editor.locator(".anno");
+  let target = -1;
+  const count = await annos.count();
+  for (let i = 0; i < count; i++) {
+    if (await annos.nth(i).getAttribute("data-sugerencia")) {
+      target = i;
+      break;
+    }
+  }
+  expect(target).toBeGreaterThanOrEqual(0);
+
+  await annos.nth(target).click();
+  const popover = page.locator("[data-anno-popover]");
+  await expect(popover).toBeVisible();
+
+  // La etiqueta separa explicación (mensaje) del reemplazo literal.
+  await expect(popover).toContainText(/Reemplazar por/);
+  // El bloque del reemplazo tiene su propio testid y muestra el texto
+  // entre comillas — comunica visualmente que es texto literal y no
+  // advice del sabio.
+  const reemplazo = page.getByTestId("popover-reemplazo");
+  await expect(reemplazo).toBeVisible();
+  await expect(reemplazo).toContainText(/"|“/);
+
+  // El botón actualizado lee "Reemplazar", no "Aplicar sugerencia".
+  await expect(page.getByTestId("popover-apply")).toHaveText(/Reemplazar/);
 });

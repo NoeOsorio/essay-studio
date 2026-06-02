@@ -321,12 +321,20 @@ export async function installTauriStub(page: Page) {
                 : undefined;
             // Canned anotaciones — one per pase per sage. Each is a
             // valid JSON-line so parseAnotaciones picks it up.
+            //
+            // Sesión 15: las sugerencias son texto literal de
+            // reemplazo (no imperativos), para reflejar el contrato
+            // tightened en sage.ts. Concretamente: sugerencia debe
+            // poder pegarse en lugar de la cita y leerse bien en
+            // el doc. Acá las construimos derivando de la cita
+            // misma para mantener el matching de longitud que las
+            // specs de aplicar esperan.
             const items: Record<string, unknown>[] = [
               {
                 cita: A,
                 severidad: "alta",
-                mensaje: `[${sage}/${pase}] problema A detectado`,
-                sugerencia: "Reescribe la apertura con la evidencia delante.",
+                mensaje: `[${sage}/${pase}] problema A — el sabio explica el porqué con detalle pedagógico.`,
+                sugerencia: `${A} (referencia)`,
                 ...(linkedCriterioId
                   ? { criterioId: linkedCriterioId }
                   : {}),
@@ -334,13 +342,13 @@ export async function installTauriStub(page: Page) {
               {
                 cita: B,
                 severidad: "media",
-                mensaje: `[${sage}/${pase}] problema B detectado`,
+                mensaje: `[${sage}/${pase}] problema B — explicación pedagógica.`,
               },
               {
                 cita: C,
                 severidad: "baja",
-                mensaje: `[${sage}/${pase}] problema C detectado`,
-                sugerencia: "Especifica un caso concreto.",
+                mensaje: `[${sage}/${pase}] problema C — explicación pedagógica.`,
+                sugerencia: `${C} con cita`,
               },
             ];
             queueMicrotask(() => {

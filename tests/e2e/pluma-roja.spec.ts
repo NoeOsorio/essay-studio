@@ -113,7 +113,9 @@ test("clicking an annotation opens the popover; descartar removes the mark", asy
   await editor.locator(".anno").first().click();
   const popover = page.locator("[data-anno-popover]");
   await expect(popover).toBeVisible();
-  await expect(popover).toContainText(/problema [ABC] detectado/);
+  // Stub messages incluyen "problema A/B/C — explicación pedagógica"
+  // (sesión 15 los amplió para reflejar el contrato pedagógico nuevo).
+  await expect(popover).toContainText(/problema [ABC]/);
 
   // Descartar removes the mark and closes the popover.
   await popover.getByRole("button", { name: /Descartar/ }).click();
