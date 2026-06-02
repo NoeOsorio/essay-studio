@@ -52,7 +52,7 @@ export function pasadasForMode(mode: EssayMode): Pase[] {
 /** Minimal shape of an applied annotation, as read from a TipTap doc. */
 export type AppliedAnotacion = Pick<
   Anotacion,
-  "id" | "sage" | "pase" | "severidad" | "mensaje" | "sugerencia" | "criterioId"
+  "id" | "sage" | "pase" | "severidad" | "mensaje" | "reemplazo" | "criterioId"
 >;
 
 /** A snapshot of one criterio's score + the anotaciones that affect it. */
@@ -123,10 +123,14 @@ export function extractAnotacionesFromContent(
           severidad: a.severidad as Severidad,
           mensaje:
             typeof a.mensaje === "string" ? (a.mensaje as string) : "",
-          sugerencia:
-            typeof a.sugerencia === "string" && a.sugerencia.length > 0
-              ? (a.sugerencia as string)
-              : undefined,
+          reemplazo:
+            // Backward compat: anotaciones viejas tienen atributo
+            // `sugerencia` en sus marks; las nuevas usan `reemplazo`.
+            typeof a.reemplazo === "string" && a.reemplazo.length > 0
+              ? (a.reemplazo as string)
+              : typeof a.sugerencia === "string" && a.sugerencia.length > 0
+                ? (a.sugerencia as string)
+                : undefined,
           criterioId:
             typeof a.criterioId === "string" && a.criterioId.length > 0
               ? (a.criterioId as string)

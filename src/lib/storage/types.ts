@@ -109,10 +109,23 @@ export type Anotacion = {
   sage: Sage;
   pase: Pase;
   severidad: Severidad;
-  /** The exact span the sage quoted (used to anchor in the doc). */
+  /** Fragmento literal del documento que el sabio decidió señalar.
+   *  Lo llamamos `cita` por inercia histórica — cubre cualquier span
+   *  marcado (claim vago, voz pasiva, error ortográfico, citación
+   *  académica, etc.), no específicamente una citación. */
   cita: string;
+  /** Diagnóstico pedagógico: qué falla en `cita` y por qué importa.
+   *  NUNCA contiene la versión nueva del texto — eso vive en
+   *  `reemplazo`. Si el sabio te explica el cambio que propone, ese
+   *  texto está mal ubicado. */
   mensaje: string;
-  sugerencia?: string;
+  /** Texto literal que reemplazaría a `cita` en el documento si el
+   *  usuario aprieta "Reemplazar". Opcional — el sabio puede no tener
+   *  una propuesta concreta (a veces el problema es estructural y
+   *  no hay un fragmento que pegar). Antes de sesión 16 este campo
+   *  se llamaba `sugerencia`; el parser lee ambos para compatibilidad
+   *  con anotaciones viejas guardadas. */
+  reemplazo?: string;
   /** Optional id of the rubric criterio this annotation maps to. */
   criterioId?: string;
   /** ISO 8601 timestamp. */

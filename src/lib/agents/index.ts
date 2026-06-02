@@ -189,7 +189,7 @@ export type RawAnotacion = {
   cita: string;
   severidad: Severidad;
   mensaje: string;
-  sugerencia?: string;
+  reemplazo?: string;
   criterioId?: string;
 };
 
@@ -198,10 +198,83 @@ function isSeveridad(v: unknown): v is Severidad {
 }
 
 /**
+ * Prefijos conversacionales que el modelo a veces antepone al
+ * texto de reemplazo ("Reescribí: <prosa>") aunque la instrucción
+ * pida prosa pura. Si el campo `reemplazo` empieza con alguno,
+ * lo strippeamos antes de exponerlo. Lista explícita en lugar de
+ * regex genérica para no comer prefijos legítimos por accidente
+ * (ej. una cita que empieza con "Sugiero" como parte del texto).
+ * Belt-and-suspenders del prompt: aunque el prompt fuerce la regla,
+ * si el modelo desobedece el sanitizer evita pegar el verbo en el
+ * documento del usuario.
+ */
+const META_PREFIXES = [
+  // Español
+  "Reescribí:",
+  "Reescribi:",
+  "Reescribe:",
+  "Reescríbelo:",
+  "Reformulá:",
+  "Reformula:",
+  "Reformúlalo:",
+  "Cambia a:",
+  "Cambia por:",
+  "Cambialo a:",
+  "Cámbialo a:",
+  "Cámbialo por:",
+  "Mejor:",
+  "Mejor así:",
+  "Sugiero:",
+  "Propongo:",
+  "Versión nueva:",
+  "Nueva versión:",
+  "En su lugar:",
+  // English
+  "Rewrite:",
+  "Reword:",
+  "Change to:",
+  "Change it to:",
+  "Try:",
+  "Better:",
+  "Better as:",
+  "Suggestion:",
+  "Suggested:",
+  "New version:",
+  "Replace with:",
+  "Instead:",
+];
+
+function stripMetaPrefix(text: string): string {
+  let out = text.trim();
+  // Strip in a loop in case the model stacked two prefixes
+  // ("Reescribí: Mejor: …" → "…"). Cap at 4 iterations to avoid
+  // pathological inputs eating CPU.
+  for (let i = 0; i < 4; i++) {
+    let changed = false;
+    for (const prefix of META_PREFIXES) {
+      if (out.toLowerCase().startsWith(prefix.toLowerCase())) {
+        out = out.slice(prefix.length).trim();
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) break;
+  }
+  return out;
+}
+
+/**
  * Parse the JSON-lines output of a critique pass into structured
  * anotaciones. Tolerates: leading/trailing prose around the JSON
  * block, ```json fences, and lines that aren't JSON. Rejects {vacio}
  * sentinels (returns []).
+ *
+ * Sesión 16: acepta tanto la llave nueva `reemplazo` (post-rename)
+ * como la vieja `sugerencia` (anotaciones generadas con el prompt
+ * pre-16 que estén guardadas en algún essay). Después de extraer el
+ * valor lo pasa por `stripMetaPrefix` para limpiar prefijos como
+ * "Reescribí:" que el modelo a veces antepone aunque el prompt los
+ * prohíba.
  */
 export function parseAnotaciones(raw: string): RawAnotacion[] {
   // Strip markdown fences if the model wrapped its output in them.
@@ -225,19 +298,23 @@ export function parseAnotaciones(raw: string): RawAnotacion[] {
     const cita = obj.cita;
     const severidad = obj.severidad;
     const mensaje = obj.mensaje;
-    const sugerencia = obj.sugerencia;
+    // Preferimos `reemplazo` (sesión 16+); fallback a `sugerencia`
+    // para anotaciones generadas con el contrato viejo.
+    const reemplazoRaw =
+      typeof obj.reemplazo === "string" ? obj.reemplazo : obj.sugerencia;
     const criterioId = obj.criterioId;
     if (typeof cita !== "string" || cita.trim().length === 0) continue;
     if (!isSeveridad(severidad)) continue;
     if (typeof mensaje !== "string" || mensaje.trim().length === 0) continue;
+    const reemplazoClean =
+      typeof reemplazoRaw === "string" && reemplazoRaw.trim().length > 0
+        ? stripMetaPrefix(reemplazoRaw)
+        : "";
     out.push({
       cita: cita.trim(),
       severidad,
       mensaje: mensaje.trim(),
-      sugerencia:
-        typeof sugerencia === "string" && sugerencia.trim().length > 0
-          ? sugerencia.trim()
-          : undefined,
+      reemplazo: reemplazoClean.length > 0 ? reemplazoClean : undefined,
       criterioId:
         typeof criterioId === "string" && criterioId.trim().length > 0
           ? criterioId.trim()
@@ -274,7 +351,7 @@ export function buildAnotacion(
     severidad: raw.severidad,
     cita: raw.cita,
     mensaje: raw.mensaje,
-    sugerencia: raw.sugerencia,
+    reemplazo: raw.reemplazo,
     criterioId,
     generadoEn,
   };
