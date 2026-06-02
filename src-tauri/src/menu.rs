@@ -1,4 +1,4 @@
-// Native menu (sesión 13 — Fase 2.7 del ROADMAP).
+// Native menu (sesión 13 + 14 — Fase 2.7 del ROADMAP).
 //
 // macOS shows menus in the system menu bar; Windows/Linux render them
 // inside the window. Tauri 2's `menu::*` API abstracts that. We build
@@ -7,17 +7,16 @@
 // action (or use a TipTap command for Edit items, where TipTap
 // handles the system Cut/Copy/Paste/Undo/Redo via standard contenteditable).
 //
-// Sesión 13 scope: minimal structure (app/File/Edit/View/Window) with
-// Historial as the only custom non-app/non-window item — the explicit
-// trigger of this session was "move Historial out of the UI to a
-// native menu so the topbar isn't saturated." Future sessions can
-// expand under the same bridge.
-//
 // Custom item ids use a `surface:action` scheme so the renderer can
 // switch on them cleanly:
-//   "file:new"      → store.newEssay()
-//   "file:close"    → store.closeEssay()
-//   "view:history"  → store.openHistory()
+//   "file:new"          → store.newEssay()
+//   "file:close"        → store.closeEssay()
+//   "view:history"      → store.openHistory()
+//   "view:board-toggle" → store.toggleBoard()
+//   "sabios:interrogar" → store.openLectura()
+//   "sabios:evaluar"    → store.openPlumaRoja()
+//   "sabios:rubrica"    → store.openRubrica()
+//   "sabios:fuentes"    → store.openFuentes()
 
 use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
@@ -70,13 +69,49 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     // --- View ---
-    // The Historial item — the explicit reason for this session.
+    let view_board_toggle = MenuItemBuilder::new("Mostrar / ocultar tablero")
+        .id("view:board-toggle")
+        .accelerator("CmdOrCtrl+\\")
+        .build(app)?;
     let view_history = MenuItemBuilder::new("Historial de versiones…")
         .id("view:history")
         .accelerator("CmdOrCtrl+Shift+H")
         .build(app)?;
     let view_submenu = SubmenuBuilder::new(app, "Vista")
+        .item(&view_board_toggle)
+        .separator()
         .item(&view_history)
+        .build()?;
+
+    // --- Sabios ---
+    // Las cuatro acciones del consejo que el usuario lanza con más
+    // frecuencia. Acceleradores siguen las convenciones de "verbo de
+    // acción" (⌘I interrogar, ⌘⇧E evaluar) y "objeto de configuración"
+    // (⌘R rúbrica, ⌘F fuentes). El bridge ignora silenciosamente si no
+    // hay essay abierto — los items se ven activos pero no hacen nada
+    // (disable contextual queda para una sesión futura).
+    let sabios_interrogar = MenuItemBuilder::new("Interrogar")
+        .id("sabios:interrogar")
+        .accelerator("CmdOrCtrl+I")
+        .build(app)?;
+    let sabios_evaluar = MenuItemBuilder::new("Evaluar")
+        .id("sabios:evaluar")
+        .accelerator("CmdOrCtrl+Shift+E")
+        .build(app)?;
+    let sabios_rubrica = MenuItemBuilder::new("Rúbrica…")
+        .id("sabios:rubrica")
+        .accelerator("CmdOrCtrl+R")
+        .build(app)?;
+    let sabios_fuentes = MenuItemBuilder::new("Fuentes…")
+        .id("sabios:fuentes")
+        .accelerator("CmdOrCtrl+F")
+        .build(app)?;
+    let sabios_submenu = SubmenuBuilder::new(app, "Sabios")
+        .item(&sabios_interrogar)
+        .item(&sabios_evaluar)
+        .separator()
+        .item(&sabios_rubrica)
+        .item(&sabios_fuentes)
         .build()?;
 
     // --- Window ---
@@ -94,6 +129,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &file_submenu,
             &edit_submenu,
             &view_submenu,
+            &sabios_submenu,
             &window_submenu,
         ],
     )
