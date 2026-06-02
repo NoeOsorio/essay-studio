@@ -984,7 +984,79 @@ Los LLMs aprenden mejor por demostración que por prohibición. Las reglas negat
 - **Backward compat doble (wire + storage)** es el costo de un rename de schema. Una vez planteado bien — `parseHTML: data-X ?? data-Y`, `obj.X ?? obj.Y`, `extractAnotaciones lee ambas` — el caso queda cerrado sin migración. Las anotaciones viejas siguen funcionando; las nuevas usan el schema nuevo. Es 4 líneas de fallback bien colocadas.
 - **Belt-and-suspenders no es paranoia cuando el cost es bajo.** La sanitización agrega ~30 líneas TS y cuesta microsegundos por anotación. Si el prompt eventualmente funciona perfecto, el sanitizer es no-op. Si no funciona, evita daño visible. El asymmetry de cost vs benefit favorece tenerlo. La regla general: para defensas baratas contra fallas con consecuencias visibles para el usuario, ponelas.
 
-## Sesión 17 (próxima) — TBD
+## Qué quedó hecho en sesión 17 — Ajustes pedidos por Noé después de uso real
+
+Noé hizo una lista corta de 4 ajustes que detectó usando la app:
+
+1. ❌ "Poder limpiar la evaluación completamente" — no había forma de borrar todas las anotaciones de una vez ni resetear el estado del Benchmark.
+2. ❌ "Corregir los shortcuts del toolbar, ninguno funciona" — los accelerators del menú nativo no respondían.
+3. ⏸ "Poder exportar en md las sugerencias con sus mejoras" — Fase 2.1 del ROADMAP, queda para sesión 18.
+4. ❌ "Poder cerrar el banner de benchmark, es molesto verlo sobre todo cuando no hay rúbrica" — el Scorebar no era dismissible.
+
+Atacados 1, 2 y 4. Export (3) requiere decisiones de formato + es scope mayor — separado.
+
+### 1. Shortcuts del menú — diagnóstico y fix
+
+Tres causas concurrentes:
+
+**a) Conflictos con built-ins del webview wry.** `⌘R` y `⌘F` los intercepta el webview antes de que lleguen al menú nativo (Reload y Find respectivamente). El item se ve en el menú con su accelerator listado, pero apretarlo no dispara nada — el evento de teclado lo come la capa del webview.
+- Fix: `sabios:rubrica` ⌘R → ⌘⇧R; `sabios:fuentes` ⌘F → ⌘⇧F.
+
+**b) Colisión interna del menú.** `file:close` (Archivo > Cerrar ensayo) y `close_window` predefinido (Ventana > Close Window) ambos tiraban ⌘W. Sólo uno gana — el predefinido — y nuestra acción nunca se disparaba.
+- Fix: quitamos `close_window` de Ventana porque para una app de una sola ventana "cerrar la ventana" = "salir de la app" (= ⌘Q en App menu). ⌘W queda exclusivo de cerrar el documento actual, que ES lo que el usuario espera.
+
+**c) Hot-reload no reinicia el Rust.** El menú se construye en `setup()` de `lib.rs`. `tauri:dev` con file watcher recompila el renderer pero no reinicia el proceso Rust. Si el usuario probó los shortcuts después de pull de sesión 14 sin matar y relanzar `tauri:dev`, el menú nativo era el de antes de sesión 14 — sin las acciones del consejo.
+- Acción: documentado en el commit message y acá. No hay fix de código.
+
+### 2. Limpiar evaluación
+
+Nuevo menu item Sabios > Limpiar evaluación (⌘⇧⌫). Acción destructiva — pide `window.confirm()` antes de ejecutar. Implementación en 4 capas:
+
+- `store.clearEvaluacion()` despacha event `editor:clear-annotations` + resetea `essay.evaluacionMeta` a `undefined`.
+- `EditorPane` escucha el event y llama `editor.commands.clearAllAnnotations()` (el comando ya existía en `Annotation.ts` desde sesión 6, sin uso hasta hoy).
+- Sutileza importante: el listener de TipTap es **síncrono** dentro del dispatch del CustomEvent. Eso significa que cuando `dispatchEvent` retorna, el `updateContent` del editor ya corrió y reemplazó `current` en la store. Si la store después spread-ea del `cur` capturado al principio del action, las marks reaparecen (la store estaría poniendo el doc viejo con marks otra vez). Fix: releer `get().current` después del dispatch antes de spread.
+- Tests pillaron el bug — `menu.spec.ts` "sabios:limpiar borra todas las anotaciones" verificaba que `scorebar` no fuera visible después del clear. La primera versión fallaba porque las marks reaparecían por el ordering bug. El test es ahora un guard explícito.
+
+### 3. Scorebar dismissible
+
+Botón `×` en la esquina derecha del Scorebar (al lado del CTA Evaluar/Re-evaluar). Lógica:
+
+- `store.scorebarDismissed: boolean`, default `false`.
+- `Scorebar` retorna `null` también cuando `dismissed === true` (en adición al gate de sesión 13b).
+- Dismiss es **por essay** — `openEssay` lo resetea a `false`. Cambiar de ensayo y volver lo trae de vuelta. No se persiste en disco.
+- `recordEvaluacion` también lo resetea a `false`: si re-evaluás, claramente querés ver el resultado. Forzar al usuario a pedir "Mostrar Benchmark" a mano sería pasivo-agresivo.
+- Recovery vía menú: Vista > Mostrar Benchmark (`view:show-benchmark`, sin accelerator). Si te arrepentiste del dismiss, lo traés sin tener que cambiar de essay.
+
+### Export markdown (postponer)
+
+Punto 3 de Noé. Decisiones que necesita antes de codear: formato (essay completo con anotaciones inline como footnotes? doc separado tipo "review notes"?), inclusión opcional del reemplazo en el MD, ¿usamos shell plugin para abrir el archivo o solo save dialog? Le pasaré opciones cuando arranque sesión 18.
+
+**110/110 E2E + 28/28 Rust + lint limpio.**
+
+## Decisiones de la sesión 17
+
+| Decisión | Por qué |
+|---|---|
+| **⌘⇧R y ⌘⇧F** en lugar de teclas más exóticas (⌘⌥R) | Shift como modificador extra es la forma estándar en macOS de "lo mismo pero más fuerte" — Option más raro y a veces inalcanzable en teclados externos. ⌘⇧R también es legible visualmente. |
+| **Quitar close_window de Ventana** en lugar de cambiar file:close a otro shortcut | ⌘W es muscle-memory universal para "cerrar documento". Para esta app de un solo doc + una sola ventana, cerrar la ventana == salir, y eso ya está cubierto con ⌘Q. Reasignar file:close habría sido perder la convención que el usuario espera. |
+| **clearEvaluacion via event en lugar de exponer editor en store** | El store no tiene acceso al editor TipTap (vive en EditorPane). Pasar el editor a la store rompería la separación. Patrón de event ya existe (pluma-roja:apply, etc.) — clearAllAnnotations es uno más. |
+| **`get().current` re-leído post-dispatch en clearEvaluacion** | Sutileza síncrona: el listener del editor corre durante el dispatch y modifica `current` via updateContent. Si la store después spread-ea del cur viejo, las marks reaparecen. Re-leer fresh es la fix correcta — el comentario en código explica el ordering para que la próxima persona no tropiece. |
+| **window.confirm para "Limpiar evaluación"** vs modal custom | Pegada feo pero claro. v1. Si en uso real molesta el look del native confirm, hacemos un modal en seda Pergamino. Por ahora la fricción es honesta: acto destructivo, paso de confirmación. |
+| **Dismiss por essay, no persistido a disco** | Si el dismiss persistiera al cerrar/reabrir el ensayo, el usuario podría olvidarse que existe un score, y la próxima vez que abre el doc el bar nunca aparece. Volátil es más honesto. La recovery via menú está siempre disponible. |
+| **recordEvaluacion resetea dismissed** | Si el usuario corrió Evaluar, claramente quiere ver el resultado. Mantener el bar oculto sería pasivo-agresivo. El estado dismissed es "no me interesa esto AHORA" no "no me interesa nunca". |
+| **`view:show-benchmark` sin accelerator** | Es recovery action — algo que apretás una vez cada X semanas. Reservar muscle memory para algo así desperdicia un slot de shortcut. Acceso vía menú alcanza. |
+| **`⌘⇧⌫` para Limpiar evaluación** vs sin shortcut | Backspace es semánticamente "borrar" — coherente. Shift + Cmd lo hace destructivo claro, no algo que el usuario apriete por accidente. Si en uso real molesta, lo bajamos. |
+| **Skip de Export en esta sesión** | Scope del export (decisiones de formato + parser TipTap → MD + dialog nativo) es 2-3× el de los otros tres ajustes juntos. Mejor sesión propia con decisiones de UX al frente. |
+
+## Aprendido en sesión 17
+
+- **Los shortcuts del menú nativo conviven con shortcuts del webview, y el webview gana.** `⌘R` y `⌘F` son built-ins del wry — la app los nunca llega a ver. La regla práctica: si un shortcut existe en Chrome/Safari el webview lo come. Cuando elegís accelerators para menús nativos, evita los obvios (Reload, Find, Print, New Tab, etc.) o agrega ⌘⇧ para sacarlos del path del webview.
+- **El primer reflejo cuando "no funciona ninguno" suele ser "hot-reload no reinició la cosa".** Cualquier feature que vive en setup() de Rust (menú, plugins, IPC handlers) requiere reinicio completo de `tauri:dev`. Vale la pena documentarlo agresivamente — los users (incluyendo yo en 6 meses) van a tropezar de nuevo.
+- **dispatchEvent es síncrono en JS — el listener corre antes de que dispatchEvent retorne.** Eso significa que el código DESPUÉS del dispatch ve el estado post-handler, no pre-handler. El bug de clearEvaluacion era exactamente esto: spread-eamos del cur viejo (capturado antes del dispatch) sobre el current nuevo (modificado por el handler). Cuando combiná dispatchEvent + setState, releé el estado fresh después del dispatch.
+- **Dismiss volátil > dismiss persistido para señales informativas.** Un score que se esconde "para siempre" después de un click puede dejar al usuario sin foco. Dismiss por sesión + recovery cercana en menú es el balance: respeta el "no quiero verlo ahora" sin condenar la información a desaparecer del muscle memory.
+- **Tests destructivos pillan ordering bugs que tests felices no.** El test de Limpiar Evaluación incluyó la aserción "scorebar oculto después del clear". Esa aserción específica fue la que rebotó cuando el ordering bug hizo que las marks reaparecieran. Sin esa aserción habríamos pushado el bug. Cuando un action mute estado en dos capas, asertá ambas.
+
+## Sesión 18 (próxima) — Export markdown (Fase 2.1)
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
