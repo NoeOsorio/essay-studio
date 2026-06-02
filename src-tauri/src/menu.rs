@@ -9,16 +9,18 @@
 //
 // Custom item ids use a `surface:action` scheme so the renderer can
 // switch on them cleanly:
-//   "file:new"          → store.newEssay()
-//   "file:close"        → store.closeEssay()
-//   "view:history"      → store.openHistory()
-//   "view:board-toggle" → store.toggleBoard()
-//   "sabios:interrogar" → store.openLectura()
-//   "sabios:evaluar"    → store.openPlumaRoja()
-//   "sabios:rubrica"    → store.openRubrica()
-//   "sabios:fuentes"    → store.openFuentes()
+//   "file:new"            → store.newEssay()
+//   "file:close"          → store.closeEssay()
+//   "view:history"        → store.openHistory()
+//   "view:board-toggle"   → store.toggleBoard()
+//   "view:show-benchmark" → store.showScorebar()       (sesión 17)
+//   "sabios:interrogar"   → store.openLectura()
+//   "sabios:evaluar"      → store.openPlumaRoja()
+//   "sabios:rubrica"      → store.openRubrica()
+//   "sabios:fuentes"      → store.openFuentes()
+//   "sabios:limpiar"      → store.clearEvaluacion()    (sesión 17)
 
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
 /// Build the application menu. Called once at setup time.
@@ -77,19 +79,32 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .id("view:history")
         .accelerator("CmdOrCtrl+Shift+H")
         .build(app)?;
+    // Sesión 17: el Scorebar tiene un botón × para esconderse a mano.
+    // Este item lo vuelve a mostrar si el usuario se arrepiente.
+    // Sin accelerator — es un recovery action, no algo que el usuario
+    // dispare con frecuencia.
+    let view_show_benchmark = MenuItemBuilder::new("Mostrar Benchmark")
+        .id("view:show-benchmark")
+        .build(app)?;
     let view_submenu = SubmenuBuilder::new(app, "Vista")
         .item(&view_board_toggle)
         .separator()
+        .item(&view_show_benchmark)
         .item(&view_history)
         .build()?;
 
     // --- Sabios ---
-    // Las cuatro acciones del consejo que el usuario lanza con más
-    // frecuencia. Acceleradores siguen las convenciones de "verbo de
-    // acción" (⌘I interrogar, ⌘⇧E evaluar) y "objeto de configuración"
-    // (⌘R rúbrica, ⌘F fuentes). El bridge ignora silenciosamente si no
-    // hay essay abierto — los items se ven activos pero no hacen nada
-    // (disable contextual queda para una sesión futura).
+    // Las acciones del consejo que el usuario lanza con más frecuencia.
+    //
+    // Sesión 17: ⌘R (Rúbrica) y ⌘F (Fuentes) chocaban con shortcuts
+    // built-in del webview (Reload y Find respectivamente) que se
+    // interceptan ANTES de llegar al menú nativo. Movimos a ⌘⇧R y
+    // ⌘⇧F. Mantenemos ⌘I (Interrogar) y ⌘⇧E (Evaluar) — esos no
+    // tienen conflictos sistémicos.
+    //
+    // Limpiar evaluación (⌘⌫ + ⇧) es el acto destructivo del consejo
+    // — sólo lo ofrecemos vía menú, no atajo único, para evitar
+    // borrar todo accidentalmente.
     let sabios_interrogar = MenuItemBuilder::new("Interrogar")
         .id("sabios:interrogar")
         .accelerator("CmdOrCtrl+I")
@@ -100,11 +115,15 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build(app)?;
     let sabios_rubrica = MenuItemBuilder::new("Rúbrica…")
         .id("sabios:rubrica")
-        .accelerator("CmdOrCtrl+R")
+        .accelerator("CmdOrCtrl+Shift+R")
         .build(app)?;
     let sabios_fuentes = MenuItemBuilder::new("Fuentes…")
         .id("sabios:fuentes")
-        .accelerator("CmdOrCtrl+F")
+        .accelerator("CmdOrCtrl+Shift+F")
+        .build(app)?;
+    let sabios_limpiar = MenuItemBuilder::new("Limpiar evaluación")
+        .id("sabios:limpiar")
+        .accelerator("CmdOrCtrl+Shift+Backspace")
         .build(app)?;
     let sabios_submenu = SubmenuBuilder::new(app, "Sabios")
         .item(&sabios_interrogar)
@@ -112,14 +131,18 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .separator()
         .item(&sabios_rubrica)
         .item(&sabios_fuentes)
+        .separator()
+        .item(&sabios_limpiar)
         .build()?;
 
     // --- Window ---
+    // Sesión 17: close_window predefinido tiraba ⌘W también, y eso
+    // chocaba con file:close. Lo quitamos — Archivo > Cerrar ensayo
+    // es semánticamente el ⌘W de esta app (cerrar el documento
+    // actual). Para cerrar la ventana del SO la gente usa ⌘Q.
     let window_submenu = SubmenuBuilder::new(app, "Ventana")
         .minimize()
         .maximize()
-        .separator()
-        .item(&PredefinedMenuItem::close_window(app, None)?)
         .build()?;
 
     Menu::with_items(
