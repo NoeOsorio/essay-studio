@@ -63,6 +63,7 @@ export function LecturaOverlay() {
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-ink-1/30 backdrop-blur-[2px]"
       onClick={() => setOverlay(null)}
+      data-testid="lectura-overlay"
     >
       <div
         className="w-[1080px] max-w-[96vw] max-h-[92vh] bg-paper-2 border border-rule-2 rounded-[14px] shadow-(--shadow-pop) overflow-hidden flex flex-col"
