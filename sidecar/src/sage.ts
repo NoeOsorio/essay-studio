@@ -220,14 +220,16 @@ function languageDirective(lang: Language | undefined): string {
   if (lang === "en") {
     return [
       "IMPORTANT LANGUAGE INSTRUCTION:",
-      "Respond entirely in English. The persona description above is in Spanish but defines your voice and disposition — translate that character into English. Keep proper nouns (Edmondson, Meadows, Kahneman, etc.) and your name in their original form. All questions, anotaciones, mensajes and sugerencias must be in English.",
+      "Respond in English for everything you write TO the author — your questions, your `mensaje` explanations, your analysis. The persona description above is in Spanish but defines your voice and disposition — translate that character into English. Keep proper nouns (Edmondson, Meadows, Kahneman, etc.) and your name in their original form.",
+      "EXCEPTION — `sugerencia` (the literal replacement text): it MUST match the language of the `cita` it replaces, not your response language. If the cita is in Spanish, the sugerencia is in Spanish; if the cita is in English, the sugerencia is in English. The replacement is inserted into the user's document in place of the cita, so it has to read grammatically in the surrounding paragraph regardless of the user's interface language.",
       "",
     ].join("\n");
   }
   // Default Spanish — explicit so the model doesn't drift.
   return [
     "INSTRUCCIÓN DE IDIOMA:",
-    "Respondé enteramente en español. Mantené los nombres propios (Edmondson, Meadows, Kahneman, etc.) como están.",
+    "Respondé en español para todo lo que escribís AL autor — tus preguntas, tus `mensaje` con la explicación, tu análisis. Mantené los nombres propios (Edmondson, Meadows, Kahneman, etc.) como están.",
+    "EXCEPCIÓN — `sugerencia` (el texto literal de reemplazo): DEBE coincidir con el idioma de la `cita` que reemplaza, NO con tu idioma de respuesta. Si la cita está en inglés, la sugerencia va en inglés; si la cita está en español, la sugerencia va en español. El reemplazo se inserta en el documento del usuario en lugar de la cita, así que tiene que leerse gramaticalmente dentro del párrafo independientemente del idioma de la interfaz.",
     "",
   ].join("\n");
 }
@@ -323,15 +325,18 @@ async function runCritique(
     "  \"cita\":       fragmento literal copiado del texto, entre 4 y 25 palabras, exacto carácter por carácter.",
     "  \"severidad\":  una de \"alta\" | \"media\" | \"baja\".",
     "  \"mensaje\":    explicación pedagógica de qué falla y por qué importa. Hasta 50 palabras. Educa al autor — no des órdenes secas, contá el razonamiento.",
-    "  \"sugerencia\": OPCIONAL — y SOLO el texto literal que reemplazaría la cita en el documento. NO uses imperativos como \"Reformula X\", \"Cita al autor\", \"Reescribe Y\" — eso va en mensaje. Si no podés dar un fragmento limpio listo para pegar, omití el campo. La interfaz tiene un botón \"Reemplazar\" que sustituye la cita literalmente por este valor, así que tiene que poder leerse bien en su lugar dentro del párrafo.",
+    "  \"sugerencia\": OPCIONAL — y SOLO el texto literal que reemplazaría la cita en el documento. NO uses imperativos como \"Reformula X\", \"Cita al autor\", \"Reescribe Y\" — eso va en mensaje. Si no podés dar un fragmento limpio listo para pegar, omití el campo. La interfaz tiene un botón \"Reemplazar\" que sustituye la cita literalmente por este valor, así que tiene que poder leerse bien en su lugar dentro del párrafo Y EN EL MISMO IDIOMA QUE LA CITA (no en tu idioma de respuesta — ver instrucción de idioma arriba).",
     "  \"criterioId\": opcional, sólo si la anotación se alinea con un criterio de la rúbrica de arriba.",
     "",
     "Ejemplo de línea válida (notá cómo mensaje explica el porqué y sugerencia es texto listo para pegar, no una instrucción):",
     exampleLineFor(req.language),
     "",
+    "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". Notá que mensaje sigue tu idioma de respuesta (el autor lo lee), pero sugerencia queda en el idioma de la cita (se inserta en el documento del autor en lugar de la cita):",
+    crossLingualExampleFor(req.language),
+    "",
     "Si no encontrás nada interesante en tu dominio, devolvé una sola línea: {\"vacio\":true,\"razon\":\"...\"}",
     "",
-    "Recordá: las LLAVES del JSON (cita, severidad, mensaje, sugerencia, criterioId) son técnicas y van siempre en español tal como las defino. Los VALORES de \"mensaje\" y \"sugerencia\" van en el idioma del ensayo indicado arriba.",
+    "Recordá: las LLAVES del JSON (cita, severidad, mensaje, sugerencia, criterioId) son técnicas y van siempre en español tal como las defino. El VALOR de \"mensaje\" va en el idioma del ensayo indicado arriba (lo lee el autor). El VALOR de \"sugerencia\" coincide con el idioma de \"cita\" (se inserta en el documento del autor en lugar de la cita, así que tiene que leerse en el mismo idioma del párrafo de origen).",
   );
   await runSageTurn(req.id, req.sage, parts.join("\n"));
 }
@@ -347,6 +352,24 @@ function exampleLineFor(lang: Language | undefined): string {
     return '{"cita":"with great power comes great responsibility","severidad":"alta","mensaje":"You are paraphrasing Uncle Ben without crediting the source. Quoting or paraphrasing famous lines without attribution is plagiarism, even when the line is iconic. Add the in-text citation right after the phrase.","sugerencia":"with great power comes great responsibility (Uncle Ben, 2002)"}';
   }
   return '{"cita":"un gran poder conlleva una gran responsabilidad","severidad":"alta","mensaje":"Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio aunque la cita sea conocida — la regla académica no hace excepciones. Añadí la cita parentética justo después de la frase.","sugerencia":"un gran poder conlleva una gran responsabilidad (Tío Ben, 2002)"}';
+}
+
+/** Cross-lingual example (sesión 15b): essay configured in one
+ *  language but the author quoted text in the other. The mensaje
+ *  follows the response language (the author reads it); the
+ *  sugerencia stays in the cita's language (it replaces the cita
+ *  inside the document and must read grammatically in that
+ *  paragraph). This is common in academic writing — citing English
+ *  sources inside a Spanish essay or vice versa. */
+function crossLingualExampleFor(lang: Language | undefined): string {
+  if (lang === "en") {
+    // Author writing in English, but they quoted Edmondson in Spanish.
+    // Sugerencia stays in Spanish so it inserts back into the doc cleanly.
+    return '{"cita":"la seguridad psicológica es la creencia compartida","severidad":"media","mensaje":"You inserted an in-text claim that paraphrases Edmondson without a citation. Quotations and close paraphrases from her 1999 paper need attribution to support the claim and to make the reader trace it. Keep the Spanish quote as-is and add the parenthetical reference.","sugerencia":"la seguridad psicológica es la creencia compartida (Edmondson, 1999)"}';
+  }
+  // Author writing in Spanish, but they quoted Tío Ben in English.
+  // Sugerencia stays in English so it inserts back into the doc cleanly.
+  return '{"cita":"with great power comes great responsibility","severidad":"alta","mensaje":"Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio aunque la cita sea conocida. Mantené la frase original en inglés (es como la pronuncia el personaje) y añadí la cita parentética justo después.","sugerencia":"with great power comes great responsibility (Uncle Ben, 2002)"}';
 }
 
 // --------- stdin loop ---------
