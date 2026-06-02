@@ -198,8 +198,16 @@ function AnotacionCard({ a }: { a: AppliedAnotacion }) {
             {a.mensaje}
           </div>
           {a.sugerencia ? (
-            <div className="mt-1 font-serif italic text-[12px] text-ink-2 leading-[1.45]">
-              → {a.sugerencia}
+            <div className="mt-2">
+              <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 mb-1">
+                Reemplazar por
+              </div>
+              <div
+                className="font-serif text-[12px] leading-[1.45] text-ink-1 px-2 py-1.5 bg-paper-2 border border-rule-1 rounded-[5px]"
+                data-testid="drilldown-reemplazo"
+              >
+                “{a.sugerencia}”
+              </div>
             </div>
           ) : null}
         </div>
@@ -208,12 +216,12 @@ function AnotacionCard({ a }: { a: AppliedAnotacion }) {
             <button
               type="button"
               onClick={apply}
-              title="Reemplazar el texto subrayado con la sugerencia"
-              aria-label="Aplicar sugerencia"
+              title="Sustituye el texto subrayado por el reemplazo del sabio"
+              aria-label="Reemplazar"
               data-testid="drilldown-apply"
               className="font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-paper bg-ink-1 hover:bg-ink-2 px-2.5 py-1 rounded cursor-pointer"
             >
-              Aplicar
+              Reemplazar
             </button>
           ) : null}
           <button

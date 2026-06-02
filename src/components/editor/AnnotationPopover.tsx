@@ -193,11 +193,18 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
 
       {open.sugerencia ? (
         <div className="px-3 py-2.5 border-t border-rule-1 bg-paper">
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3 mb-1">
-            Sugerencia
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3 mb-1.5">
+            Reemplazar por
           </div>
-          <div className="font-serif text-[12.5px] leading-[1.5] text-ink-2 italic">
-            {open.sugerencia}
+          {/* Bloque literal — borde + fondo distinto + tipografía
+              que comunica "esto es lo que se va a pegar en tu texto,
+              no advice". El italic se fue porque el contenido es
+              prosa real, no comentario del sabio. */}
+          <div
+            className="font-serif text-[12.5px] leading-[1.5] text-ink-1 px-2.5 py-1.5 bg-paper-2 border border-rule-1 rounded-[6px]"
+            data-testid="popover-reemplazo"
+          >
+            “{open.sugerencia}”
           </div>
         </div>
       ) : null}
@@ -216,10 +223,10 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
             type="button"
             onClick={applySugerencia}
             data-testid="popover-apply"
-            title="Reemplaza el texto subrayado con la sugerencia del sabio"
+            title="Sustituye el texto subrayado por el reemplazo que propone el sabio"
             className="font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-paper bg-ink-1 hover:bg-ink-2 px-2.5 py-1 rounded cursor-pointer"
           >
-            Aplicar sugerencia
+            Reemplazar
           </button>
         ) : null}
       </div>
