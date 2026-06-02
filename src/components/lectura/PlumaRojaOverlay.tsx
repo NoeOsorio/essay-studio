@@ -613,9 +613,14 @@ function PaneBody({
                 <div className="text-[12.5px] leading-[1.5] text-ink-1">
                   {a.mensaje}
                 </div>
-                {a.sugerencia ? (
-                  <div className="mt-1.5 pt-1.5 border-t border-rule-1 font-serif italic text-[12px] text-ink-2 leading-[1.45]">
-                    → {a.sugerencia}
+                {a.reemplazo ? (
+                  <div className="mt-1.5 pt-1.5 border-t border-rule-1">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 mb-0.5">
+                      Reemplazar por
+                    </div>
+                    <div className="font-serif text-[12px] text-ink-1 leading-[1.45]">
+                      “{a.reemplazo}”
+                    </div>
                   </div>
                 ) : null}
               </div>

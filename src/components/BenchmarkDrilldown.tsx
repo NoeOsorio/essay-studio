@@ -148,13 +148,13 @@ function AnotacionCard({ a }: { a: AppliedAnotacion }) {
 
   const apply = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!a.id || !a.sugerencia) return;
-    // EditorPane listens for `pluma-roja:apply-suggestion` and calls
-    // `applyAnnotationSuggestion(id, sugerencia)`. If the mark crosses
-    // block boundaries, the editor surfaces a toast.
+    if (!a.id || !a.reemplazo) return;
+    // EditorPane escucha `pluma-roja:apply-reemplazo` y llama
+    // `applyAnnotationReemplazo(id, reemplazo)`. Si la mark cruza
+    // bloques, el editor surface un alert al usuario.
     window.dispatchEvent(
-      new CustomEvent("pluma-roja:apply-suggestion", {
-        detail: { id: a.id, sugerencia: a.sugerencia },
+      new CustomEvent("pluma-roja:apply-reemplazo", {
+        detail: { id: a.id, reemplazo: a.reemplazo },
       }),
     );
   };
@@ -197,7 +197,7 @@ function AnotacionCard({ a }: { a: AppliedAnotacion }) {
           <div className="text-[13px] leading-[1.5] text-ink-1 font-serif">
             {a.mensaje}
           </div>
-          {a.sugerencia ? (
+          {a.reemplazo ? (
             <div className="mt-2">
               <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 mb-1">
                 Reemplazar por
@@ -206,13 +206,13 @@ function AnotacionCard({ a }: { a: AppliedAnotacion }) {
                 className="font-serif text-[12px] leading-[1.45] text-ink-1 px-2 py-1.5 bg-paper-2 border border-rule-1 rounded-[5px]"
                 data-testid="drilldown-reemplazo"
               >
-                “{a.sugerencia}”
+                “{a.reemplazo}”
               </div>
             </div>
           ) : null}
         </div>
         <div className="flex flex-col items-end gap-1.5 flex-none">
-          {a.sugerencia ? (
+          {a.reemplazo ? (
             <button
               type="button"
               onClick={apply}

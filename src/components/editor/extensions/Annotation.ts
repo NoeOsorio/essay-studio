@@ -5,10 +5,16 @@
 // etc. classes live in globals.css and supply the tinted underline +
 // the circular sage chip.
 //
-// All annotation metadata (sage, pase, severidad, mensaje, sugerencia)
+// All annotation metadata (sage, pase, severidad, mensaje, reemplazo)
 // is stored as mark attributes so it travels with the TipTap content
 // — no separate side store. That means re-opening an essay just
 // re-renders the marks for free.
+//
+// Sesión 16: el atributo antes se llamaba `sugerencia` y persistía
+// como `data-sugerencia`. Ahora es `reemplazo` / `data-reemplazo`.
+// El parseHTML acepta ambos para que anotaciones viejas guardadas en
+// docs existentes sigan rindiéndose con el campo poblado; renderHTML
+// sólo escribe el nuevo.
 
 import { Mark, mergeAttributes } from "@tiptap/core";
 
@@ -18,7 +24,7 @@ export type AnnotationAttrs = {
   pase: "coherencia" | "estilo" | "argumento" | "apa" | null;
   severidad: "alta" | "media" | "baja" | null;
   mensaje: string | null;
-  sugerencia: string | null;
+  reemplazo: string | null;
   /** Optional id of the rubric criterio this annotation maps to. */
   criterioId: string | null;
 };
@@ -41,12 +47,12 @@ declare module "@tiptap/core" {
        */
       removeAnnotationById: (id: string) => ReturnType;
       /**
-       * Replace the text under the annotation's mark with `sugerencia`
-       * and remove the mark. Used by the popover/drilldown "Aplicar
-       * sugerencia" button. Returns false (no-op) when the mark spans
+       * Replace the text under the annotation's mark with `reemplazo`
+       * and remove the mark. Used by el popover/drilldown botón
+       * "Reemplazar". Returns false (no-op) when the mark spans
        * multiple block nodes — those cases need manual editing.
        */
-      applyAnnotationSuggestion: (id: string, sugerencia: string) => ReturnType;
+      applyAnnotationReemplazo: (id: string, reemplazo: string) => ReturnType;
       /** Strip every annotation mark from the document. */
       clearAllAnnotations: () => ReturnType;
     };
@@ -109,12 +115,17 @@ export const Annotation = Mark.create({
         renderHTML: (attrs) =>
           attrs.mensaje ? { "data-mensaje": String(attrs.mensaje) } : {},
       },
-      sugerencia: {
+      reemplazo: {
         default: null,
-        parseHTML: (el) => el.getAttribute("data-sugerencia"),
+        // Backward compat: anotaciones viejas guardadas con
+        // data-sugerencia siguen poblando el campo. Nuevas se
+        // escriben como data-reemplazo (renderHTML abajo).
+        parseHTML: (el) =>
+          el.getAttribute("data-reemplazo") ??
+          el.getAttribute("data-sugerencia"),
         renderHTML: (attrs) =>
-          attrs.sugerencia
-            ? { "data-sugerencia": String(attrs.sugerencia) }
+          attrs.reemplazo
+            ? { "data-reemplazo": String(attrs.reemplazo) }
             : {},
       },
       criterioId: {
@@ -184,8 +195,8 @@ export const Annotation = Mark.create({
           }
           return true;
         },
-      applyAnnotationSuggestion:
-        (id, sugerencia) =>
+      applyAnnotationReemplazo:
+        (id, reemplazo) =>
         ({ tr, dispatch, state }) => {
           // Find the (contiguous, hopefully) range carrying this id.
           let firstFrom = -1;
@@ -208,9 +219,6 @@ export const Annotation = Mark.create({
                   // in a *different* block from the previous one (which
                   // would mean the mark crosses paragraphs / headings).
                   if (lastTo !== -1 && pos > lastBlockTop && lastBlockTop !== -1) {
-                    // Quick heuristic: if the new segment's pos is past
-                    // the most-recent block boundary, AND lastTo was
-                    // before that boundary, we crossed.
                     if (lastTo <= lastBlockTop) crossesBlock = true;
                   }
                   lastTo = to;
@@ -224,15 +232,15 @@ export const Annotation = Mark.create({
             // Refuse to merge paragraphs — caller should surface a hint.
             return false;
           }
-          if (!sugerencia || sugerencia.length === 0) return false;
+          if (!reemplazo || reemplazo.length === 0) return false;
           if (dispatch) {
-            // Replace the marked range with the suggestion text. The
-            // new text inherits the annotation mark on its left edge,
-            // so we explicitly strip the mark afterwards.
-            tr.insertText(sugerencia, firstFrom, lastTo);
+            // Replace the marked range with the new prose. The new
+            // text inherits the annotation mark on its left edge, so
+            // we explicitly strip the mark afterwards.
+            tr.insertText(reemplazo, firstFrom, lastTo);
             tr.removeMark(
               firstFrom,
-              firstFrom + sugerencia.length,
+              firstFrom + reemplazo.length,
               this.type,
             );
             dispatch(tr);

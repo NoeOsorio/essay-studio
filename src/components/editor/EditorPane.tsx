@@ -254,34 +254,35 @@ function TipTapEditor({
       );
   }, [editor]);
 
-  // Benchmark drilldown also dispatches `pluma-roja:apply-suggestion`
-  // when the user clicks "Aplicar" on a card. The editor replaces the
-  // marked text with the sugerencia. Multi-block marks return false →
-  // surface a toast so the user knows to apply manually.
+  // Popover / drilldown despachan `pluma-roja:apply-reemplazo` cuando
+  // el usuario aprieta "Reemplazar" en una anotación. El editor
+  // sustituye el texto marcado por el reemplazo. Multi-block marks
+  // devuelven false → surface un alert para que el usuario sepa
+  // que tiene que aplicarlo manualmente.
   useEffect(() => {
     if (!editor) return;
     const handler = (e: Event) => {
       const detail = (
-        e as CustomEvent<{ id: string; sugerencia: string }>
+        e as CustomEvent<{ id: string; reemplazo: string }>
       ).detail;
-      if (!detail?.id || !detail.sugerencia) return;
-      const applied = editor.commands.applyAnnotationSuggestion(
+      if (!detail?.id || !detail.reemplazo) return;
+      const applied = editor.commands.applyAnnotationReemplazo(
         detail.id,
-        detail.sugerencia,
+        detail.reemplazo,
       );
       if (!applied) {
         window.alert(
-          "La sugerencia cruza varios bloques (párrafo/heading). Aplícala manualmente.",
+          "El reemplazo cruza varios bloques (párrafo/heading). Aplicalo manualmente.",
         );
       }
     };
     window.addEventListener(
-      "pluma-roja:apply-suggestion",
+      "pluma-roja:apply-reemplazo",
       handler as EventListener,
     );
     return () =>
       window.removeEventListener(
-        "pluma-roja:apply-suggestion",
+        "pluma-roja:apply-reemplazo",
         handler as EventListener,
       );
   }, [editor]);
@@ -321,7 +322,7 @@ function applyAnotaciones(editor: Editor, anotaciones: Anotacion[]) {
         pase: a.pase,
         severidad: a.severidad,
         mensaje: a.mensaje,
-        sugerencia: a.sugerencia ?? null,
+        reemplazo: a.reemplazo ?? null,
         criterioId: a.criterioId ?? null,
       })
       .run();

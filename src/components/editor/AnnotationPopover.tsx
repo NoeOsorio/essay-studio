@@ -13,7 +13,7 @@ type Open = {
   pase: string;
   severidad: string;
   mensaje: string;
-  sugerencia: string | null;
+  reemplazo: string | null;
   criterioId: string | null;
 };
 
@@ -71,7 +71,9 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
       const pase = el.dataset.pase;
       const severidad = el.dataset.severidad;
       const mensaje = el.dataset.mensaje;
-      const sugerencia = el.dataset.sugerencia ?? null;
+      // Backward compat con anotaciones viejas (data-sugerencia).
+      const reemplazo =
+        el.dataset.reemplazo ?? el.dataset.sugerencia ?? null;
       const criterioId = el.dataset.criterioId ?? null;
       if (!id || !sage || !pase || !severidad || !mensaje) return;
       e.preventDefault();
@@ -83,7 +85,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
         pase,
         severidad,
         mensaje,
-        sugerencia,
+        reemplazo,
         criterioId,
       });
     };
@@ -117,16 +119,16 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
     setOpen(null);
   };
 
-  const applySugerencia = () => {
-    if (!open.sugerencia) return;
-    const applied = editor.commands.applyAnnotationSuggestion(
+  const applyReemplazo = () => {
+    if (!open.reemplazo) return;
+    const applied = editor.commands.applyAnnotationReemplazo(
       open.id,
-      open.sugerencia,
+      open.reemplazo,
     );
     if (!applied) {
       // Multi-block range — refuse and tell the user.
       window.alert(
-        "La sugerencia cruza varios bloques (párrafo/heading). Aplícala manualmente seleccionando el texto y reemplazándolo.",
+        "El reemplazo cruza varios bloques (párrafo/heading). Aplicalo manualmente seleccionando el texto y sustituyéndolo.",
       );
       return;
     }
@@ -191,7 +193,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
         <div>{open.mensaje}</div>
       </div>
 
-      {open.sugerencia ? (
+      {open.reemplazo ? (
         <div className="px-3 py-2.5 border-t border-rule-1 bg-paper">
           <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3 mb-1.5">
             Reemplazar por
@@ -204,7 +206,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
             className="font-serif text-[12.5px] leading-[1.5] text-ink-1 px-2.5 py-1.5 bg-paper-2 border border-rule-1 rounded-[6px]"
             data-testid="popover-reemplazo"
           >
-            “{open.sugerencia}”
+            “{open.reemplazo}”
           </div>
         </div>
       ) : null}
@@ -218,10 +220,10 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
         >
           Descartar
         </button>
-        {open.sugerencia ? (
+        {open.reemplazo ? (
           <button
             type="button"
-            onClick={applySugerencia}
+            onClick={applyReemplazo}
             data-testid="popover-apply"
             title="Sustituye el texto subrayado por el reemplazo que propone el sabio"
             className="font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-paper bg-ink-1 hover:bg-ink-2 px-2.5 py-1 rounded cursor-pointer"
