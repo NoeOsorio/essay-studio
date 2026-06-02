@@ -9,14 +9,16 @@
 // want behavior wired up.
 //
 // IDs follow the convention `surface:action`:
-//   "file:new"           → newEssay()
-//   "file:close"         → closeEssay()
-//   "view:history"       → openHistory()
-//   "view:board-toggle"  → toggleBoard()
-//   "sabios:interrogar"  → openLectura()
-//   "sabios:evaluar"     → openPlumaRoja()
-//   "sabios:rubrica"     → openRubrica()
-//   "sabios:fuentes"     → openFuentes()
+//   "file:new"             → newEssay()
+//   "file:close"           → closeEssay()
+//   "view:history"         → openHistory()
+//   "view:board-toggle"    → toggleBoard()
+//   "view:show-benchmark"  → showScorebar()    (sesión 17)
+//   "sabios:interrogar"    → openLectura()
+//   "sabios:evaluar"       → openPlumaRoja()
+//   "sabios:rubrica"       → openRubrica()
+//   "sabios:fuentes"       → openFuentes()
+//   "sabios:limpiar"       → clearEvaluacion() (sesión 17)
 
 import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -65,6 +67,23 @@ export function useNativeMenuBridge() {
           break;
         case "sabios:fuentes":
           if (s.current) s.openFuentes();
+          break;
+        case "sabios:limpiar":
+          // Acto destructivo — pedimos confirmación rápida porque
+          // borra TODAS las anotaciones del documento de una vez.
+          // window.confirm bloqueante alcanza para v1; un modal más
+          // suave queda para si lo pedís.
+          if (s.current) {
+            const ok = window.confirm(
+              "¿Limpiar la evaluación entera? Esto borra todas las anotaciones del documento. No se puede deshacer (salvo con ⌘Z).",
+            );
+            if (ok) s.clearEvaluacion();
+          }
+          break;
+        case "view:show-benchmark":
+          // No-op si no hay essay o ya está visible — el render del
+          // Scorebar de todas formas chequea hasAnotaciones/wasEvaluated.
+          if (s.current) s.showScorebar();
           break;
         default:
           // Predefined items (cut/copy/paste/quit/undo/redo/etc.)

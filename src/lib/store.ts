@@ -94,6 +94,18 @@ type State = {
    *  current `essay.updatedAt` so subsequent edits make the score
    *  stale without false positives from the apply itself. */
   recordEvaluacion: (pasadasCubiertas: Pase[]) => void;
+  /** Limpia la evaluación entera: quita todas las anotaciones del
+   *  documento (vía evento que captura EditorPane) y resetea
+   *  evaluacionMeta. El Scorebar vuelve al estado "nunca evaluado"
+   *  (sesión 13b: oculto). Sesión 17. */
+  clearEvaluacion: () => void;
+  /** Scorebar dismissible (sesión 17). Estado de sesión — no se
+   *  persiste, vuelve al re-abrir el ensayo o al correr Evaluar. */
+  scorebarDismissed: boolean;
+  /** Esconde el Scorebar. Sólo afecta el render — los datos quedan. */
+  dismissScorebar: () => void;
+  /** Vuelve a mostrar el Scorebar (menú Vista > Mostrar Benchmark). */
+  showScorebar: () => void;
   /** Open / close the lectura overlay. */
   setOverlay: (overlay: Overlay) => void;
   /** Open the Lectura overlay AND make sure the board pane is
@@ -201,6 +213,7 @@ export const useStore = create<State>((set, get) => ({
   lecturaPrefill: "",
   history: [],
   restoreNonce: 0,
+  scorebarDismissed: false,
   _autosaveTimer: null,
 
   async loadList() {
@@ -249,9 +262,12 @@ export const useStore = create<State>((set, get) => ({
         current: essay,
         view: "editor",
         saveStatus: { kind: "saved", at: Date.parse(essay.updatedAt) },
-        // Reset; loadHistory below repopulates with metas for the
-        // freshly opened essay so the topbar count is honest.
+        // Reset; loadHistory below repopulates con metas del essay
+        // recién abierto para que el count del topbar sea honesto.
         history: [],
+        // Sesión 17: el dismiss del Scorebar es por-essay, no global.
+        // Abrir otro ensayo lo trae de vuelta.
+        scorebarDismissed: false,
       });
       void get().loadHistory();
     } catch (err) {
@@ -391,8 +407,46 @@ export const useStore = create<State>((set, get) => ({
         pasadasCubiertas: [...pasadasCubiertas],
       },
     };
+    // Re-mostrar el Scorebar — si el usuario lo había cerrado y
+    // ahora corrió Evaluar de nuevo, claramente quiere ver el
+    // resultado. Mantener oculto sería confuso.
+    set({
+      current: updated,
+      saveStatus: { kind: "dirty" },
+      scorebarDismissed: false,
+    });
+    void get().flush();
+  },
+
+  clearEvaluacion() {
+    const cur = get().current;
+    if (!cur) return;
+    // Quitar todas las marks del doc. EditorPane escucha este event
+    // SÍNCRONAMENTE y llama editor.commands.clearAllAnnotations().
+    // Eso dispara TipTap's onUpdate → updateContent en este mismo
+    // tick, dejando current.content sin marks y bumping updatedAt.
+    window.dispatchEvent(new CustomEvent("editor:clear-annotations"));
+    // DESPUÉS del clear de marks, leemos el current fresh (porque
+    // updateContent acaba de reemplazarlo) y le sacamos evaluacionMeta.
+    // Si capturáramos cur arriba y spread-eáramos sobre eso, el
+    // marcado iba a reaparecer porque cur.content todavía tenía las
+    // marks viejas. Sesión 17 — ordering bug pillado por menu.spec.
+    const fresh = get().current;
+    if (!fresh) return;
+    const updated: Essay = {
+      ...fresh,
+      evaluacionMeta: undefined,
+    };
     set({ current: updated, saveStatus: { kind: "dirty" } });
     void get().flush();
+  },
+
+  dismissScorebar() {
+    set({ scorebarDismissed: true });
+  },
+
+  showScorebar() {
+    set({ scorebarDismissed: false });
   },
 
   setOverlay(overlay) {

@@ -254,6 +254,22 @@ function TipTapEditor({
       );
   }, [editor]);
 
+  // Sesión 17 — store.clearEvaluacion() despacha este event para
+  // quitar TODAS las marks del doc de una sola pasada. El comando
+  // clearAllAnnotations del Mark recorre el doc y removeMark cada
+  // annotation. El onUpdate del editor dispara updateContent, así
+  // que el flush + el reset de evaluacionMeta que hace la store
+  // quedan consistentes.
+  useEffect(() => {
+    if (!editor) return;
+    const handler = () => {
+      editor.commands.clearAllAnnotations();
+    };
+    window.addEventListener("editor:clear-annotations", handler);
+    return () =>
+      window.removeEventListener("editor:clear-annotations", handler);
+  }, [editor]);
+
   // Popover / drilldown despachan `pluma-roja:apply-reemplazo` cuando
   // el usuario aprieta "Reemplazar" en una anotación. El editor
   // sustituye el texto marcado por el reemplazo. Multi-block marks
