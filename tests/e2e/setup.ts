@@ -319,22 +319,21 @@ export async function installTauriStub(page: Page) {
               firstCriterio && typeof firstCriterio.id === "string"
                 ? firstCriterio.id
                 : undefined;
-            // Canned anotaciones — one per pase per sage. Each is a
-            // valid JSON-line so parseAnotaciones picks it up.
+            // Canned anotaciones — una por pase por sabio. Cada una
+            // es una línea JSON válida que parseAnotaciones consume.
             //
-            // Sesión 15: las sugerencias son texto literal de
-            // reemplazo (no imperativos), para reflejar el contrato
-            // tightened en sage.ts. Concretamente: sugerencia debe
-            // poder pegarse en lugar de la cita y leerse bien en
-            // el doc. Acá las construimos derivando de la cita
-            // misma para mantener el matching de longitud que las
-            // specs de aplicar esperan.
+            // Sesión 16: la llave pasó de `sugerencia` a `reemplazo`.
+            // El stub emite con la nueva llave para reflejar el
+            // contrato del sidecar real. parseAnotaciones acepta
+            // ambas por backward compat. Los reemplazos derivan de
+            // la cita misma para mantener el matching de longitud
+            // que las specs de aplicar esperan.
             const items: Record<string, unknown>[] = [
               {
                 cita: A,
                 severidad: "alta",
-                mensaje: `[${sage}/${pase}] problema A — el sabio explica el porqué con detalle pedagógico.`,
-                sugerencia: `${A} (referencia)`,
+                mensaje: `[${sage}/${pase}] problema A — el sabio diagnostica el porqué (sin meter aquí la versión nueva).`,
+                reemplazo: `${A} (referencia)`,
                 ...(linkedCriterioId
                   ? { criterioId: linkedCriterioId }
                   : {}),
@@ -342,13 +341,13 @@ export async function installTauriStub(page: Page) {
               {
                 cita: B,
                 severidad: "media",
-                mensaje: `[${sage}/${pase}] problema B — explicación pedagógica.`,
+                mensaje: `[${sage}/${pase}] problema B — diagnóstico sin reemplazo concreto.`,
               },
               {
                 cita: C,
                 severidad: "baja",
-                mensaje: `[${sage}/${pase}] problema C — explicación pedagógica.`,
-                sugerencia: `${C} con cita`,
+                mensaje: `[${sage}/${pase}] problema C — diagnóstico pedagógico.`,
+                reemplazo: `${C} con cita`,
               },
             ];
             queueMicrotask(() => {

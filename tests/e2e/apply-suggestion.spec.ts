@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { installTauriStub, openNewEssay } from "./setup";
+import { parseAnotaciones } from "../../src/lib/agents";
 
 /**
  * "Reemplazar" click-to-apply coverage (originalmente "Aplicar
@@ -52,11 +53,11 @@ test("popover: 'Aplicar sugerencia' replaces the text and removes the mark", asy
 
   // Find the first anno that has a sugerencia (the stub sets sugerencia
   // on items A and C; B has none). Iterate until we find one with a
-  // data-sugerencia attribute.
+  // data-reemplazo attribute.
   const annos = editor.locator(".anno");
   let targetIndex = -1;
   for (let i = 0; i < initialMarks; i++) {
-    const hasSug = await annos.nth(i).getAttribute("data-sugerencia");
+    const hasSug = await annos.nth(i).getAttribute("data-reemplazo");
     if (hasSug && hasSug.length > 0) {
       targetIndex = i;
       break;
@@ -65,7 +66,7 @@ test("popover: 'Aplicar sugerencia' replaces the text and removes the mark", asy
   expect(targetIndex).toBeGreaterThanOrEqual(0);
 
   const target = annos.nth(targetIndex);
-  const sugerencia = await target.getAttribute("data-sugerencia");
+  const sugerencia = await target.getAttribute("data-reemplazo");
   expect(sugerencia).toBeTruthy();
 
   // Open the popover by clicking the mark.
@@ -100,7 +101,7 @@ test("popover: 'Aplicar' is hidden when the anotación has no sugerencia", async
   const count = await annos.count();
   let nopeIndex = -1;
   for (let i = 0; i < count; i++) {
-    const hasSug = await annos.nth(i).getAttribute("data-sugerencia");
+    const hasSug = await annos.nth(i).getAttribute("data-reemplazo");
     if (!hasSug) {
       nopeIndex = i;
       break;
@@ -169,7 +170,7 @@ test("after applying, the Scorebar overall recomputes", async ({ page }) => {
   const count = await annos.count();
   let target = -1;
   for (let i = 0; i < count; i++) {
-    if (await annos.nth(i).getAttribute("data-sugerencia")) {
+    if (await annos.nth(i).getAttribute("data-reemplazo")) {
       target = i;
       break;
     }
@@ -200,7 +201,7 @@ test("popover muestra 'Reemplazar por' como bloque literal separado del mensaje 
   let target = -1;
   const count = await annos.count();
   for (let i = 0; i < count; i++) {
-    if (await annos.nth(i).getAttribute("data-sugerencia")) {
+    if (await annos.nth(i).getAttribute("data-reemplazo")) {
       target = i;
       break;
     }
@@ -222,4 +223,30 @@ test("popover muestra 'Reemplazar por' como bloque literal separado del mensaje 
 
   // El botón actualizado lee "Reemplazar", no "Aplicar sugerencia".
   await expect(page.getByTestId("popover-apply")).toHaveText(/Reemplazar/);
+});
+
+test("parseAnotaciones strippea prefijos conversacionales como 'Reescribí:' (sesión 16)", async () => {
+  // Probamos el parser en su forma pura, no a través del flow completo
+  // de Evaluar. Esto pilla el caso del bug que Noé reportó: el modelo
+  // a veces antepone "Reescribí:" o "Mejor:" al reemplazo, y la
+  // sanitización defensiva tiene que quitarlo antes de exponerlo.
+  const lines = [
+    '{"cita":"x","severidad":"alta","mensaje":"d","reemplazo":"Reescribí: la cultura emerge"}',
+    '{"cita":"y","severidad":"media","mensaje":"d","reemplazo":"Mejor así: una versión más concreta"}',
+    '{"cita":"z","severidad":"baja","mensaje":"d","reemplazo":"un reemplazo sin prefijo"}',
+    // Backward compat: anotación vieja con `sugerencia` (preserva
+    // semantics + igual strippea el prefijo).
+    '{"cita":"w","severidad":"alta","mensaje":"d","sugerencia":"Reformulá: contenido"}',
+    // English prefix variant.
+    '{"cita":"v","severidad":"media","mensaje":"d","reemplazo":"Rewrite: a cleaner sentence"}',
+    // Stacked prefijos — la sanitización itera hasta 4 veces.
+    '{"cita":"u","severidad":"alta","mensaje":"d","reemplazo":"Reescribí: Mejor: la versión limpia"}',
+  ].join("\n");
+  const out = parseAnotaciones(lines);
+  expect(out[0]?.reemplazo).toBe("la cultura emerge");
+  expect(out[1]?.reemplazo).toBe("una versión más concreta");
+  expect(out[2]?.reemplazo).toBe("un reemplazo sin prefijo");
+  expect(out[3]?.reemplazo).toBe("contenido");
+  expect(out[4]?.reemplazo).toBe("a cleaner sentence");
+  expect(out[5]?.reemplazo).toBe("la versión limpia");
 });

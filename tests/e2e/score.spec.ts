@@ -52,7 +52,7 @@ function makeAnotacion(
     pase: partial.pase ?? "coherencia",
     severidad: partial.severidad,
     mensaje: partial.mensaje ?? "msg",
-    sugerencia: partial.sugerencia,
+    reemplazo: partial.reemplazo,
     criterioId: partial.criterioId,
   };
 }
@@ -343,8 +343,12 @@ test("extracts anotaciones from a TipTap doc and dedupes by id (split text nodes
   expect(out).toHaveLength(2);
   expect(out.map((a) => a.id).sort()).toEqual(["x1", "x2"]);
   // First one keeps its full attrs (the richer occurrence wins).
+  // Sesión 16: el campo del schema pasó a llamarse `reemplazo`. El
+  // test sigue alimentando el atributo viejo `sugerencia` en la
+  // mark para verificar el backward compat — el output expone el
+  // valor bajo `reemplazo`.
   const x1 = out.find((a) => a.id === "x1")!;
   expect(x1.mensaje).toBe("msg1");
-  expect(x1.sugerencia).toBe("fix1");
+  expect(x1.reemplazo).toBe("fix1");
   expect(x1.criterioId).toBe("c2");
 });
