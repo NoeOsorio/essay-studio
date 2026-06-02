@@ -889,7 +889,102 @@ El `crossLingualExampleFor(lang)` queda como ejemplo separado, pase-agnostic (ca
 
 106/106 E2E + lint limpio.
 
-## Sesión 16 (próxima) — TBD
+## Qué quedó hecho en sesión 16 — Rename del campo + sanitización + ❌/✅
+
+Bug en producción reportado por Noé con un ejemplo concreto del Sistémico:
+
+> Texto original: "La cultura organizacional representa el conjunto de valores, normas y creencias…"
+> mensaje: "Definís cultura como sustancia estática. Es propiedad emergente sostenida por loops de incentivos, selección, socialización y refuerzo cotidiano."
+> sugerencia: "**Reescribí:** la cultura emerge de y se sostiene por loops…"
+
+Dos problemas concurrentes, no uno:
+
+**1. Prefijo conversacional en el campo de reemplazo.** "Reescribí:" es un verbo dirigido al autor — si apreta Reemplazar, eso queda pegado en el documento.
+
+**2. Duplicación de contenido entre `mensaje` y `sugerencia`.** El mensaje YA contenía la reformulación ("Es propiedad emergente sostenida por loops…") y el campo de reemplazo daba OTRA versión con el prefijo. El sabio estaba escribiendo en su modo natural pedagógico "[explicación] + [reformulación]" como párrafo continuo, y mi schema lo cortaba en dos campos. El "Reescribí:" era el pegamento conversacional.
+
+**Por qué fallaron las instrucciones de sesión 15:**
+
+Le dije al modelo "no uses imperativos como 'Reformula X' en sugerencia". El modelo interpretó: "no des SOLO el imperativo". Como adjunta el rewrite real después de "Reescribí:", cumple técnicamente. Mis ejemplos en el prompt eran todos del estilo correcto, así que nunca le mostré explícitamente "Reescribí: X" como prohibido.
+
+**Fix en cuatro capas:**
+
+### 1. Rename del campo JSON: `sugerencia` → `reemplazo`
+
+El nombre del campo afecta lo que el modelo escribe ahí. "Sugerencia" invita a redactar consejos al autor; "reemplazo" señala que el campo ES prosa que sustituye a la cita. Cambio en:
+
+- `Anotacion.sugerencia` → `Anotacion.reemplazo` (types)
+- `AnnotationAttrs.sugerencia` → `AnnotationAttrs.reemplazo` (mark)
+- `data-sugerencia` → `data-reemplazo` en el HTML render
+- Eventos: `pluma-roja:apply-suggestion` → `pluma-roja:apply-reemplazo`
+- Comando: `applyAnnotationSuggestion` → `applyAnnotationReemplazo`
+
+**Backward compat completa:** `parseAnotaciones` acepta JSON con cualquiera de las dos llaves; `parseHTML` del TipTap Mark acepta cualquiera de los dos data-attrs; `extractAnotacionesFromContent` lee ambos. Anotaciones guardadas en docs antes del rename siguen rindiéndose sin migración manual.
+
+### 2. Instrucción de `mensaje` reforzada
+
+Antes: "explicación pedagógica de qué falla y por qué importa".
+
+Ahora: "ÚNICAMENTE explicás QUÉ está mal en la cita y POR QUÉ importa. EL MENSAJE NUNCA INCLUYE EL TEXTO NUEVO. Si te encontrás escribiendo 'podrías decir...', 'sería mejor que...', 'reescribilo como...', PARÁ — esa parte va en reemplazo, no acá."
+
+Esto rompe el patrón donde el sabio metía la versión corregida embebida en `mensaje` y duplicaba en sugerencia.
+
+### 3. Sección anti-patrón explícita con ❌/✅ en el prompt
+
+Tres ejemplos MAL al lado del ✅ correcto:
+
+```
+❌ {"reemplazo":"Reescribí: la cultura emerge de loops de incentivos"}
+   ← "Reescribí:" es un verbo dirigido al autor; quedaría pegado al apretar Reemplazar.
+❌ {"reemplazo":"Mejor así: 'la transparencia tiene efecto sólo cuando...'"}
+   ← prefacio meta + comillas extras.
+❌ {"mensaje":"Atribución individual. Reescribilo como propiedad emergente sostenida por loops."}
+   ← el mensaje contiene el reemplazo embutido. El mensaje sólo diagnostica.
+✅ {"mensaje":"Atribución individual de un fenómeno sistémico — borra los loops y rituales que sostienen la cultura.",
+   "reemplazo":"la cultura emerge de loops de incentivos, rituales sostenidos y narrativas compartidas"}
+```
+
+Los LLMs aprenden mejor por demostración que por prohibición. Las reglas negativas solas habían fallado.
+
+### 4. Sanitización defensiva server-side
+
+`META_PREFIXES` en `parseAnotaciones` con 20+ prefijos conversacionales conocidos:
+
+- ES: "Reescribí:", "Reformulá:", "Mejor:", "Mejor así:", "Cambia a:", "Cambia por:", "Sugiero:", "Propongo:", "Versión nueva:", "En su lugar:", etc.
+- EN: "Rewrite:", "Reword:", "Change to:", "Better:", "Suggestion:", "Replace with:", "Instead:", etc.
+
+`stripMetaPrefix` itera hasta 4 veces para cubrir prefijos apilados ("Reescribí: Mejor: la versión"). Si el modelo desobedece la regla del prompt, el sanitizer evita igual que el verbo termine pegado en el documento del usuario. Belt-and-suspenders puro.
+
+### Tests
+
+- Nuevo spec en `apply-suggestion.spec.ts`: `parseAnotaciones strippea prefijos conversacionales como 'Reescribí:'` cubre 6 casos (ES "Reescribí:", ES "Mejor así:", sin prefijo, backward compat con llave `sugerencia` + "Reformulá:", EN "Rewrite:", apilado "Reescribí: Mejor:").
+- Stub Tauri ajustado para emitir `reemplazo` (refleja el contrato del sidecar real).
+- `score.spec.ts` actualizado: el test del backward compat de `extractAnotacionesFromContent` ahora aserta que la mark vieja con atributo `sugerencia: "fix1"` se expone como `reemplazo: "fix1"`.
+
+**107/107 E2E + 28/28 Rust + lint + TS limpio.**
+
+## Decisiones de la sesión 16
+
+| Decisión | Por qué |
+|---|---|
+| **Rename del campo en lugar de sólo mejorar prompts** | Los LLMs leen el nombre del campo cuando generan el JSON — "sugerencia" estaba pidiéndole consejos conversacionales. "Reemplazo" señala su función literal. La instrucción más fuerte la da el nombre, no el doc-string. |
+| **Backward compat doble (JSON + data-attr)** en lugar de migración | Tenía que asegurar que anotaciones guardadas en docs existentes siguieran funcionando. Aceptar ambas llaves en parser + parseHTML es 4 líneas; una migración habría sido invasiva, error-prone y obligaba al usuario a re-evaluar. |
+| **Sanitización por lista explícita** vs regex | "/^\\w+[íi]?:\\s+/" parecía elegante pero come prefijos legítimos (una cita que empieza con "Sugiero" como parte del texto del autor sería falso positivo). Lista de ~20 patrones conocidos es boring pero confiable. |
+| **Iteración hasta 4 prefijos apilados** | El modelo a veces escribe "Reescribí: Mejor: …" cuando está confundido. Una sola pasada de strip dejaría "Mejor: …". 4 es el cap pragmático que cubre lo razonable sin pathological inputs. |
+| **Mensaje estricto en diagnóstico, no en advice** | Hasta sesión 15 el campo permitía "explicación pedagógica" que el modelo interpretaba como "incluyo la versión corregida también porque eso es pedagógico". Estricto a "QUÉ falla y POR QUÉ importa, NUNCA EL TEXTO NUEVO" rompe la duplicación. |
+| **Sección ❌/✅ con tres mal-patrones** vs uno solo | Ver el patrón "Reescribí:" prohibido al lado de la prosa pura es la enseñanza concreta que arregla el bug. Añadir los otros dos casos (prefacio "Mejor así:", mensaje con reemplazo embebido) cubre los modos de falla adyacentes que el modelo podría adoptar como evasivas. |
+| **Belt-and-suspenders con sanitizer + prompt** | El prompt podría ser perfecto y el modelo desobedecer (Claude Opus a veces lo hace con instrucciones estrictas, especialmente bajo persona pedagógica). La sanitización server-side es la red de seguridad — si el prompt funciona, el strip es no-op; si no funciona, evita el daño al documento del usuario. |
+| **No agregamos test E2E que simule el bug de extremo a extremo** | No tenemos forma de instruir al stub a generar "Reescribí: X" porque el stub define la sugerencia derivando de la cita. El test del parser puro cubre el path real de sanitización. Si quisiéramos cobertura E2E del bug, habría que parametrizar el stub. Postergado. |
+
+## Aprendido en sesión 16
+
+- **El nombre del campo es parte del prompt.** Las LLMs leen las llaves del JSON cuando generan output, y eso afecta lo que escriben en cada slot. "Sugerencia" empuja al modelo a un registro conversacional; "reemplazo" lo empuja a prosa literal. Los nombres no son decoración técnica — son señales semánticas activas.
+- **Cuando una regla negativa falla, agregá el ejemplo del patrón prohibido.** "No uses 'Reformula X'" no rompió el patrón porque el modelo lo interpretó creativamente. "Acá hay un caso MAL, acá hay el correcto, no hagas el MAL" sí funciona. Demostración > prohibición.
+- **Mensajes y reemplazos son registros distintos — el sabio quiere fundirlos.** Su instinto pedagógico es escribir "[diagnóstico] + [reformulación]" como un párrafo. Si tu schema los separa, vas a tener que pelearle al modelo cada vez. La pelea se gana con instrucción explícita + nombre del campo + ejemplo + sanitización. Las cuatro juntas, no una.
+- **Backward compat doble (wire + storage)** es el costo de un rename de schema. Una vez planteado bien — `parseHTML: data-X ?? data-Y`, `obj.X ?? obj.Y`, `extractAnotaciones lee ambas` — el caso queda cerrado sin migración. Las anotaciones viejas siguen funcionando; las nuevas usan el schema nuevo. Es 4 líneas de fallback bien colocadas.
+- **Belt-and-suspenders no es paranoia cuando el cost es bajo.** La sanitización agrega ~30 líneas TS y cuesta microsegundos por anotación. Si el prompt eventualmente funciona perfecto, el sanitizer es no-op. Si no funciona, evita daño visible. El asymmetry de cost vs benefit favorece tenerlo. La regla general: para defensas baratas contra fallas con consecuencias visibles para el usuario, ponelas.
+
+## Sesión 17 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
