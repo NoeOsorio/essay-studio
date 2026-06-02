@@ -2,7 +2,7 @@
 
 Lo que falta para que la app pase de "demo funcional en dev" a "instalable que usas a diario sin frustración", ordenado por dolor real cuando lo veas en uso. Cada fase es independiente: termina la 0 y ya tienes un .app usable; sigue las demás cuando duela.
 
-Última actualización: **2026-05-30** (sesión 13 cerrada — menú nativo + Historial fuera del topbar, Fase 2.7 arrancada).
+Última actualización: **2026-05-30** (sesión 14 cerrada — submenú Sabios + Toggle tablero, Fase 2.7 core completa).
 
 Para el log de qué se hizo en cada sesión y por qué, ver [CLAUDE.md](CLAUDE.md).
 
@@ -96,25 +96,25 @@ Hoy no hay forma de cambiar:
 
 **Scope:** modal de Settings accesible desde menú nativo o ⌘,. Persistir en `settings.json` aparte de los ensayos. Categorías: Editor · Autosave · Benchmark · Sabios · Backup.
 
-### 🟡 2.7 Menú nativo de macOS — arrancada en sesión 13
+### 🟢 2.7 Menú nativo de macOS — core completo (sesiones 13 + 14)
 
-Foundation hecha + Historial movido a `View > Historial de versiones…` (⌘⇧H), botón removido del topbar. Detalle: [CLAUDE.md → sesión 13](CLAUDE.md).
+Detalle: [CLAUDE.md → sesión 13](CLAUDE.md) (foundation + Historial) y [sesión 14](CLAUDE.md) (Sabios + Toggle tablero).
 
 **Ya cubierto:**
 - **App menu**: About / Services / Hide / Hide Others / Show All / Quit (predefinidos macOS)
-- **Archivo**: Nuevo ensayo (⌘N), Cerrar ensayo (⌘W) — wired al store
-- **Edición**: Undo / Redo / Cut / Copy / Paste / Select All — predefinidos, sin custom wiring (TipTap los maneja vía contenteditable)
-- **Vista**: Historial de versiones… (⌘⇧H)
-- **Ventana**: Minimize / Maximize / Close — predefinidos
+- **Archivo**: Nuevo ensayo (⌘N), Cerrar ensayo (⌘W)
+- **Edición**: Undo / Redo / Cut / Copy / Paste / Select All (predefinidos)
+- **Vista**: Mostrar / ocultar tablero (⌘\\), Historial de versiones… (⌘⇧H)
+- **Sabios**: Interrogar (⌘I), Evaluar (⌘⇧E), Rúbrica… (⌘R), Fuentes… (⌘F)
+- **Ventana**: Minimize / Maximize / Close (predefinidos)
 
-**Pendiente para sesiones futuras:**
-- **Vista** también: Toggle board (⌘\\), Toggle scorebar (⌘B)
-- **Sabios** (nuevo submenu): Interrogar (⌘I), Evaluar (⌘⇧E), Rúbrica (⌘R), Fuentes (⌘F)
+**Pendiente menor para sesiones futuras:**
 - **Archivo**: Export (⌘E) cuando hagamos Fase 2.1
-- **Ayuda**: About Essay Studio, Open ROADMAP, Open CLAUDE.md
-- **Disable contextual** (p.ej. `file:close` desactivado cuando no hay ensayo abierto)
+- **Ayuda**: About Essay Studio, Open ROADMAP, Open CLAUDE.md (requiere `tauri-plugin-opener` + bundlear los `.md` como resources)
+- **Disable contextual** (p.ej. `sabios:*` y `file:close` desactivados sin essay abierto) — requiere wirear `MenuItem::set_enabled` desde el renderer
+- **Toggle scorebar (⌘B)** — sesión 13b lo hizo auto-show/hide, probablemente redundante. Validamos con uso real antes de añadir.
 
-El esqueleto ya soporta todo eso — cada item nuevo es ~4 líneas Rust + 1 case TS.
+El bridge es genérico: cada item nuevo es ~4 líneas Rust + 1 case TS.
 
 ### 2.8 Onboarding la primera vez
 Si nunca has abierto la app, ¿qué ves? La lista vacía con un botón "Nuevo ensayo". Funciona pero no enseña nada sobre el concepto del consejo / rúbrica / fuentes.

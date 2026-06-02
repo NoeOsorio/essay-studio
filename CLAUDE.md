@@ -688,7 +688,90 @@ Implementación:
 - **Tauri 2's `PredefinedMenuItem` es underrated.** Cut/Copy/Paste/Undo/Redo/Quit/Hide funcionan con la plataforma sin que escribamos ni una línea de handler. Para un `Edit` menu, 95% del trabajo lo hace Tauri. Cuando lo único que añadimos es un par de items custom (uno por sesión), la curva de costo es muy plana.
 - **Helper `openHistoryViaMenu` en tests > mock del native menu.** Cuando una capa es untestable directamente (system UI), el test cleaner es ejercer la capa siguiente con el mismo input que recibiría. Esto generaliza: para cualquier feature que dependa de algo native-only, una función helper que emite el evento del bridge cubre el comportamiento real.
 
-## Sesión 14 (próxima) — TBD
+## Qué quedó hecho en sesión 13b — Tres bugs que Noé encontró usando la app
+
+Después de cerrar sesión 13 con el menú nativo + Historial movido, Noé usó la app y devolvió tres reports en cadena. Los tres eran reales, los tres con root causes distintos. Documentado acá porque ilustran patrones que probablemente vuelvan en sesiones futuras.
+
+### 1. Flash de "No se pudo leer esta versión" en HistoryOverlay
+
+Noé abría el panel con un snapshot guardado y veía instantáneamente el mensaje rojo de error. Bug: mi código tenía `preview: Snapshot | null` y un render-path `!preview → "No se pudo leer"`. Cuando el panel montaba con history pre-existente, `selected` se pre-seteaba pero `preview` quedaba en `null`. La conflación entre "aún no cargué" y "falló al cargar" disparaba el path equivocado.
+
+Fix:
+- Estado discriminado `{ kind: "idle" | "loading" | "ready" | "error" }` — sin ambigüedad
+- Auto-load on mount via `queueMicrotask` cuando hay history existente — al abrir el panel ves directamente la versión más reciente
+- Test de regresión en `history.spec.ts` que asserta que el texto "No se pudo leer" no aparece y el preview se materializa
+
+### 2. Scorebar saturando el viewport en ensayo nuevo
+
+Noé observó: "Primero el benchmark se ve raro cuando abrimos un nuevo documento, segundo no quiero que esté ahí el benchmark ocupando espacio si no hay evaluación." El placeholder `— DE 10` sin número arriba se veía como un estado roto, y la barra ocupaba ~80px de altura útil del editor.
+
+Fix:
+- `Scorebar` retorna `null` cuando `wasEvaluated === false && hasAnotaciones === false`
+- La invariante de sesión 9.5 "nunca un 10/10 falso" sigue intacta — sólo cambia cómo se expresa: por ausencia del bar en vez de `—` placeholder. Misma honestidad, menos ruido visual.
+- Trade-off: el CTA "Corre Evaluar para puntuar" desaparecía con el bar — pero el botón **Evaluar** del topbar y el `⌘⇧E` del menú (sesión 14) lo cubren. No se pierde discoverability.
+- Tests actualizados: `"empty essay"` y `"never-evaluated essay"` ahora asertan `scorebar` con count 0 (era visible con `—`)
+
+### 3. Editor + tablero "cortados" a ~430px del viewport
+
+Tras esconder el Scorebar, Noé vio que el editor + tablero sólo ocupaban la mitad superior del viewport y el resto era beige vacío. Diagnostiqué un bug de CSS Grid auto-placement:
+
+`grid-rows-[auto_auto_1fr_auto]` define 4 tracks. Pero la mayoría del tiempo, SidecarBanner, Scorebar y los 5 overlays (Lectura/Pluma/Rúbrica/Fuentes/Historial) retornan `null` — sin DOM, sin grid items. Sólo Topbar + `<main>` creaban DOM. CSS Grid auto-placement los metía en los DOS primeros tracks consecutivos: Topbar en row 1 (`auto`), `<main>` en row 2 (`auto`). El track 3 (`1fr`) quedaba vacío y `<main>` no se expandía — sólo crecía con su contenido (~430px del tablero vacío de tldraw).
+
+Fix:
+- Pasar a flexbox columna. `flex-1` en `<main>` siempre aplica sin depender de cuántos hermanos rendericen null.
+- Como bonus, mover los 5 overlays fuera del wrapper. Son `fixed inset-0` — su ubicación en el árbol no afecta el layout. Page.tsx queda más legible (4 cosas dentro del flex, overlays como siblings del wrapper).
+- Test de regresión en `flow.spec.ts`: mide `boundingBox` de `<main>` y asserta >= 80% del viewport (genera mensaje específico apuntando al commit si se rompe).
+
+### Aprendizajes de 13b
+
+- **Estados discriminados ganan a flags booleanos en cuanto hay > 2 estados.** El bug del "No se pudo leer" salió de colapsar 4 estados conceptuales en un nullable. Cuando notes que tu `null` significa dos cosas distintas, esa es la señal.
+- **CSS Grid auto-placement es trampa cuando hijos pueden ser null.** Si tu template tiene N tracks y a veces sólo M < N hijos se renderizan, los hijos caen en los primeros tracks, no en los que vos pensabas. Flexbox columna con `flex-1` no tiene ese problema — sólo distribuye lo que existe. Lección general: para layouts column-style con piezas opcionales, **flex > grid**.
+- **Bugs de UX que el usuario reporta son señales gratis.** Los tres eran detectables sólo usando la app — no había una spec que pudiera capturarlos. Cada uno ganó su propio test de regresión, y la lista de "things to look out for" del codebase creció con tres patterns útiles (estado discriminado para load states, layout flex para piezas opcionales, ocultar vs placeholder honesto).
+- **Comentar el porqué de la decisión vale el espacio.** Mi `page.tsx` ahora explica en 4 líneas por qué flexbox y no grid. La próxima persona (o yo mismo en 6 meses) entiende la trampa de auto-placement sin tener que reproducirla.
+
+## Qué quedó hecho en sesión 14 — Submenú Sabios + Toggle tablero (completa Fase 2.7 core)
+
+Después de la foundation de sesión 13, Noé dijo "continúa con el resto del plan". El siguiente paso natural era completar el menú nativo con las shortcuts que él usa a diario — todas las acciones del topbar deberían tener equivalente teclado vía menú.
+
+Items añadidos:
+
+**Vista:**
+- Mostrar / ocultar tablero (`⌘\`, `view:board-toggle`)
+
+**Sabios** (submenu nuevo entre Vista y Ventana):
+- Interrogar (`⌘I`, `sabios:interrogar`) → openLectura() en modo consejo
+- Evaluar (`⌘⇧E`, `sabios:evaluar`) → openPlumaRoja()
+- Rúbrica… (`⌘R`, `sabios:rubrica`) → openRubrica()
+- Fuentes… (`⌘F`, `sabios:fuentes`) → openFuentes()
+
+Bridge TS: 5 cases nuevos en el switch, todos guard-ed por `if (s.current)` — sin essay, no-op silencioso. Disable contextual (greyed-out visual) queda para sesión futura.
+
+Como drive-by: añadí `data-testid="lectura-overlay"` y `data-testid="pluma-overlay"` en sus wrappers (los otros 3 overlays ya los tenían). El nuevo `tests/e2e/menu.spec.ts` cubre 7 casos: 5 happy paths (1 por item), 1 guard de "sin essay → no-op", 1 guard de "id desconocido → no-op silencioso".
+
+**105/105 E2E + 28/28 Rust + lint limpio.**
+
+## Decisiones de la sesión 14
+
+| Decisión | Por qué |
+|---|---|
+| **Skip de Toggle Scorebar (⌘B)** del ROADMAP original | Con sesión 13b el Scorebar auto-aparece/desaparece según haya evaluación. Un toggle manual es redundante. Si en uso real lo extrañamos, lo añadimos. |
+| **Skip de submenú Ayuda** | About + Open ROADMAP + Open CLAUDE.md requieren wirear el plugin `opener` de Tauri (o shell) y bundlear los `.md` como resources. Trabajo modesto pero no rinde valor diario. Lo dejamos para una sesión de "polish" futura. |
+| **Skip de disable contextual** (greyed-out cuando no hay essay) | Tauri 2 lo permite via `MenuItem::set_enabled(false)`, pero requiere que el renderer mande state changes a Rust y reconstruir parte del menú reactivamente. Para v1, el bridge silently no-op es honesto: cliquear no rompe nada, sólo no hace nada visible. Si en uso real es confuso, lo arreglamos con un Rust command que actualice el enabled state desde el renderer. |
+| **`⌘I` para Interrogar y `⌘⇧E` para Evaluar** | Convención clara: `⌘I` activa un sabio inmediato (interrogar es el flujo más frecuente); `⌘⇧E` está reservado para la acción más pesada (multi-pasada con anotaciones inline). El shift indica "modo más fuerte". |
+| **`⌘R` para Rúbrica y `⌘F` para Fuentes** | Iniciales del nombre, sin conflicto con shortcuts del sistema (Refresh / Find normalmente, pero en una app sin esos conceptos directos las re-asignamos). |
+| **`⌘\` para Toggle Tablero** | Inspirado en VS Code (`⌘\` divide el editor en dos paneles). El concepto es paralelo: muestrar/ocultar la columna secundaria. |
+| **Tests via `fireMenu` helper en lugar de mocking del menú** | Mismo patrón que `openHistoryViaMenu` (sesión 13). Emitir el `app:menu` event directamente recorre el mismo bridge que producción — la única diferencia es el origen del trigger. Cobertura real, sin scaffold. |
+| **`data-testid` en los 2 overlays que faltaban** | Un drive-by chiquito. Lectura y Pluma no tenían testid root porque las specs anteriores los detectaban via botones internos. Ahora con menu.spec abriendo overlays "desde afuera", un testid en root es la forma más limpia. |
+| **El bridge ignora `default:` con comment** | Predefined items (cut/copy/paste/quit/etc.) no pasan al bridge — Tauri los handlea a nivel plataforma. El `default: break` con el comentario hace explícito que es intencional, no un olvido. |
+
+## Aprendido en sesión 14
+
+- **La foundation que armás temprano paga durante muchas sesiones.** Sesión 13 invirtió ~30 minutos extras en build el menú completo (no sólo el item Historial) y wireear el bridge genérico. Sesión 14 añadió 5 items en otros ~15 minutos. Si hubiera atajado en 13 y armado sólo View > Historial, sesión 14 habría duplicado costo. La regla: la primera vez que tocás una pieza nueva del sistema, hacela bien.
+- **El switch + ids stringificados es resiliente al growth.** Pasamos de 3 ids a 8 con cambios mínimos en el bridge (5 cases nuevos) y cero en el contrato del event. Una API más "type-safe" (eventos por item, schema discriminado, etc.) habría costado más line-y para zero benefit en esta escala.
+- **Tests de "no-op silencioso" merecen su propio caso.** El test "ids desconocidos del menú son no-op silencioso" parece tonto, pero locka una garantía importante: añadir un item en Rust antes de wirear el bridge no rompe la app. Es lo que permite hacer sesiones cortas e incrementales (Rust primero, TS después) sin miedo.
+- **Convenciones de atajos de otras apps son shortcut intelectual.** No tuve que inventar `⌘\` ni explicar por qué — VS Code ya lo enseñó. Mismo con `⌘⇧E` (Evaluar / Export — convención de "shift = versión más fuerte"). Reutilizar el muscle memory del usuario en otras apps tiene un costo cero y un beneficio enorme.
+
+## Sesión 15 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
