@@ -856,6 +856,39 @@ El prompt del sabio ahora muestra ambos ejemplos seguidos (el del mismo idioma p
 
 106/106 E2E + lint limpio.
 
+## Sesión 15c — Un ejemplo por pasada (cita el caso, no el campo)
+
+Refinamiento de Noé después de leer mis cambios de sesión 15/15b:
+
+> "No me refiero a citaciones, me refiero a las correcciones que da. Ese fue un ejemplo pero puede ser corregir ortografía, corregir coherencia, corregir citación, corregir lo que sea del texto para mejorar."
+
+Yo había leído su comentario anterior como una crítica al **nombre** del campo `cita` (era ambiguo entre "citación académica" y "fragmento literal del documento") y le había propuesto opciones de rename. Pero su preocupación real era de **cobertura**: en sesión 15 había añadido ejemplos de Tío Ben y Edmondson — ambos casos de citación académica — y eso le enseña al modelo un sesgo: "casi todo se corrige citando autores". Sesgo nada chico porque hay 4 pasadas (coherencia, estilo, argumento, apa) y sólo APA es estrictamente sobre citaciones.
+
+El campo `cita` cubre **cualquier fragmento** del documento que el sabio crea que debe corregir. Lo que ese fragmento sea (un claim vago, una voz pasiva, una atribución equivocada, un formato APA mal, un error ortográfico) depende del problema, no del campo.
+
+Fix:
+
+**`exampleLineFor(lang, pase)`** ahora toma la pasada y devuelve un ejemplo del tipo de corrección típico de esa pasada:
+
+| Pase | Caso del ejemplo |
+|---|---|
+| coherencia | "El liderazgo del CEO determina la cultura" → atribución individual de fenómeno sistémico, sugerencia reformula como sistema de incentivos |
+| estilo | "se observa que el equipo respondió de manera efectiva" → voz pasiva + sustantivos abstractos, sugerencia voz activa con dato medible |
+| argumento | "todos sabemos que la transparencia mejora la confianza" → cliché disfrazado de evidencia, sugerencia con mecanismo + referencia |
+| apa | "(Edmondson 1999)" → coma faltante, sugerencia "(Edmondson, 1999)" |
+
+Cada pasada ahora ve concretamente el tipo de corrección que le toca, en lugar de defaultear al caso de citación.
+
+El `crossLingualExampleFor(lang)` queda como ejemplo separado, pase-agnostic (caso de citación porque es donde naturalmente difieren los idiomas — el autor cita una fuente en su idioma original). Después del pase-typed (que enseña QUÉ buscar) y del cross-lingüe (que enseña la regla de idiomas), el modelo tiene los dos vectores conceptuales que necesita.
+
+**Decisión de diseño:** severidades y largos del mensaje varían a propósito entre los ejemplos (alta/media/baja, 30-50 palabras) para no entrenar al modelo en un único registro emocional. Si todos los ejemplos fueran "alta + 50 palabras", el modelo tendería a marcar todo como alta urgencia.
+
+**Lección general:** cuando un prompt da una regla genérica + un solo ejemplo concreto, el modelo aprende la regla **a través del lente del ejemplo**. Un ejemplo de citación enseña implícitamente "marcá cosas tipo citación", aunque la regla diga "marcá cualquier cosa". La cobertura del set de ejemplos es parte de la regla, no decoración.
+
+**Otra lección, esta sobre conversación:** cuando un usuario corrige una interpretación mía, vale la pena releer el mensaje original buscando qué dimensión estaba destacando. Yo había agarrado el árbol "naming del campo `cita`" cuando ellos estaban en "scope de las correcciones". Releer + verificar antes de proponer fixes.
+
+106/106 E2E + lint limpio.
+
 ## Sesión 16 (próxima) — TBD
 
 Algunas posibilidades con el sistema ya estable:
