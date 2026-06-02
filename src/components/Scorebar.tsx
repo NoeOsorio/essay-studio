@@ -44,6 +44,8 @@ export function Scorebar() {
   const current = useStore((s) => s.current);
   const openPlumaRoja = useStore((s) => s.openPlumaRoja);
   const openRubrica = useStore((s) => s.openRubrica);
+  const dismissed = useStore((s) => s.scorebarDismissed);
+  const dismiss = useStore((s) => s.dismissScorebar);
 
   const result = useMemo<BenchmarkResult>(() => {
     if (!current) {
@@ -85,6 +87,11 @@ export function Scorebar() {
   // previous one. New / unevaluated essays get the editor's full
   // height instead of a placeholder strip.
   if (!result.wasEvaluated && !result.hasAnotaciones) return null;
+
+  // Sesión 17: el usuario lo cerró a mano. Se queda escondido hasta
+  // re-Evaluar (recordEvaluacion restaura), cambiar de ensayo, o
+  // pedir Vista > Mostrar Benchmark.
+  if (dismissed) return null;
 
   return (
     <div className="relative">
@@ -179,7 +186,7 @@ export function Scorebar() {
           )}
         </div>
 
-        {/* Right — CTA contextual */}
+        {/* Right — CTA contextual + dismiss (sesión 17) */}
         <div className="flex gap-2.5 items-center">
           {!result.wasEvaluated ? (
             <Button
@@ -203,6 +210,26 @@ export function Scorebar() {
               Re-evaluar
             </Button>
           )}
+          <button
+            type="button"
+            onClick={dismiss}
+            data-testid="scorebar-dismiss"
+            title="Ocultar el Benchmark (Vista > Mostrar Benchmark para volver)"
+            aria-label="Ocultar benchmark"
+            className="w-7 h-7 grid place-items-center rounded-full text-ink-3 hover:text-ink-1 hover:bg-paper-3 cursor-pointer transition-colors"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M3 3l8 8M11 3l-8 8" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>

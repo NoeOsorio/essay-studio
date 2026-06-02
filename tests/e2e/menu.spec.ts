@@ -96,3 +96,85 @@ test("ids desconocidos del menú son no-op silencioso", async ({ page }) => {
     page.getByRole("textbox", { name: "Título del ensayo" }),
   ).toBeVisible();
 });
+
+test("sabios:limpiar borra todas las anotaciones y resetea evaluacion (sesión 17)", async ({
+  page,
+}) => {
+  await openNewEssay(page, "academico");
+  const editor = page.locator(".tiptap-content");
+  await editor.click();
+  await page.keyboard.type(
+    "El liderazgo del CEO determina la cultura. Cuando alguien tóxico ocupa esa silla la organización se contamina. La solución es entrenar a todos en confianza.",
+  );
+
+  // Run Evaluar para sembrar marks.
+  await page.getByTestId("topbar-pluma-roja").click();
+  await page.getByTestId("pluma-start").click();
+  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
+  await page.getByTestId("pluma-apply").click();
+
+  const initialMarks = await editor.locator(".anno").count();
+  expect(initialMarks).toBeGreaterThan(0);
+  await expect(page.getByTestId("scorebar")).toBeVisible();
+
+  // Auto-confirm el window.confirm que dispara el bridge.
+  page.once("dialog", (d) => void d.accept());
+  await fireMenu(page, "sabios:limpiar");
+
+  // Todas las marks fuera. El Scorebar vuelve al estado "nunca
+  // evaluado" → oculto (sesión 13b).
+  await expect(editor.locator(".anno")).toHaveCount(0);
+  await expect(page.getByTestId("scorebar")).toHaveCount(0);
+});
+
+test("Scorebar dismiss button + view:show-benchmark lo restaura (sesión 17)", async ({
+  page,
+}) => {
+  await openNewEssay(page, "academico");
+  const editor = page.locator(".tiptap-content");
+  await editor.click();
+  await page.keyboard.type(
+    "Texto suficiente para que el sabio tenga algo concreto que analizar y produzca anotaciones.",
+  );
+  await page.getByTestId("topbar-pluma-roja").click();
+  await page.getByTestId("pluma-start").click();
+  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
+  await page.getByTestId("pluma-apply").click();
+
+  await expect(page.getByTestId("scorebar")).toBeVisible();
+
+  // Click × → bar desaparece.
+  await page.getByTestId("scorebar-dismiss").click();
+  await expect(page.getByTestId("scorebar")).toHaveCount(0);
+
+  // Menú Vista > Mostrar Benchmark lo trae de vuelta.
+  await fireMenu(page, "view:show-benchmark");
+  await expect(page.getByTestId("scorebar")).toBeVisible();
+});
+
+test("recordEvaluacion vuelve a mostrar el Scorebar si estaba dismissed (sesión 17)", async ({
+  page,
+}) => {
+  await openNewEssay(page, "academico");
+  const editor = page.locator(".tiptap-content");
+  await editor.click();
+  await page.keyboard.type(
+    "Texto para evaluar con un párrafo de longitud razonable que produzca anotaciones.",
+  );
+
+  // Primera evaluación, dismiss.
+  await page.getByTestId("topbar-pluma-roja").click();
+  await page.getByTestId("pluma-start").click();
+  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
+  await page.getByTestId("pluma-apply").click();
+  await page.getByTestId("scorebar-dismiss").click();
+  await expect(page.getByTestId("scorebar")).toHaveCount(0);
+
+  // Re-evaluar — el bar debería reaparecer automáticamente, sin
+  // necesidad de pedir "Mostrar Benchmark" a mano.
+  await page.getByTestId("topbar-pluma-roja").click();
+  await page.getByTestId("pluma-start").click();
+  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
+  await page.getByTestId("pluma-apply").click();
+  await expect(page.getByTestId("scorebar")).toBeVisible();
+});
