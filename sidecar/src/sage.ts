@@ -322,11 +322,11 @@ async function runCritique(
     "FORMATO ESTRICTO: una línea de JSON por anotación. Nada antes, nada después, sin envoltura markdown, sin numeración, sin comentarios. Cada línea es un objeto con las llaves exactas:",
     "  \"cita\":       fragmento literal copiado del texto, entre 4 y 25 palabras, exacto carácter por carácter.",
     "  \"severidad\":  una de \"alta\" | \"media\" | \"baja\".",
-    "  \"mensaje\":    máximo 25 palabras explicando qué falla.",
-    "  \"sugerencia\": opcional, máximo 30 palabras, reescritura o paso accionable.",
+    "  \"mensaje\":    explicación pedagógica de qué falla y por qué importa. Hasta 50 palabras. Educa al autor — no des órdenes secas, contá el razonamiento.",
+    "  \"sugerencia\": OPCIONAL — y SOLO el texto literal que reemplazaría la cita en el documento. NO uses imperativos como \"Reformula X\", \"Cita al autor\", \"Reescribe Y\" — eso va en mensaje. Si no podés dar un fragmento limpio listo para pegar, omití el campo. La interfaz tiene un botón \"Reemplazar\" que sustituye la cita literalmente por este valor, así que tiene que poder leerse bien en su lugar dentro del párrafo.",
     "  \"criterioId\": opcional, sólo si la anotación se alinea con un criterio de la rúbrica de arriba.",
     "",
-    "Ejemplo de línea válida:",
+    "Ejemplo de línea válida (notá cómo mensaje explica el porqué y sugerencia es texto listo para pegar, no una instrucción):",
     exampleLineFor(req.language),
     "",
     "Si no encontrás nada interesante en tu dominio, devolvé una sola línea: {\"vacio\":true,\"razon\":\"...\"}",
@@ -336,13 +336,17 @@ async function runCritique(
   await runSageTurn(req.id, req.sage, parts.join("\n"));
 }
 
-/** Example JSON line in the target language so the model sees the
- *  shape AND the language for the human-readable fields. */
+/** Example JSON line in the target language. Sesión 15: el ejemplo
+ *  ahora muestra el split honesto — `mensaje` es la explicación
+ *  pedagógica (el "por qué"), `sugerencia` es ÚNICAMENTE el texto
+ *  que se pegaría en lugar de la cita. Antes ambos campos se
+ *  confundían y la sugerencia terminaba siendo un imperativo
+ *  ("Reformula X") que al "Aplicar" rompía el documento. */
 function exampleLineFor(lang: Language | undefined): string {
   if (lang === "en") {
-    return '{"cita":"culture emerges from leadership","severidad":"alta","mensaje":"Individual attribution of a systemic phenomenon.","sugerencia":"Reframe as a feedback loop sustained by incentives."}';
+    return '{"cita":"with great power comes great responsibility","severidad":"alta","mensaje":"You are paraphrasing Uncle Ben without crediting the source. Quoting or paraphrasing famous lines without attribution is plagiarism, even when the line is iconic. Add the in-text citation right after the phrase.","sugerencia":"with great power comes great responsibility (Uncle Ben, 2002)"}';
   }
-  return '{"cita":"la cultura emerge del liderazgo","severidad":"alta","mensaje":"Atribución individual de fenómeno sistémico.","sugerencia":"Reformula como loop sostenido por incentivos."}';
+  return '{"cita":"un gran poder conlleva una gran responsabilidad","severidad":"alta","mensaje":"Estás parafraseando a Tío Ben sin citarlo. Reproducir frases icónicas sin atribución es plagio aunque la cita sea conocida — la regla académica no hace excepciones. Añadí la cita parentética justo después de la frase.","sugerencia":"un gran poder conlleva una gran responsabilidad (Tío Ben, 2002)"}';
 }
 
 // --------- stdin loop ---------
