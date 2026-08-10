@@ -96,6 +96,191 @@ fn find_walking_up(start: &Path, segments: &str, max_hops: usize) -> Option<Path
     None
 }
 
+/// Locate a usable `node` binary.
+///
+/// Sesión 18: apps de macOS lanzadas desde Finder/Dock NO heredan el
+/// PATH del shell del usuario — arrancan con el PATH mínimo de
+/// `launchd` (`/usr/bin:/bin:/usr/sbin:/sbin`). Como la mayoría de
+/// la gente instala Node con nvm/homebrew/volta (ninguno de esos
+/// dirs está en ese PATH), `Command::new("node")` fallaba con ENOENT
+/// y el consejo nunca arrancaba desde el `.app` bundleado — aunque
+/// funcionara perfecto en `tauri:dev` (que hereda el PATH de la
+/// terminal).
+///
+/// Capas, en orden:
+///   1. `SAGE_NODE_PATH` — override explícito (CI, setups raros).
+///   2. El `PATH` del proceso — cubre dev y "abrí la app desde la
+///      terminal con `open`", donde el PATH sí viene poblado.
+///   3. Ubicaciones conocidas — homebrew (arm64 + intel), nvm
+///      (versión más alta instalada), volta, fnm, asdf, /usr/local.
+///   4. Preguntarle al login shell del usuario (`$SHELL -lc
+///      'command -v node'`). Respeta cualquier setup exótico que
+///      el usuario tenga en su `.zshrc` / `.zprofile`.
+///
+/// Devolver `None` significa "no hay Node en esta máquina" y el
+/// banner del renderer se lo dice al usuario con el detalle.
+fn resolve_node() -> Option<PathBuf> {
+    // 1. Override explícito.
+    if let Ok(p) = std::env::var("SAGE_NODE_PATH") {
+        let path = PathBuf::from(p);
+        if is_executable(&path) {
+            return Some(path);
+        }
+    }
+
+    // 2. PATH del proceso.
+    if let Some(p) = find_in_path("node") {
+        return Some(p);
+    }
+
+    // 3. Ubicaciones conocidas.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let fixed_candidates = [
+        // Homebrew: Apple Silicon primero, después Intel.
+        PathBuf::from("/opt/homebrew/bin/node"),
+        PathBuf::from("/usr/local/bin/node"),
+        // Volta y asdf shims.
+        PathBuf::from(format!("{home}/.volta/bin/node")),
+        PathBuf::from(format!("{home}/.asdf/shims/node")),
+        // Linux distro default (por si algún día empacamos ahí).
+        PathBuf::from("/usr/bin/node"),
+    ];
+    for candidate in &fixed_candidates {
+        if is_executable(candidate) {
+            return Some(candidate.clone());
+        }
+    }
+    // Version managers que guardan un dir por versión: elegimos la
+    // más alta instalada en lugar de la primera que aparezca en el
+    // read_dir (que viene en orden arbitrario del filesystem).
+    for versions_root in [
+        format!("{home}/.nvm/versions/node"),
+        format!("{home}/Library/Application Support/fnm/node-versions"),
+        format!("{home}/.local/share/fnm/node-versions"),
+    ] {
+        if let Some(p) = newest_versioned_node(Path::new(&versions_root)) {
+            return Some(p);
+        }
+    }
+
+    // 4. Preguntarle al login shell. Última capa porque cuesta
+    //    ~100-300ms (carga el profile del usuario) y las anteriores
+    //    cubren el 99% de los casos.
+    if let Some(p) = ask_login_shell_for_node() {
+        return Some(p);
+    }
+
+    None
+}
+
+fn is_executable(path: &Path) -> bool {
+    // `metadata()` sigue symlinks, que es lo que queremos: los shims
+    // de nvm/volta suelen serlo.
+    path.metadata().map(|m| m.is_file()).unwrap_or(false)
+}
+
+/// Busca un binario recorriendo el `PATH` del proceso actual.
+fn find_in_path(bin: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    std::env::split_paths(&path_var)
+        .map(|dir| dir.join(bin))
+        .find(|candidate| is_executable(candidate))
+}
+
+/// Dado un dir tipo `~/.nvm/versions/node`, devuelve el
+/// `<version>/bin/node` de la versión más alta instalada. Ordena por
+/// semver numérico — un sort lexicográfico pondría `v9.x` por encima
+/// de `v22.x`, que es justo al revés de lo que queremos.
+fn newest_versioned_node(versions_root: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(versions_root).ok()?;
+    let mut best: Option<((u64, u64, u64), PathBuf)> = None;
+    for entry in entries.flatten() {
+        let node_bin = entry.path().join("bin/node");
+        if !is_executable(&node_bin) {
+            continue;
+        }
+        let name = entry.file_name();
+        let version = parse_semver(&name.to_string_lossy()).unwrap_or((0, 0, 0));
+        let is_better = match &best {
+            Some((best_version, _)) => version > *best_version,
+            None => true,
+        };
+        if is_better {
+            best = Some((version, node_bin));
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+/// `"v22.17.0"` / `"22.17.0"` → `(22, 17, 0)`. Devuelve `None` si el
+/// nombre no parsea como versión.
+fn parse_semver(raw: &str) -> Option<(u64, u64, u64)> {
+    let cleaned = raw.trim_start_matches('v');
+    let mut parts = cleaned.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// PATH para el proceso hijo: el dir del node resuelto primero, luego
+/// los bins habituales de macOS, luego lo que hubiera heredado el
+/// proceso. Dedupe preservando el orden para no armar un PATH gigante
+/// con repetidos.
+fn enriched_path(node: &Path) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+
+    if let Some(node_dir) = node.parent() {
+        dirs.push(node_dir.to_path_buf());
+    }
+    dirs.extend(
+        [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+        .iter()
+        .map(PathBuf::from),
+    );
+    dirs.push(PathBuf::from(format!("{home}/.volta/bin")));
+    if let Some(inherited) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&inherited));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let unique: Vec<PathBuf> = dirs
+        .into_iter()
+        .filter(|d| seen.insert(d.clone()))
+        .collect();
+    std::env::join_paths(unique)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "/usr/bin:/bin".to_string())
+}
+
+/// Último recurso: preguntarle al login shell del usuario dónde está
+/// su `node`. Un login shell (`-l`) carga `.zprofile`/`.bash_profile`,
+/// que es donde nvm/fnm/asdf se inicializan.
+fn ask_login_shell_for_node() -> Option<PathBuf> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = std::process::Command::new(shell)
+        .args(["-lc", "command -v node"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let found = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if found.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(found);
+    is_executable(&path).then_some(path)
+}
+
 /// Same resolution strategy as `sidecar_path` but for the `prompts/`
 /// dir. In production the dir lives at `Resources/_up_/prompts/`
 /// because `tauri.conf.json` declares `../prompts/*.md` as resources;
@@ -136,19 +321,39 @@ pub async fn spawn(app: AppHandle) -> Result<(), String> {
         }
     };
 
-    let mut cmd = Command::new("node");
+    // Resolver el binario de Node antes de spawnear. Ver
+    // `resolve_node` para por qué no alcanza con `Command::new("node")`
+    // cuando la app se abre desde Finder/Dock.
+    let node = match resolve_node() {
+        Some(n) => n,
+        None => {
+            let msg = "No encontramos Node.js en esta Mac. El consejo necesita Node 20+ para correr. Instalalo desde nodejs.org (o con Homebrew: `brew install node`) y reabrí la app.".to_string();
+            log::error!("node not found in PATH nor well-known locations");
+            set_status(&app, SidecarStatus::Down { message: msg.clone() }).await;
+            return Err(msg);
+        }
+    };
+    log::info!("using node at {}", node.display());
+
+    let mut cmd = Command::new(&node);
     cmd.arg(&path);
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(p) = prompts_dir(&app) {
         cmd.env("SAGE_PROMPTS_DIR", p);
     }
+    // El PATH heredado desde Finder/Dock es mínimo. Le anteponemos el
+    // dir del node que resolvimos + los bins habituales para que
+    // cualquier subproceso que el Agent SDK necesite (git, el binario
+    // `claude`, etc.) también los encuentre.
+    cmd.env("PATH", enriched_path(&node));
     cmd.kill_on_drop(true);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             let msg = format!(
-                "No pudimos arrancar el consejo (¿está `node` en el PATH?). Detalle: {e}"
+                "No pudimos arrancar el consejo con Node en {}. Detalle: {e}",
+                node.display()
             );
             set_status(&app, SidecarStatus::Down { message: msg.clone() }).await;
             return Err(msg);
@@ -454,6 +659,77 @@ mod tests {
         // 2 hops can't reach root from h/g/f/e/d/c/b/a (needs 8 pops).
         let found = find_walking_up(&start, "prompts", 2);
         assert!(found.is_none());
+    }
+
+    // --- Node resolution (sesión 18) ---
+
+    #[test]
+    fn parses_node_version_strings() {
+        assert_eq!(parse_semver("v22.17.0"), Some((22, 17, 0)));
+        assert_eq!(parse_semver("22.17.0"), Some((22, 17, 0)));
+        assert_eq!(parse_semver("v20"), Some((20, 0, 0)));
+        assert_eq!(parse_semver("v18.1"), Some((18, 1, 0)));
+        assert_eq!(parse_semver("not-a-version"), None);
+    }
+
+    #[test]
+    fn picks_highest_node_version_not_lexicographic_first() {
+        // El bug que este test previene: ordenar por string pondría
+        // "v9.0.0" por encima de "v22.17.0" porque '9' > '2'.
+        let root = temp_dir();
+        for version in ["v9.0.0", "v22.17.0", "v22.16.0", "v18.20.4"] {
+            let bin_dir = root.join(version).join("bin");
+            fs::create_dir_all(&bin_dir).unwrap();
+            fs::write(bin_dir.join("node"), b"#!/bin/sh\n").unwrap();
+        }
+        let found = newest_versioned_node(&root).expect("should find one");
+        assert!(
+            found.to_string_lossy().contains("v22.17.0"),
+            "expected v22.17.0, got {}",
+            found.display()
+        );
+    }
+
+    #[test]
+    fn versioned_node_lookup_skips_dirs_without_binary() {
+        let root = temp_dir();
+        // Versión más alta pero SIN bin/node — no debe ganar.
+        fs::create_dir_all(root.join("v23.0.0")).unwrap();
+        let ok_bin = root.join("v20.11.0").join("bin");
+        fs::create_dir_all(&ok_bin).unwrap();
+        fs::write(ok_bin.join("node"), b"#!/bin/sh\n").unwrap();
+
+        let found = newest_versioned_node(&root).expect("should find v20");
+        assert!(found.to_string_lossy().contains("v20.11.0"));
+    }
+
+    #[test]
+    fn versioned_node_lookup_on_missing_dir_is_none() {
+        let root = temp_dir().join("does-not-exist");
+        assert!(newest_versioned_node(&root).is_none());
+    }
+
+    #[test]
+    fn enriched_path_puts_node_dir_first_and_dedupes() {
+        let node = PathBuf::from("/opt/homebrew/bin/node");
+        let path = enriched_path(&node);
+        let entries: Vec<&str> = path.split(':').collect();
+
+        assert_eq!(
+            entries.first().copied(),
+            Some("/opt/homebrew/bin"),
+            "el dir del node resuelto va primero"
+        );
+        // Los bins base tienen que estar presentes.
+        assert!(entries.contains(&"/usr/bin"));
+        assert!(entries.contains(&"/bin"));
+        // Sin duplicados — /opt/homebrew/bin aparecería dos veces
+        // (como parent del node y como candidato fijo) sin el dedupe.
+        let homebrew_count = entries
+            .iter()
+            .filter(|e| **e == "/opt/homebrew/bin")
+            .count();
+        assert_eq!(homebrew_count, 1, "PATH no debe tener repetidos");
     }
 
     #[test]
