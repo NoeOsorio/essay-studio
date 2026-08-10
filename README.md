@@ -115,10 +115,25 @@ Todo termina en `Essay Studio.app/Contents/Resources/_up_/`. En runtime, Rust re
 ### Requisitos del usuario final (la primera vez que corre el `.app`)
 
 - macOS 12+ (Tauri 2 requirement)
-- **Node 20+** instalado y en PATH (el sidecar es un proceso Node — el bundle no trae su propio runtime todavía; ver Fase 3.2 del ROADMAP)
+- **Node 20+** instalado (el sidecar es un proceso Node — el bundle no trae su propio runtime todavía; ver Fase 3.2 del ROADMAP)
 - **Claude Code** instalado y logueado con cuenta Max / Pro — el sidecar reutiliza esas credenciales OAuth para autenticar contra el Agent SDK
 
 Si falta `node` o el sidecar no arranca, la app abre un **banner rojo arriba del editor** ("El consejo no está disponible") con el detalle del error. El editor sigue siendo usable; solo Interrogar / Evaluar fallan hasta arreglar el entorno y reiniciar la app.
+
+#### Cómo se encuentra Node (sesión 18)
+
+Las apps de macOS lanzadas desde Finder/Dock **no heredan el PATH de tu shell** — arrancan con el PATH mínimo de `launchd`. Como nvm / fnm / volta instalan Node fuera de ese PATH, `node` "a secas" no se encuentra. La app resuelve el binario en cuatro capas:
+
+1. `SAGE_NODE_PATH` — override explícito, si querés apuntar a un Node específico
+2. El `PATH` del proceso — cubre `tauri:dev` y abrir la app con `open` desde la terminal
+3. Ubicaciones conocidas — Homebrew (`/opt/homebrew/bin`, `/usr/local/bin`), volta, asdf, `/usr/bin`, y los version managers por-versión (nvm, fnm) eligiendo la **versión más alta** instalada
+4. Preguntarle a tu login shell (`$SHELL -lc 'command -v node'`), que carga tu `.zprofile` y respeta cualquier setup exótico
+
+Si aun así no aparece, el banner te dice cómo instalarlo. Para forzar un Node puntual:
+
+```bash
+SAGE_NODE_PATH=/ruta/a/node open "src-tauri/target/release/bundle/macos/Essay Studio.app"
+```
 
 ### Smoke test post-build
 

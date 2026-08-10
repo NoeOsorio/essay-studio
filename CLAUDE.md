@@ -1056,7 +1056,64 @@ Punto 3 de Noé. Decisiones que necesita antes de codear: formato (essay complet
 - **Dismiss volátil > dismiss persistido para señales informativas.** Un score que se esconde "para siempre" después de un click puede dejar al usuario sin foco. Dismiss por sesión + recovery cercana en menú es el balance: respeta el "no quiero verlo ahora" sin condenar la información a desaparecer del muscle memory.
 - **Tests destructivos pillan ordering bugs que tests felices no.** El test de Limpiar Evaluación incluyó la aserción "scorebar oculto después del clear". Esa aserción específica fue la que rebotó cuando el ordering bug hizo que las marks reaparecieran. Sin esa aserción habríamos pushado el bug. Cuando un action mute estado en dos capas, asertá ambas.
 
-## Sesión 18 (próxima) — Export markdown (Fase 2.1)
+## Qué quedó hecho en sesión 18 — El `.app` no encontraba Node
+
+Noé abrió el `.app` bundleado desde Finder y le salió el banner rojo:
+
+> "No pudimos arrancar el consejo (¿está `node` en el PATH?). Detalle: No such file or directory (os error 2)"
+
+Detalle importante del reporte: **en `tauri:dev` funcionaba perfecto**. Ese contraste es el diagnóstico.
+
+### Root cause
+
+Las apps de macOS lanzadas desde Finder/Dock no heredan el PATH del shell del usuario — `launchd` las arranca con un PATH mínimo (`/usr/bin:/bin:/usr/sbin:/sbin`). El Node de Noé vive en `~/.nvm/versions/node/v22.17.0/bin/`, que no está ahí. Cuando lanzás con `tauri:dev` desde la terminal, el proceso hereda el PATH poblado de la shell y `Command::new("node")` resuelve sin drama. Desde Finder, no.
+
+Es el mismo problema que sufre cualquier app de escritorio que shell-out a herramientas instaladas por version managers. La lección general: **si tu app spawnea binarios del usuario, no confíes en el PATH heredado**.
+
+### Fix — `resolve_node()` en 4 capas
+
+| Capa | Qué cubre |
+|---|---|
+| 1. `SAGE_NODE_PATH` | Override explícito — CI, setups raros, forzar una versión concreta |
+| 2. `PATH` del proceso | Dev (`tauri:dev`) y `open` desde terminal, donde el PATH sí viene poblado |
+| 3. Ubicaciones conocidas | Homebrew arm64/intel, volta, asdf, `/usr/bin`; y nvm/fnm vía `newest_versioned_node()` |
+| 4. Login shell | `$SHELL -lc 'command -v node'` — carga el profile del usuario, respeta cualquier setup |
+
+`newest_versioned_node()` tiene una sutileza que vale la pena: recorre los dirs por-versión (`~/.nvm/versions/node/v22.17.0/`, etc.) y elige la **más alta**, ordenando por semver **numérico**. Un sort lexicográfico pondría `v9.0.0` por encima de `v22.17.0` porque `'9' > '2'` como caracteres — exactamente al revés. Hay un test explícito que siembra `v9.0.0`, `v22.17.0`, `v22.16.0` y `v18.20.4` y verifica que gana `v22.17.0`.
+
+### Fix secundario — PATH enriquecido para el hijo
+
+Aunque resolvamos el binario de Node por path absoluto, el proceso hijo seguía heredando el PATH mínimo. Si el Agent SDK necesita spawnear algo (git, un helper), también fallaría. `enriched_path()` arma un PATH con: dir del node resuelto primero → bins habituales de macOS → lo heredado, deduplicando y preservando el orden.
+
+### Mensaje de error accionable
+
+Antes el banner mostraba el `ENOENT` crudo. Ahora, cuando ninguna capa encuentra Node:
+
+> "No encontramos Node.js en esta Mac. El consejo necesita Node 20+ para correr. Instalalo desde nodejs.org (o con Homebrew: `brew install node`) y reabrí la app."
+
+Si Node existe pero el spawn falla por otra razón, el mensaje incluye la ruta que intentamos — para debuggear permisos o binarios corruptos.
+
+**33/33 Rust verde** (5 tests nuevos: `parse_semver`, ordenamiento de versiones, skip de dirs sin binario, dir inexistente, `enriched_path`).
+
+## Decisiones de la sesión 18
+
+| Decisión | Por qué |
+|---|---|
+| **4 capas en lugar de sólo el login shell** | El login shell resuelve el 100% de los casos pero cuesta 100-300ms (carga el profile completo) en cada arranque. Las capas 2 y 3 cubren el 99% en microsegundos. El shell queda como red de seguridad para el 1% exótico. |
+| **Login shell como última capa, no primera** | Además del costo, hay riesgo: un `.zshrc` que cuelga colgaría el arranque de la app. Poniéndolo último, sólo llegamos ahí si todo lo demás falló — donde el usuario ya tiene un problema de setup igual. |
+| **Elegir la versión más alta de nvm, no la "default"** | Leer el alias `default` de nvm implicaría parsear su formato (que puede apuntar a otro alias, recursivo) y sólo cubre nvm. Tomar la más alta instalada es una heurística simple, universal para cualquier version manager por-dir, y casi siempre correcta. |
+| **PATH enriquecido para el hijo además del path absoluto** | Resolver el binario de Node no ayuda si el proceso Node después necesita spawnear otra cosa. Es el mismo bug un nivel más abajo — mejor cerrarlo de una. |
+| **No bundlear Node dentro del `.app`** | Sería la solución definitiva (Fase 3.2 del ROADMAP) pero suma ~60-80 MB sobre los 272 MB actuales, y para uso personal donde Node ya está instalado es puro peso. La resolución robusta cubre el caso real sin engordar el bundle. |
+| **Tests sólo de las funciones puras** | `resolve_node()` completo depende del filesystem y del `$SHELL` de la máquina — testearlo pediría mockear ambos. Las partes con lógica real (parseo de versión, ordenamiento, construcción del PATH) sí son puras y ahí está el riesgo de bug. El wiring de capas es trivial de leer. |
+
+## Aprendido en sesión 18
+
+- **"Funciona en dev pero no en el bundle" casi siempre es entorno, no código.** PATH, working directory, variables de entorno, permisos. Cuando el síntoma tiene esa forma, empezá comparando los dos entornos en lugar de leer la lógica — la lógica suele estar bien.
+- **Las apps GUI de macOS viven en un universo de PATH distinto al de la terminal.** No es un detalle de Tauri; le pasa a Electron, a apps nativas, a todo lo que `launchd` arranca. Cualquier app de escritorio que shell-out a herramientas del usuario necesita esta resolución.
+- **Ordenar versiones como strings es un bug esperando.** `v9 > v22` lexicográficamente. Cada vez que ordenes algo que "parece número pero es texto", parsealo. El test que siembra un `v9.0.0` junto a `v22.x` existe justamente para que nadie "simplifique" a un sort de strings en el futuro.
+- **Un mensaje de error accionable vale más que el error técnico.** `ENOENT` es correcto pero inútil para el usuario. "Instalá Node desde nodejs.org" le dice qué hacer. El detalle técnico va al log, no al banner.
+
+## Sesión 19 (próxima) — Export markdown (Fase 2.1)
 
 Algunas posibilidades con el sistema ya estable:
 - **Histórico de versiones del ensayo** (snapshots + diff de score entre versiones — "subió 1.2 puntos en Coherencia").
