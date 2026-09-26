@@ -227,6 +227,6 @@ Distribuido bajo licencia MIT. Ver [`LICENSE`](LICENSE).
 
 <div align="center">
 
-Hecho con ☕ por [Noé Osorio](https://noeosorio.com)
+Hecho con ☕ por [Noé Osorio](https://noeosorio.com) · [business@noeosorio.com](mailto:business@noeosorio.com)
 
 </div>
