@@ -1,216 +1,232 @@
+<div align="center">
+
+<!-- TODO: crear docs/banner-dark.png y docs/banner-light.png (1280x640) con la paleta de noeosorio.com (fondo #18181b, acento #bef264 → #10b981) y descomentar
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/banner-dark.png">
+  <img alt="Essay Studio: un consejo de cuatro sabios de IA que interroga, anota y puntúa tus ensayos" src="docs/banner-light.png" width="600">
+</picture>
+-->
+
+<img src="branding/logo.png" alt="Logo de Essay Studio" width="96">
+
 # Essay Studio
 
-App de escritorio para escritura aumentada con IA — editor + canvas + un consejo de cuatro sabios que anotan, organizan y critican borradores. Pensada para escribir ensayos sobre psicología organizacional.
+**Un consejo de cuatro sabios de IA que interroga, anota y puntúa tus ensayos mientras los escribes.**
 
-> Estado: **sesión 11 cerrada**. Editor TipTap + tablero tldraw + **los 4 sabios vivos** (Empirista / Sistémico / Práctico / Crítico), interrogación coral (3 preguntas por sabio en paralelo), **Evaluar** multi-pasada con anotaciones inline + click-to-apply, **Rúbrica** del profesor inyectada al consejo, **Fuentes** persistentes por ensayo, pasada APA en modo académico, **Benchmark** derivado de anotaciones con estados honestos (—/ parcial / 10 / stale), **idioma ES/EN** por ensayo, y **build distribuible** (`npm run tauri:build:full` genera un `.app` con el sidecar empacado). Auth contra el Agent SDK monthly credit de Claude Max. Para el plan por sesión, ver [CLAUDE.md](CLAUDE.md); para lo que falta, [ROADMAP.md](ROADMAP.md).
+![License](https://img.shields.io/badge/license-MIT-84cc16?style=for-the-badge&labelColor=18181b)
+![Tauri](https://img.shields.io/badge/Tauri_2-18181b?style=for-the-badge&logo=tauri&logoColor=bef264)
+![Next.js](https://img.shields.io/badge/Next.js_16-18181b?style=for-the-badge&logo=nextdotjs&logoColor=bef264)
+![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-18181b?style=for-the-badge&logo=claude&logoColor=bef264)
 
-## Stack
+[Features](#-features) · [Quickstart](#-quickstart) · [Arquitectura](#️-arquitectura) · [Roadmap](ROADMAP.md)
 
-- [Tauri 2](https://v2.tauri.app/) — wrapper de escritorio (Rust + WebView nativo)
-- [Next.js 16](https://nextjs.org/) (App Router, static export)
-- [React 19](https://react.dev/)
-- [TypeScript](https://www.typescriptlang.org/) strict
-- [Tailwind CSS 4](https://tailwindcss.com/) — tokens en CSS via `@theme`
-- [TipTap 3](https://tiptap.dev/) — editor de texto rico con slash commands custom
-- [tldraw 5](https://tldraw.dev/) — canvas con override del `NoteShapeUtil` para el visual Pergamino
-- [Zustand 5](https://zustand-demo.pmnd.rs/) — state global (ensayo abierto, save status, overlays)
-- [Claude Agent SDK](https://docs.claude.com/en/docs/agent-sdk/overview) — sabios via sidecar Node, auth OAuth de Claude Code
-- [Playwright](https://playwright.dev/) — suite E2E para atajos, flow y sage (con sidecar stubbed)
-- Fuentes: [Newsreader](https://fonts.google.com/specimen/Newsreader), [Inter](https://fonts.google.com/specimen/Inter), [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) (vía `next/font/google`)
+</div>
 
-## Requisitos
+Essay Studio es una app de escritorio para escritura aumentada con IA: un editor de texto, un tablero de post-its y cuatro agentes con voces distintas (Empirista, Sistémico, Práctico y Crítico) que te cuestionan a ti en lugar de escribir por ti. Nació para aprender psicología organizacional escribiendo ensayos, con una regla: el puntaje no se le pide al modelo, se calcula a partir de hallazgos concretos que puedes ver, aplicar o descartar.
 
-- Node 20+ (probado con 22.17.0)
-- npm 10+
-- Rust **1.88 o más reciente** (varias crates transitivas piden `edition2024`)
-  - Si tu `rustc --version` es menor: `rustup update stable`
-  - Si no tienes rustup: [rustup.rs](https://rustup.rs/)
-- macOS / Windows / Linux con dependencias nativas de Tauri:
-  - macOS: Xcode Command Line Tools (`xcode-select --install`)
-  - Linux: ver [requisitos de Tauri](https://v2.tauri.app/start/prerequisites/)
+## ✨ Features
 
-## Cómo correrlo
-
-### Primera vez (setup)
-
-```bash
-npm install                       # deps del proyecto
-npm run sidecar:install           # deps del sidecar (Claude Agent SDK)
-npm run sidecar:build             # compila el sidecar → sidecar/dist/sage.js
-npx playwright install chromium   # navegador para E2E
-```
-
-### Día a día — ¿qué corro?
-
-| Qué quieres ver | Comando | Notas |
+| | Feature | Qué hace |
 |---|---|---|
-| Iterar UI rápido en el browser | `npm run dev` | Abre `http://localhost:3000`. Sin Tauri ni sidecar: persistencia y sabios fallan porque no existe `window.__TAURI_INTERNALS__`. Útil para tweaks de estilo. |
-| **La app real** (editor + tablero + consejo) | `npm run tauri:dev` | Lanza Next + ventana Tauri + sidecar Node todo junto. Es lo que usas el 90% del tiempo. La ventana abre con el **icono de la app**. |
-| Empacar el `.app` / `.dmg` distribuible | `npm run tauri:build` | 10+ min. Produce el bundle en `src-tauri/target/release/bundle/`. El **icono del Dock** de macOS solo aparece desde el `.app` bundleado, no en `tauri:dev`. |
-| Solo el build estático de Next | `npm run build` | Salida en `./out/`. Lo usa `tauri:build` internamente. |
+| 🧑‍⚖️ | **Consejo de cuatro sabios** | Cada sabio tiene su persona en [`prompts/`](prompts/): evidencia (EM), sistemas (SI), aplicación (PR) y objeciones (CR). |
+| ❓ | **Interrogar** | Los sabios elegidos corren en paralelo sobre un texto o una fuente y hacen 3 preguntas cada uno. Las que marques se convierten en post-its del tablero. |
+| 🖍️ | **Evaluar (Pluma Roja)** | Pasadas de coherencia, estilo, argumento y APA 7 (esta última solo en modo académico). El resultado son anotaciones inline sobre el texto, y cada reemplazo se aplica con un click. |
+| 📐 | **Rúbrica** | Defines los criterios del profesor con su peso (1 a 5). El consejo los recibe y etiqueta cada hallazgo con su criterio. |
+| 📚 | **Fuentes** | Una biblioteca de fuentes por ensayo (`.txt` / `.md`) que se inyecta en cada pasada de Evaluar. |
+| 🎯 | **Benchmark determinista** | El puntaje por criterio parte de 10 y baja según la severidad de cada anotación. Un 10/10 significa que el consejo no encontró nada más, y cambia en cuanto editas el ensayo. |
+| 🕰️ | **Historial de versiones** | Snapshots automáticos cada 10 min y al cerrar, más guardado manual. Antes de restaurar siempre se guarda una copia de seguridad. |
+| 🌐 | **ES / EN por ensayo** | Los sabios te explican en el idioma del ensayo, y cada reemplazo respeta el idioma del fragmento citado. |
+| ⌨️ | **Menú nativo con atajos** | Todas las acciones del consejo tienen atajo de teclado (ver abajo). |
+| 🔒 | **Local-first, sin API key** | Los ensayos se guardan como JSON en tu máquina. Los sabios usan la sesión OAuth de Claude Code que ya tienes. |
 
-> **Auth de los sabios:** necesitas tener [Claude Code](https://claude.com/code) instalado y logueado con tu cuenta Max/Pro. El sidecar reutiliza esas credenciales OAuth (macOS Keychain) y consume del **Agent SDK monthly credit** de tu plan — no hay API key.
+<details>
+<summary>Atajos de teclado</summary>
 
-> **Primera vez con `tauri:dev`:** Cargo descarga y compila ~470 crates de Tauri y sus deps. Tarda **5-10 minutos**. Las siguientes corridas son segundos. Si `next dev` ya estaba corriendo en `:3000`, mátalo antes — Next 16 rechaza dos instancias del mismo proyecto.
+| Atajo | Acción |
+|---|---|
+| `⌘N` | Nuevo ensayo |
+| `⌘W` | Cerrar ensayo |
+| `⌘I` | Interrogar (modo consejo) |
+| `⌘⇧E` | Evaluar |
+| `⌘⇧R` | Rúbrica |
+| `⌘⇧F` | Fuentes |
+| `⌘⇧⌫` | Limpiar evaluación |
+| `⌘⇧H` | Historial de versiones |
+| `⌘\` | Mostrar / ocultar tablero |
 
-> **Cambié el icono y no se actualiza en la app:** los iconos se embedean en el binario al compilar. Si cambias archivos en `src-tauri/icons/`, corre `cargo clean --manifest-path src-tauri/Cargo.toml -p app` y vuelve a `npm run tauri:dev`. El icono del **Dock de macOS** solo se ve correctamente desde el `.app` bundleado (`tauri:build`).
+</details>
 
-### Branding / iconos
+## 🖼️ Demo
 
-El source del logo vive en `branding/logo.png` (transparente 500px) y `branding/logo-1024.png` (upscaled para el generator). Para regenerar todo el set de iconos (macOS `.icns`, Windows `.ico`, Linux PNGs, Windows Store, iOS, Android):
+<!-- TODO: agregar docs/demo.gif (Interrogar → post-its → Evaluar → aplicar reemplazo) y una captura actual de la app -->
+<p align="center">
+  <img src="docs/session-1-writing-view.png" alt="Vista de escritura: editor con anotaciones inline de los sabios, tablero de post-its y barra de benchmark" width="900">
+</p>
 
-```bash
-npx tauri icon branding/logo-1024.png
-```
+## 🚀 Quickstart
 
-Para el favicon web, los archivos `src/app/icon.png` y `src/app/apple-icon.png` se sirven automáticamente por Next.js — al cambiarlos, hard refresh en el browser (`⌘⇧R`).
+> [!IMPORTANT]
+> Para usar a los sabios necesitas tener [Claude Code](https://claude.com/code) instalado y con sesión iniciada en una cuenta **Pro o Max**. El sidecar reutiliza esas credenciales (Keychain de macOS) y consume el crédito mensual del Agent SDK de tu plan. No usa `ANTHROPIC_API_KEY`.
 
-## Tests
+**Requisitos**
 
-**48 specs E2E (Playwright) + 10 tests Rust** — todos verdes. **Antes de tocar atajos, edit modes o el flow lista↔editor, corre la suite.** Nos ha mordido dos veces ese subsistema y por eso existen.
-
-```bash
-npm run test:e2e          # headless Playwright (~90s)
-npm run test:e2e:ui       # con UI interactiva (debugging)
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust storage round-trips
-```
-
-Lo que cubre la suite E2E:
-
-- **Editor** — texto plano, título single-line, slash menu, `⌘B` bold
-- **Tablero** — `N` no es sticky, escribir después de crear va al note, atajos no se solapan con typing, counter live, panel contextual asigna autor/kind
-- **Flow** — crear ensayo persiste, autosave guarda, breadcrumb vuelve a la lista
-- **Sage / interrogación** — modo consejo (4×3=12 notes), modo single, checkboxes, bubble menu de selección, upload `.txt` que se guarda en biblioteca
-- **Evaluar (Pluma Roja)** — 3 pasadas en paralelo, anotaciones inline aplican con `.anno` marks, popover, descartar, uncheck filtra apply
-- **Rúbrica** — CRUD, count badge, pasada APA visible solo en académico, rúbrica forwarded a cada pase, chip de criterio
-- **Fuentes** — CRUD, upload en biblioteca y desde Lectura, chip-picker, inyección a cada pase de Evaluar
-
-Tests Rust cubren round-trip de persistencia (board, interrogatorios, rúbrica, fuentes), ordenamiento por `updatedAt`, sanitización de IDs, escritura atómica (tmp + rename).
-
-## Build de producción
-
-```bash
-npm run tauri:build:full
-```
-
-Compila el sidecar (`sidecar/dist/sage.js`) **y luego** corre `tauri build` — los dos en orden. Es el comando recomendado: si solo corres `tauri:build` y olvidas reconstruir el sidecar, el `.app` resultante abre pero los sabios no responden (el banner rojo te avisa).
-
-Genera el bundle nativo en `src-tauri/target/release/bundle/`:
-- macOS: `.dmg` + `.app`
-- Windows: `.msi`
-- Linux: `.deb` / `.AppImage`
-
-### Qué se empaca dentro del bundle
-
-`tauri.conf.json` declara como `bundle.resources` (paths relativos a `src-tauri/`):
-- `../sidecar/dist/sage.js` → el binario JS del consejo
-- `../sidecar/package.json` → necesario para que Node respete `type: "module"`
-- `../sidecar/node_modules/**/*` → la SDK del consejo y todas sus deps, incluyendo el binario nativo `claude` (~197 MB en `darwin-arm64`) que la SDK usa internamente para hacer las queries
-- `../prompts/*.md` → las personas de los cuatro sabios
-
-Todo termina en `Essay Studio.app/Contents/Resources/_up_/`. En runtime, Rust resuelve los paths via `app.path().resolve(..., BaseDirectory::Resource)`. Fallback de dev: walk-up desde `cwd` (busca `sidecar/dist/sage.js` y `prompts/` en el repo). Override manual: env vars `SAGE_SIDECAR_PATH` y `SAGE_PROMPTS_DIR`.
-
-**Tamaño esperado del bundle:** `.app` ~272 MB · `.dmg` ~210 MB. El 90% es el binario nativo de la Claude Agent SDK. Es comparable a un Electron app típico (Slack, Notion, Discord). Si en algún momento querés distribuir, hay margen de optimización (esbuild + reusar el `claude` global del usuario en vez del bundled — Fase 3.2 del ROADMAP).
-
-### Requisitos del usuario final (la primera vez que corre el `.app`)
-
-- macOS 12+ (Tauri 2 requirement)
-- **Node 20+** instalado (el sidecar es un proceso Node — el bundle no trae su propio runtime todavía; ver Fase 3.2 del ROADMAP)
-- **Claude Code** instalado y logueado con cuenta Max / Pro — el sidecar reutiliza esas credenciales OAuth para autenticar contra el Agent SDK
-
-Si falta `node` o el sidecar no arranca, la app abre un **banner rojo arriba del editor** ("El consejo no está disponible") con el detalle del error. El editor sigue siendo usable; solo Interrogar / Evaluar fallan hasta arreglar el entorno y reiniciar la app.
-
-#### Cómo se encuentra Node (sesión 18)
-
-Las apps de macOS lanzadas desde Finder/Dock **no heredan el PATH de tu shell** — arrancan con el PATH mínimo de `launchd`. Como nvm / fnm / volta instalan Node fuera de ese PATH, `node` "a secas" no se encuentra. La app resuelve el binario en cuatro capas:
-
-1. `SAGE_NODE_PATH` — override explícito, si querés apuntar a un Node específico
-2. El `PATH` del proceso — cubre `tauri:dev` y abrir la app con `open` desde la terminal
-3. Ubicaciones conocidas — Homebrew (`/opt/homebrew/bin`, `/usr/local/bin`), volta, asdf, `/usr/bin`, y los version managers por-versión (nvm, fnm) eligiendo la **versión más alta** instalada
-4. Preguntarle a tu login shell (`$SHELL -lc 'command -v node'`), que carga tu `.zprofile` y respeta cualquier setup exótico
-
-Si aun así no aparece, el banner te dice cómo instalarlo. Para forzar un Node puntual:
+- Node 20+ y npm 10+
+- Rust 1.88+ (`rustup update stable`)
+- Dependencias nativas de Tauri: en macOS, `xcode-select --install`. Para otros sistemas, ver los [prerequisitos de Tauri](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
-SAGE_NODE_PATH=/ruta/a/node open "src-tauri/target/release/bundle/macos/Essay Studio.app"
+git clone https://github.com/NoeOsorio/essay-studio.git && cd essay-studio
+npm install
+npm run sidecar:install     # deps del sidecar (Claude Agent SDK)
+npm run sidecar:build       # compila sidecar/dist/sage.js
+npm run tauri:dev           # Next + ventana Tauri + sidecar
 ```
 
-### Smoke test post-build
+> [!NOTE]
+> La primera vez, `tauri:dev` compila ~470 crates y tarda de 5 a 10 minutos. Las siguientes corridas tardan segundos. Si ya tienes `next dev` corriendo en `:3000`, detenlo antes.
 
-La primera vez que generes un `.app` distribuible, verificá manualmente:
+**Build distribuible**
 
-- [ ] `open src-tauri/target/release/bundle/macos/Essay\ Studio.app` abre la ventana sin crash
-- [ ] El icono pergamino se ve correcto en el Dock
-- [ ] No aparece el banner rojo del sidecar (si aparece → revisar Node + Claude Code)
-- [ ] Crear ensayo persiste — el archivo aparece en `~/Library/Application Support/com.noeosorio.essaystudio/essays/<uuid>.json`
-- [ ] Cerrar y reabrir el `.app` → el ensayo sigue ahí
-- [ ] Click **Interrogar** streamea preguntas reales del modelo (no del stub)
-- [ ] Click **Evaluar** produce anotaciones y el Scorebar refleja el score
+```bash
+npm run tauri:build:full    # recompila el sidecar y luego empaqueta
+```
 
-## Scripts disponibles
+El bundle queda en `src-tauri/target/release/bundle/` (`.app` / `.dmg` en macOS, `.msi` en Windows, `.deb` / `.AppImage` en Linux). Para abrir el `.app` hacen falta Node 20+ y Claude Code con sesión iniciada. Si falta alguno, la app lo avisa con un banner, y el editor y el tablero siguen funcionando.
+
+<details>
+<summary>Todos los scripts</summary>
 
 | Script | Qué hace |
 |---|---|
-| `npm run dev` | Next.js dev server en `http://localhost:3000` |
-| `npm run build` | Build estático → `./out` |
-| `npm run lint` | ESLint sobre `src/` |
+| `npm run dev` | Solo Next en `http://localhost:3000` (sin Tauri: persistencia y sabios desactivados). Útil para iterar estilos. |
+| `npm run build` | Export estático de Next a `./out` |
+| `npm run lint` | ESLint |
 | `npm run test:e2e` | Suite Playwright headless |
 | `npm run test:e2e:ui` | Suite Playwright con UI interactiva |
-| `npm run sidecar:install` | Instala deps del sidecar (Agent SDK + tipos) |
-| `npm run sidecar:build` | Compila el sidecar Node → `sidecar/dist/sage.js` |
-| `npm run tauri:dev` | Arranca Next dev + ventana Tauri + sidecar de sabios (lo que usas a diario) |
-| `npm run tauri:build` | Empaqueta la app de escritorio (.app/.dmg/.msi) usando lo que ya esté compilado |
-| `npm run tauri:build:full` | **Compila el sidecar y luego empaqueta** — el comando de release recomendado |
-| `npm run tauri` | CLI de Tauri (passthrough — p.ej. `npm run tauri -- icon branding/logo-1024.png`) |
+| `npm run sidecar:install` | Instala deps del sidecar |
+| `npm run sidecar:build` | Compila el sidecar a `sidecar/dist/sage.js` |
+| `npm run tauri:dev` | App completa en modo desarrollo |
+| `npm run tauri:build` | Empaqueta usando el sidecar ya compilado |
+| `npm run tauri:build:full` | Compila el sidecar y empaqueta (recomendado para release) |
+| `npm run tauri` | CLI de Tauri, p. ej. `npm run tauri -- icon branding/logo-1024.png` |
 
-## Estructura
+</details>
 
-Ver [CLAUDE.md](CLAUDE.md) para el detalle. Resumen:
+**Tests**: 110 specs E2E con Playwright (el sidecar está stubbed, así que no consumen créditos) y 33 tests de Rust.
 
-```
-branding/                       # source del logo + upscale para tauri icon
-src/
-├── app/
-│   ├── icon.png                # favicon web (Next.js auto-served)
-│   ├── apple-icon.png          # apple-touch-icon
-│   └── …                       # layout, globals, page
-├── components/
-│   ├── editor/                 # TipTap + Annotation mark + popover
-│   ├── canvas/                 # tldraw real (override NoteShapeUtil)
-│   ├── lectura/
-│   │   ├── LecturaOverlay.tsx     # Interrogatorio (consejo / single sabio)
-│   │   ├── PlumaRojaOverlay.tsx   # Evaluar (3 pasadas + APA opcional)
-│   │   ├── RubricaOverlay.tsx     # CRUD de criterios
-│   │   └── FuentesOverlay.tsx     # biblioteca de fuentes por ensayo
-│   ├── council/                # avatares clickables del consejo
-│   ├── ui/                     # primitivos compartidos
-│   ├── EssayList.tsx
-│   ├── Topbar.tsx              # Fuentes · Rúbrica · Interrogar · Evaluar
-│   └── Scorebar.tsx
-└── lib/
-    ├── store.ts                # Zustand (essay + overlays + autosave)
-    ├── storage/                # invoke wrappers + tipos (Essay, Fuente, Rubrica…)
-    ├── agents/                 # interrogate, critique, parseAnotaciones, buildAnotacion
-    └── editor/findCita.ts      # resuelve citas literales a posiciones PM
-src-tauri/                      # storage + sidecar lifecycle + sage_critique
-│   └── icons/                  # generados por `npx tauri icon`
-sidecar/                        # Node + Claude Agent SDK (sabios)
-   ├── src/sage.ts              # JSON-Lines stdin/stdout protocol
-   └── dist/sage.js             # compilado (gitignored)
-tests/e2e/                      # Playwright (keyboard + flow + sage/rubrica/fuentes stubbed)
-prompts/                        # personas markdown por sabio
+```bash
+npm run test:e2e
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## Convenciones
+## ⚙️ Configuración
 
-- **Conventional commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`).
-- **TS strict, prohibido `any`.**
-- **Sin librerías de componentes externas.** Primitivos propios.
-- **Sabios via OAuth de Claude Code**, no API key. El sidecar usa el binario de Claude Code instalado y reutiliza sus credenciales del Keychain. No hay `ANTHROPIC_API_KEY` en el proyecto.
-- **Una feature por sesión.** Scope apretado. Cambios no triviales → plan/diff antes de aplicar.
-- **No refactores preventivos.** Tradeoffs reales → explícalos y deja decidir a Noé.
-- **Antes de tocar keyboard handlers / edit modes**, correr `npm run test:e2e`. La suite existe porque ese subsistema nos ha mordido dos veces.
+No hace falta `.env`. Estas variables opcionales sirven como override para setups poco comunes:
 
-## Diseño
+| Variable | Para qué sirve |
+|---|---|
+| `SAGE_NODE_PATH` | Ruta explícita al binario de Node que usará el sidecar |
+| `SAGE_SIDECAR_PATH` | Ruta a `sage.js` si no está en el bundle ni en el repo |
+| `SAGE_PROMPTS_DIR` | Carpeta con las personas `.md` de los sabios |
 
-Dirección visual: Pergamino (D2) + benchmarks circulares (D3 Atelier) + post-its con cinta vintage. Mockeado en HTML por Noé en [claude.ai/design](https://claude.ai/design); los design tokens viven en [src/app/globals.css](src/app/globals.css). Detalle en [CLAUDE.md](CLAUDE.md#diseño-pergamino--atelier-benchmarks).
+<details>
+<summary>Cómo encuentra Node el <code>.app</code></summary>
+
+Las apps que abres desde Finder o el Dock no heredan el `PATH` de tu shell, así que un Node instalado con nvm, fnm o volta no aparece a simple vista. Rust lo busca en este orden:
+
+1. `SAGE_NODE_PATH`
+2. El `PATH` del proceso (cubre `tauri:dev` y `open` desde la terminal)
+3. Ubicaciones conocidas: Homebrew, volta, asdf, `/usr/bin` y la versión más alta que haya en nvm/fnm
+4. Tu login shell (`$SHELL -lc 'command -v node'`)
+
+Los datos viven en `~/Library/Application Support/com.noeosorio.essaystudio/essays/`, con un `<id>.json` y un `<id>.history.jsonl` por cada ensayo.
+
+</details>
+
+## 🏗️ Arquitectura
+
+```mermaid
+flowchart LR
+    subgraph UI["Renderer · Next.js 16 + React 19"]
+        ED[Editor TipTap<br/>anotaciones inline]
+        BO[Tablero tldraw<br/>post-its]
+        ST[(Zustand store)]
+    end
+    subgraph RS["Tauri 2 · Rust"]
+        STO[storage.rs<br/>history.rs]
+        SC[sidecar.rs]
+        MN[menu.rs]
+    end
+    subgraph NODE["Sidecar Node"]
+        SG[sage.ts]
+        SDK[Claude Agent SDK]
+    end
+    ED & BO --- ST
+    ST -- invoke --> STO
+    ST -- invoke --> SC
+    MN -- "app:menu" --> ST
+    STO --> FS[("essays/*.json<br/>*.history.jsonl")]
+    SC -- "JSON Lines · stdin" --> SG
+    SG -- "tokens · stdout" --> SC
+    SC -- "sage://event" --> ST
+    SG --> P["prompts/*.md"]
+    SG --> SDK -- "OAuth de Claude Code" --> CL((Claude))
+```
+
+- **El renderer no tiene acceso crudo al filesystem.** Toda la I/O pasa por comandos Rust con escritura atómica (tmp + rename).
+- **Los sabios corren en un proceso Node aparte** que habla con Rust por JSON Lines, así que el streaming token a token funciona sin abrir puertos.
+- **El modelo devuelve citas literales y el frontend las ancla al documento.** Así nadie tiene que calcular offsets de ProseMirror, y las anotaciones viajan dentro del propio documento como marks de TipTap.
+
+## 📁 Estructura
+
+<details>
+<summary>Ver estructura</summary>
+
+```text
+essay-studio/
+├── src/
+│   ├── app/                 # layout, page, tokens de diseño (globals.css)
+│   ├── components/
+│   │   ├── editor/          # TipTap + mark Annotation + popover + slash menu
+│   │   ├── canvas/          # tldraw con NoteShapeUtil propio (post-its Pergamino)
+│   │   ├── lectura/         # overlays: Interrogar, Evaluar, Rúbrica, Fuentes, Historial
+│   │   ├── council/         # avatares del consejo
+│   │   └── ui/              # primitivos propios (sin librerías de componentes)
+│   └── lib/
+│       ├── agents/          # interrogate, critique, parseo de anotaciones
+│       ├── benchmark/       # score determinista
+│       ├── storage/         # wrappers de invoke + tipos
+│       └── store.ts         # Zustand
+├── src-tauri/src/           # storage, history, sidecar, menu
+├── sidecar/src/sage.ts      # protocolo JSON Lines + Claude Agent SDK
+├── prompts/                 # personas de los cuatro sabios
+├── tests/e2e/               # Playwright con Tauri stubbed
+└── branding/                # logo fuente (npx tauri icon branding/logo-1024.png)
+```
+
+</details>
+
+## 🗺️ Roadmap
+
+El detalle está en [`ROADMAP.md`](ROADMAP.md).
+
+- [x] Build distribuible con sidecar y prompts empacados
+- [x] Historial de versiones con restauración segura
+- [x] Menú nativo con atajos para todo el consejo
+- [ ] Export a Markdown con anotaciones
+- [ ] Auto-respawn del sidecar e indicador de salud
+- [ ] Abrir el último ensayo al iniciar
+- [ ] Backup automático y export a ZIP
+- [ ] PDF y Word como tipo de fuente
+
+## 📄 Licencia
+
+Distribuido bajo licencia MIT. Ver [`LICENSE`](LICENSE).
+
+---
+
+<div align="center">
+
+Hecho con ☕ por [Noé Osorio](https://noeosorio.com)
+
+</div>

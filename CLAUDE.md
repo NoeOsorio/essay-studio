@@ -33,7 +33,7 @@ Persistencia: JSON files en app data dir para v1; migrar a SQLite cuando haya vo
 
 **Dirección elegida:** D2 Pergamino + benchmarks circulares de D3 Atelier + post-its con tape vintage.
 
-**Source of truth:** prototipos HTML exportados de claude.ai/design en `https://api.anthropic.com/v1/design/h/v3Gc4dvsFkBWab4LeVVoOQ` (gzip → tar). Tratar los HTML como spec pixel-perfect, NO como código de producción — recrear el output visual, no copiar la estructura del prototipo.
+**Source of truth:** prototipos HTML exportados de claude.ai/design (ya no se usan; el diseño vive en el código). Tratar los HTML como spec pixel-perfect, NO como código de producción — recrear el output visual, no copiar la estructura del prototipo.
 
 **Paleta** (todos los tokens viven en [src/app/globals.css](src/app/globals.css) bajo `@theme`):
 - Paper: `paper #F6F1E7` / `paper-2 #FBF7EE` / `paper-3 #EFE8DA` / `paper-4 #E6DDC9`

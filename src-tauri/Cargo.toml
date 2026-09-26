@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "Essay Studio: consejo de sabios de IA que interroga, anota y puntúa tus ensayos"
+authors = ["Noé Osorio <business@noeosorio.com>"]
+license = "MIT"
+repository = "https://github.com/NoeOsorio/essay-studio"
 edition = "2021"
 rust-version = "1.77.2"
 
