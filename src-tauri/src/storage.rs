@@ -40,6 +40,8 @@ pub struct Essay {
     /// essays (treated as "es" by the renderer when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(default, rename = "reviewerProfile", skip_serializing_if = "Option::is_none")]
+    pub reviewer_profile: Option<String>,
     pub mode: String,
     #[serde(rename = "wordCount", default)]
     pub word_count: u32,
@@ -137,11 +139,23 @@ pub fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
 
 // --------- Tauri command wrappers (production entry points) ---------
 
-fn essays_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let mut path = app
-        .path()
+/// An explicit launcher-only override allows native QA on disposable data.
+/// It is never accepted from renderer/MCP tool arguments.
+pub(crate) fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("ESSAY_STUDIO_DATA_DIR") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err("ESSAY_STUDIO_DATA_DIR must be absolute".into());
+        }
+        return Ok(path);
+    }
+    app.path()
         .app_data_dir()
-        .map_err(|e| format!("app data dir: {e}"))?;
+        .map_err(|e| format!("app data dir: {e}"))
+}
+
+pub(crate) fn essays_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let mut path = app_data_dir(app)?;
     path.push("essays");
     fs::create_dir_all(&path).map_err(|e| format!("create essays dir: {e}"))?;
     Ok(path)
@@ -195,6 +209,7 @@ mod tests {
             fuentes: None,
             evaluacion_meta: None,
             language: None,
+            reviewer_profile: None,
             mode: "academico".to_string(),
             word_count: 3,
             created_at: "2026-05-09T20:00:00Z".to_string(),
@@ -209,10 +224,8 @@ mod tests {
         // Each test gets its own subdirectory so the parallel test runner
         // doesn't have one test's `remove_dir_all` blow away another's data.
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "essay-studio-test-{}-{n}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("essay-studio-test-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
     }

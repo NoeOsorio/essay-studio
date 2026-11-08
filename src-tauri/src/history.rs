@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::storage::Essay;
 
@@ -180,7 +180,10 @@ pub fn prune_in(dir: &Path, id: &str) -> Result<(), String> {
         .map(String::as_str)
         .collect();
 
-    let kept: Vec<&Snapshot> = all.iter().filter(|s| !drop_set.contains(s.taken_at.as_str())).collect();
+    let kept: Vec<&Snapshot> = all
+        .iter()
+        .filter(|s| !drop_set.contains(s.taken_at.as_str()))
+        .collect();
 
     // Same file means no work needed.
     if kept.len() == all.len() {
@@ -194,7 +197,8 @@ pub fn prune_in(dir: &Path, id: &str) -> Result<(), String> {
             let line = serde_json::to_string(snap).map_err(|e| format!("serialize: {e}"))?;
             f.write_all(line.as_bytes())
                 .map_err(|e| format!("write history tmp: {e}"))?;
-            f.write_all(b"\n").map_err(|e| format!("write history tmp: {e}"))?;
+            f.write_all(b"\n")
+                .map_err(|e| format!("write history tmp: {e}"))?;
         }
     }
     fs::rename(&tmp, &path).map_err(|e| format!("rename history tmp: {e}"))?;
@@ -214,13 +218,7 @@ pub fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
 // --------- Tauri command wrappers ---------
 
 fn essays_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let mut path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app data dir: {e}"))?;
-    path.push("essays");
-    fs::create_dir_all(&path).map_err(|e| format!("create essays dir: {e}"))?;
-    Ok(path)
+    crate::storage::essays_dir(app)
 }
 
 #[tauri::command]
@@ -229,11 +227,7 @@ pub fn history_list(app: AppHandle, id: String) -> Result<Vec<SnapshotMeta>, Str
 }
 
 #[tauri::command]
-pub fn history_read(
-    app: AppHandle,
-    id: String,
-    taken_at: String,
-) -> Result<Snapshot, String> {
+pub fn history_read(app: AppHandle, id: String, taken_at: String) -> Result<Snapshot, String> {
     read_in(&essays_dir(&app)?, &id, &taken_at)
 }
 
@@ -287,6 +281,7 @@ mod tests {
             fuentes: None,
             evaluacion_meta: None,
             language: None,
+            reviewer_profile: None,
             mode: "academico".to_string(),
             word_count: words,
             created_at: "2026-05-09T20:00:00Z".to_string(),
@@ -357,9 +352,17 @@ mod tests {
         // `append_in` is the pure layer and doesn't prune; the
         // `history_append` Tauri command runs both. We test them
         // composed here.
-        append_in(&dir, &snap("2026-05-30T26:00:00Z", "manual", "manual-v", 100)).unwrap();
+        append_in(
+            &dir,
+            &snap("2026-05-30T26:00:00Z", "manual", "manual-v", 100),
+        )
+        .unwrap();
         append_in(&dir, &snap("2026-05-30T27:00:00Z", "close", "close-v", 110)).unwrap();
-        append_in(&dir, &snap("2026-05-30T28:00:00Z", "before-restore", "br-v", 120)).unwrap();
+        append_in(
+            &dir,
+            &snap("2026-05-30T28:00:00Z", "before-restore", "br-v", 120),
+        )
+        .unwrap();
         prune_in(&dir, "a").unwrap();
 
         // After prune, only the most recent 20 autos remain + the

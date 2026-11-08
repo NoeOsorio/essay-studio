@@ -58,11 +58,19 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     // --- Edit ---
-    // All standard — TipTap and the platform handle these natively
-    // through contenteditable; we don't need custom ids.
+    // WebKit's predefined undo bypasses TipTap/tldraw transaction history.
+    // Route these two actions to the focused live editor instead.
+    let edit_undo = MenuItemBuilder::new("Deshacer")
+        .id("edit:undo")
+        .accelerator("CmdOrCtrl+Z")
+        .build(app)?;
+    let edit_redo = MenuItemBuilder::new("Rehacer")
+        .id("edit:redo")
+        .accelerator("CmdOrCtrl+Shift+Z")
+        .build(app)?;
     let edit_submenu = SubmenuBuilder::new(app, "Edición")
-        .undo()
-        .redo()
+        .item(&edit_undo)
+        .item(&edit_redo)
         .separator()
         .cut()
         .copy()

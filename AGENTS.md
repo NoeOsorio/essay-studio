@@ -24,7 +24,38 @@ Este archivo es la entrada para cualquier agente (Claude Code, Cursor, otros). L
 10. **Tauri dev requires Rust 1.88+** porque varias crates transitivas piden `edition2024`. Si tu rustc es viejo, corre `rustup update stable` (con permiso explícito de Noé).
 11. **Antes de tocar keyboard handlers, edit modes, o el flow lista↔editor, corre `npm run test:e2e`.** Esa suite existe porque ese subsistema ya nos mordió dos veces. Si rompes algo, va a fallar en segundos en lugar de en QA manual.
 12. **Reusar antes de reinventar.** Cuando una lib (tldraw, TipTap, etc.) ya implementa el comportamiento (drag, edit-in-place, atajos), override la pieza visual + persiste tus extras en `meta`. Nunca dupliques el flow.
-13. **Sabios via Agent SDK + Claude Code OAuth.** No metas `ANTHROPIC_API_KEY` ni `@anthropic-ai/sdk` directo. Todas las llamadas pasan por el sidecar Node (`sidecar/src/sage.ts`) usando el Claude Agent SDK, que reusa la auth de Claude Code → consumo cae en el Agent SDK monthly credit del usuario, no en un API key separado. Si tocas el sidecar, recuerda `npm run sidecar:build` antes de probar.
+13. **Sabios via Agent SDK + Claude Code OAuth.** No metas `ANTHROPIC_API_KEY` ni `@anthropic-ai/sdk` directo. Todas las llamadas pasan por el sidecar Node usando la sesión OAuth compatible de Claude Code y los límites de su plan. No prometas crédito mensual separado ni permitas fallback a proveedores/API keys. Si tocas el sidecar, recuerda `npm run sidecar:build` antes de probar.
+
+## MCP local
+
+- Instalación para Codex, Claude Desktop y Claude Code: [docs/mcp-installation.md](docs/mcp-installation.md).
+
+- `shared/mcp.ts` es el registro único de herramientas, esquemas y clasificación.
+- `mcp/` es un paquete npm independiente (Node 22+) para el adaptador stdio.
+- El MCP opera sobre instancias vivas de TipTap/tldraw en `src/lib/mcp/`, nunca
+  escribiendo los JSON de ensayos desde un segundo proceso.
+- Toda mutación comprueba ensayo, sesión y revisión antes de la transacción.
+  No confirmes guardado hasta que la cola de persistencia termine correctamente.
+- Verifica con datos desechables (`ESSAY_STUDIO_DATA_DIR` del lanzador), no con
+  ensayos personales. No registres texto, credenciales ni descriptores privados.
+- Instala dependencias con scripts deshabilitados; revisa cualquier script que
+  una nueva plataforma necesite ejecutar. No cambies paquetes por `audit fix --force`.
+
+## Calidad de los revisores
+
+- El parser de anotaciones y verificación literal vive en
+  `sidecar/src/annotation-parser.ts` y `review-contract.ts`, compartido con la UI
+  y los benchmarks. No dupliques el motor de revisión para el examen.
+- Los perfiles viven en `sidecar/src/model-profiles.ts`. No promociones un
+  candidato ni afirmes disponibilidad o superioridad sin una corrida verificada.
+- Validar y preparar un dry-run es gratuito; ejecutar modelos requiere un
+  manifiesto concreto y aprobación de consumo. No ejecutes inferencia al probar
+  importaciones, levantar el MCP o iniciar el sidecar.
+- Conserva evidencia inválida visible como tal. Una cita que existe en una
+  fuente no demuestra por sí sola apoyo semántico. No certifiques fuentes por
+  memoria del modelo ni puntúes «sin AI slop» con una lista de palabras.
+- Mantén privados los resultados y bibliotecas importadas. El corpus piloto
+  sintético tiene claves provisionales, no aprobación humana inventada.
 
 ## Antes de escribir código de Next.js
 

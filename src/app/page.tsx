@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Topbar } from "@/components/Topbar";
 import { SidecarBanner } from "@/components/SidecarBanner";
+import { McpConnection } from "@/components/McpConnection";
 import { EditorPane } from "@/components/editor/EditorPane";
 import { BoardPane } from "@/components/canvas/BoardPane";
 import { Scorebar } from "@/components/Scorebar";
@@ -82,6 +83,7 @@ export default function Page() {
       <div className="relative z-[1] flex flex-col h-screen">
         <Topbar />
         <SidecarBanner />
+        <McpConnection />
         {view === "list" ? (
           <EssayList />
         ) : boardOpen ? (

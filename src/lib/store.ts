@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { getReviewerProfile } from "../../sidecar/src/model-profiles";
 import type { JSONContent } from "@tiptap/core";
 import {
   appendSnapshot,
@@ -25,6 +26,7 @@ import type {
   Snapshot,
   SnapshotKind,
   SnapshotMeta,
+  ReviewProvenance,
 } from "@/lib/storage/types";
 
 const AUTOSAVE_MS = 800;
@@ -74,7 +76,7 @@ type State = {
   /** Create a new essay (initial empty doc), open it in the editor. */
   newEssay: (mode?: EssayMode) => Promise<void>;
   /** Open an existing essay by id. */
-  openEssay: (id: string) => Promise<void>;
+  openEssay: (id: string, expectedCurrentId?: string | null) => Promise<void>;
   /** Close the current essay and go back to the list, flushing pending writes. */
   closeEssay: () => Promise<void>;
   /** Delete an essay. Caller must confirm with the user first. */
@@ -93,7 +95,8 @@ type State = {
    *  right after applying anotaciones; `evaluadoEn` is synced to the
    *  current `essay.updatedAt` so subsequent edits make the score
    *  stale without false positives from the apply itself. */
-  recordEvaluacion: (pasadasCubiertas: Pase[]) => void;
+  recordEvaluacion: (pasadasCubiertas: Pase[], reviewerRuns?: { pase: Pase; provenance?: ReviewProvenance }[]) => void;
+  updateReviewerProfile: (profileId: string) => void;
   /** Limpia la evaluación entera: quita todas las anotaciones del
    *  documento (vía evento que captura EditorPane) y resetea
    *  evaluacionMeta. El Scorebar vuelve al estado "nunca evaluado"
@@ -201,6 +204,11 @@ function upsertMeta(list: EssayMeta[], meta: EssayMeta): EssayMeta[] {
   );
 }
 
+// One persistence queue serves UI autosave and agent writes. Navigation tokens
+// prevent an older async open from replacing a newer human choice.
+let activeFlush: Promise<void> | null = null;
+let navigationGeneration = 0;
+
 export const useStore = create<State>((set, get) => ({
   view: "list",
   list: [],
@@ -217,16 +225,26 @@ export const useStore = create<State>((set, get) => ({
   _autosaveTimer: null,
 
   async loadList() {
+    const navigation = navigationGeneration;
+    const previous = get().current;
     try {
       const list = await listEssays();
+      if (navigation !== navigationGeneration || get().current !== previous) return;
       set({ list, view: "list" });
     } catch (err) {
+      if (navigation !== navigationGeneration || get().current !== previous) return;
       console.error("loadList failed", err);
       set({ list: [], view: "list" });
     }
   },
 
   async newEssay(mode = "academico") {
+    const navigation = ++navigationGeneration;
+    if (get().current) {
+      await get().flush();
+      if (navigation !== navigationGeneration || get().saveStatus.kind !== "saved") return;
+    }
+    const previous = get().current;
     const now = nowIso();
     const essay: Essay = {
       id: genId(),
@@ -239,6 +257,7 @@ export const useStore = create<State>((set, get) => ({
     };
     try {
       await writeEssay(essay);
+      if (navigation !== navigationGeneration || get().current !== previous) return;
       set((s) => ({
         current: essay,
         view: "editor",
@@ -246,6 +265,7 @@ export const useStore = create<State>((set, get) => ({
         saveStatus: { kind: "saved", at: Date.now() },
       }));
     } catch (err) {
+      if (navigation !== navigationGeneration || get().current !== previous) return;
       set({
         saveStatus: {
           kind: "error",
@@ -255,9 +275,22 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async openEssay(id) {
+  async openEssay(id, expectedCurrentId) {
+    const previousId = get().current?.id ?? null;
+    if (expectedCurrentId !== undefined && previousId !== expectedCurrentId) return;
+    const navigation = ++navigationGeneration;
+    let previous = get().current;
     try {
+      if (previousId) {
+        await get().flush();
+        if (navigation !== navigationGeneration || (get().current?.id ?? null) !== previousId || get().saveStatus.kind !== "saved") return;
+      }
+      if (previousId === id) return;
+      previous = get().current;
       const essay = await readEssay(id);
+      // Typing does not navigate, but it still invalidates this pending open.
+      // Preserve that live version even if autosave already completed it.
+      if (navigation !== navigationGeneration || get().current !== previous) return;
       set({
         current: essay,
         view: "editor",
@@ -271,6 +304,7 @@ export const useStore = create<State>((set, get) => ({
       });
       void get().loadHistory();
     } catch (err) {
+      if (navigation !== navigationGeneration || get().current !== previous) return;
       console.error("openEssay failed", err);
       set({
         saveStatus: {
@@ -282,6 +316,9 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async closeEssay() {
+    const navigation = ++navigationGeneration;
+    const closingEssay = get().current;
+    const essayId = closingEssay?.id;
     // Take a "close" snapshot before tearing down. Best-effort — if it
     // fails (sidecar down, disk full), we still close the essay so the
     // user isn't trapped. The snapshot also runs `flush()` internally
@@ -292,6 +329,7 @@ export const useStore = create<State>((set, get) => ({
       console.warn("close snapshot failed", err);
     }
     await get().flush();
+    if (navigation !== navigationGeneration || get().current !== closingEssay || (essayId && get().saveStatus.kind !== "saved")) return;
     const timer = get()._autosaveTimer;
     if (timer) clearTimeout(timer);
     set({
@@ -394,7 +432,15 @@ export const useStore = create<State>((set, get) => ({
     void get().flush();
   },
 
-  recordEvaluacion(pasadasCubiertas) {
+  updateReviewerProfile(profileId) {
+    const cur = get().current;
+    if (!cur) return;
+    getReviewerProfile(profileId);
+    set({ current: { ...cur, reviewerProfile: profileId }, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
+  recordEvaluacion(pasadasCubiertas, reviewerRuns) {
     const cur = get().current;
     if (!cur) return;
     // Sync `evaluadoEn` to the current updatedAt so the apply itself
@@ -405,6 +451,7 @@ export const useStore = create<State>((set, get) => ({
       evaluacionMeta: {
         evaluadoEn: cur.updatedAt,
         pasadasCubiertas: [...pasadasCubiertas],
+        ...(reviewerRuns ? { reviewerRuns: structuredClone(reviewerRuns) } : {}),
       },
     };
     // Re-mostrar el Scorebar — si el usuario lo había cerrado y
@@ -593,7 +640,7 @@ export const useStore = create<State>((set, get) => ({
     }
     try {
       const list = await listHistory(cur.id);
-      set({ history: list });
+      if (get().current?.id === cur.id) set({ history: list });
     } catch (err) {
       console.error("loadHistory failed", err);
       set({ history: [] });
@@ -665,25 +712,35 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async flush() {
-    const cur = get().current;
-    if (!cur) return;
-    const status = get().saveStatus;
-    if (status.kind === "saving") return; // already in flight
-    if (status.kind === "saved") return; // nothing to do
-    set({ saveStatus: { kind: "saving" } });
-    try {
-      await writeEssay(cur);
-      set((s) => ({
-        saveStatus: { kind: "saved", at: Date.now() },
-        list: upsertMeta(s.list, essayToMeta(cur)),
-      }));
-    } catch (err) {
-      set({
-        saveStatus: {
-          kind: "error",
-          message: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
+    if (activeFlush) return activeFlush;
+    // Start on the next microtask so the shared promise is installed before
+    // any subscriber can request another flush.
+    activeFlush = Promise.resolve().then(async () => {
+      while (true) {
+        const cur = get().current;
+        if (!cur || get().saveStatus.kind === "saved") return;
+        const timer = get()._autosaveTimer;
+        if (timer) clearTimeout(timer);
+        set({ _autosaveTimer: null, saveStatus: { kind: "saving" } });
+        try {
+          await writeEssay(cur);
+          const unchanged = get().current === cur;
+          const sameEssay = get().current?.id === cur.id;
+          set((s) => ({
+            list: upsertMeta(s.list, essayToMeta(cur)),
+            ...(sameEssay ? { saveStatus: unchanged ? { kind: "saved" as const, at: Date.now() } : { kind: "dirty" as const } } : {}),
+          }));
+          if (!sameEssay || unchanged) return;
+          // Human input during IO changed current: persist that new version
+          // before allowing any caller to report a durable save.
+        } catch (err) {
+          if (get().current?.id === cur.id) set({ saveStatus: {
+            kind: "error", message: err instanceof Error ? err.message : String(err),
+          } });
+          return;
+        }
+      }
+    }).finally(() => { activeFlush = null; });
+    return activeFlush;
   },
 }));

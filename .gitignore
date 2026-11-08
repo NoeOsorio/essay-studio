@@ -4,6 +4,7 @@
 /node_modules
 /sidecar/node_modules
 /sidecar/dist
+/mcp/dist
 /.pnp
 .pnp.*
 .yarn/*
@@ -54,3 +55,5 @@ venv/
 .next/
 .wrangler/
 src-tauri/target/
+benchmarks/reviewers/local/
+benchmarks/reviewers/runs/

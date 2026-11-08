@@ -17,8 +17,11 @@
 // sólo escribe el nuevo.
 
 import { Mark, mergeAttributes } from "@tiptap/core";
+import type { ReviewEvidence, ReviewProvenance } from "@/lib/storage/types";
 
 export type AnnotationAttrs = {
+  evidence?: ReviewEvidence[] | null;
+  provenance?: ReviewProvenance | null;
   id: string | null;
   sage: "em" | "sis" | "pra" | "cri" | null;
   pase: "coherencia" | "estilo" | "argumento" | "apa" | null;
@@ -72,6 +75,12 @@ const SAGE_CLASS: Record<NonNullable<AnnotationAttrs["sage"]>, string> = {
   pra: "anno-pra",
   cri: "anno-cri",
 };
+
+function readJsonAttribute(element: HTMLElement, name: string): unknown {
+  const raw = element.getAttribute(name);
+  if (!raw) return null;
+  try { return JSON.parse(raw) as unknown; } catch { return null; }
+}
 
 export const Annotation = Mark.create({
   name: "annotation",
@@ -127,6 +136,17 @@ export const Annotation = Mark.create({
           attrs.reemplazo
             ? { "data-reemplazo": String(attrs.reemplazo) }
             : {},
+      },
+      evidence: {
+        default: null,
+        // Source verification is recalculated against the live library in UI.
+        parseHTML: (el) => readJsonAttribute(el, "data-evidence"),
+        renderHTML: (attrs) => attrs.evidence ? { "data-evidence": JSON.stringify(attrs.evidence) } : {},
+      },
+      provenance: {
+        default: null,
+        parseHTML: (el) => readJsonAttribute(el, "data-provenance"),
+        renderHTML: (attrs) => attrs.provenance ? { "data-provenance": JSON.stringify(attrs.provenance) } : {},
       },
       criterioId: {
         default: null,

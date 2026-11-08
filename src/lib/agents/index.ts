@@ -8,6 +8,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ReviewProvenance } from "../../../sidecar/src/review-contract";
 import type {
   Anotacion,
   Criterio,
@@ -15,19 +16,18 @@ import type {
   Fuente,
   Pase,
   Sage,
-  Severidad,
 } from "@/lib/storage/types";
 
 export type InterrogateUpdate =
   | { kind: "started" }
   | { kind: "token"; delta: string }
-  | { kind: "complete"; result: string; costUsd?: number }
+  | { kind: "complete"; result: string; costUsd?: number; provenance?: ReviewProvenance }
   | { kind: "error"; message: string };
 
 export type SidecarEvent =
   | { id: string; type: "started" }
   | { id: string; type: "token"; delta: string }
-  | { id: string; type: "complete"; result: string; costUsd?: number }
+  | { id: string; type: "complete"; result: string; costUsd?: number; provenance?: ReviewProvenance }
   | { id: string; type: "error"; message: string };
 
 function newId(): string {
@@ -44,9 +44,9 @@ function runSidecarCommand(args: {
   args: Record<string, unknown>;
   id: string;
   onUpdate?: (update: InterrogateUpdate) => void;
-}): Promise<{ result: string; costUsd?: number }> {
+}): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const { command, args: invokeArgs, id, onUpdate } = args;
-  return new Promise<{ result: string; costUsd?: number }>(
+  return new Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }>(
     (resolveOuter, reject) => {
       let unlisten: UnlistenFn | null = null;
       let settled = false;
@@ -55,7 +55,7 @@ function runSidecarCommand(args: {
         if (unlisten) unlisten();
       };
       const finish = (
-        ok: { result: string; costUsd?: number } | null,
+        ok: { result: string; costUsd?: number; provenance?: ReviewProvenance } | null,
         err?: Error,
       ) => {
         if (settled) return;
@@ -80,8 +80,9 @@ function runSidecarCommand(args: {
               kind: "complete",
               result: ev.result,
               costUsd: ev.costUsd,
+              provenance: ev.provenance,
             });
-            finish({ result: ev.result, costUsd: ev.costUsd });
+            finish({ result: ev.result, costUsd: ev.costUsd, provenance: ev.provenance });
             break;
           case "error":
             onUpdate?.({ kind: "error", message: ev.message });
@@ -112,7 +113,7 @@ export async function interrogate(args: {
   /** Output language. Defaults to "es". */
   language?: EssayLanguage;
   onUpdate?: (update: InterrogateUpdate) => void;
-}): Promise<{ result: string; costUsd?: number }> {
+}): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const id = newId();
   return runSidecarCommand({
     command: "sage_interrogate",
@@ -144,8 +145,9 @@ export async function critique(args: {
   fuentes?: Fuente[];
   /** Output language. Defaults to "es". */
   language?: EssayLanguage;
+  reviewerProfile?: string;
   onUpdate?: (update: InterrogateUpdate) => void;
-}): Promise<{ result: string; costUsd?: number }> {
+}): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const id = newId();
   const rubricaPayload = args.rubrica && args.rubrica.length > 0
     ? { criterios: args.rubrica }
@@ -162,6 +164,7 @@ export async function critique(args: {
       ...(rubricaPayload ? { rubrica: rubricaPayload } : {}),
       ...(fuentesPayload ? { fuentes: fuentesPayload } : {}),
       ...(args.language ? { language: args.language } : {}),
+      ...(args.reviewerProfile ? { reviewerProfile: args.reviewerProfile } : {}),
     },
     id,
     onUpdate: args.onUpdate,
@@ -184,145 +187,9 @@ export function parsePreguntas(raw: string): string[] {
   return out.length > 0 ? out : [raw.trim()];
 }
 
-/** Shape of one parsed Pluma Roja line before it becomes an Anotación. */
-export type RawAnotacion = {
-  cita: string;
-  severidad: Severidad;
-  mensaje: string;
-  reemplazo?: string;
-  criterioId?: string;
-};
-
-function isSeveridad(v: unknown): v is Severidad {
-  return v === "alta" || v === "media" || v === "baja";
-}
-
-/**
- * Prefijos conversacionales que el modelo a veces antepone al
- * texto de reemplazo ("Reescribí: <prosa>") aunque la instrucción
- * pida prosa pura. Si el campo `reemplazo` empieza con alguno,
- * lo strippeamos antes de exponerlo. Lista explícita en lugar de
- * regex genérica para no comer prefijos legítimos por accidente
- * (ej. una cita que empieza con "Sugiero" como parte del texto).
- * Belt-and-suspenders del prompt: aunque el prompt fuerce la regla,
- * si el modelo desobedece el sanitizer evita pegar el verbo en el
- * documento del usuario.
- */
-const META_PREFIXES = [
-  // Español
-  "Reescribí:",
-  "Reescribi:",
-  "Reescribe:",
-  "Reescríbelo:",
-  "Reformulá:",
-  "Reformula:",
-  "Reformúlalo:",
-  "Cambia a:",
-  "Cambia por:",
-  "Cambialo a:",
-  "Cámbialo a:",
-  "Cámbialo por:",
-  "Mejor:",
-  "Mejor así:",
-  "Sugiero:",
-  "Propongo:",
-  "Versión nueva:",
-  "Nueva versión:",
-  "En su lugar:",
-  // English
-  "Rewrite:",
-  "Reword:",
-  "Change to:",
-  "Change it to:",
-  "Try:",
-  "Better:",
-  "Better as:",
-  "Suggestion:",
-  "Suggested:",
-  "New version:",
-  "Replace with:",
-  "Instead:",
-];
-
-function stripMetaPrefix(text: string): string {
-  let out = text.trim();
-  // Strip in a loop in case the model stacked two prefixes
-  // ("Reescribí: Mejor: …" → "…"). Cap at 4 iterations to avoid
-  // pathological inputs eating CPU.
-  for (let i = 0; i < 4; i++) {
-    let changed = false;
-    for (const prefix of META_PREFIXES) {
-      if (out.toLowerCase().startsWith(prefix.toLowerCase())) {
-        out = out.slice(prefix.length).trim();
-        changed = true;
-        break;
-      }
-    }
-    if (!changed) break;
-  }
-  return out;
-}
-
-/**
- * Parse the JSON-lines output of a critique pass into structured
- * anotaciones. Tolerates: leading/trailing prose around the JSON
- * block, ```json fences, and lines that aren't JSON. Rejects {vacio}
- * sentinels (returns []).
- *
- * Sesión 16: acepta tanto la llave nueva `reemplazo` (post-rename)
- * como la vieja `sugerencia` (anotaciones generadas con el prompt
- * pre-16 que estén guardadas en algún essay). Después de extraer el
- * valor lo pasa por `stripMetaPrefix` para limpiar prefijos como
- * "Reescribí:" que el modelo a veces antepone aunque el prompt los
- * prohíba.
- */
-export function parseAnotaciones(raw: string): RawAnotacion[] {
-  // Strip markdown fences if the model wrapped its output in them.
-  const cleaned = raw
-    .replace(/^\s*```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "");
-
-  const out: RawAnotacion[] = [];
-  for (const lineRaw of cleaned.split("\n")) {
-    const line = lineRaw.trim();
-    if (!line || !line.startsWith("{")) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!parsed || typeof parsed !== "object") continue;
-    const obj = parsed as Record<string, unknown>;
-    if (obj.vacio === true) continue;
-    const cita = obj.cita;
-    const severidad = obj.severidad;
-    const mensaje = obj.mensaje;
-    // Preferimos `reemplazo` (sesión 16+); fallback a `sugerencia`
-    // para anotaciones generadas con el contrato viejo.
-    const reemplazoRaw =
-      typeof obj.reemplazo === "string" ? obj.reemplazo : obj.sugerencia;
-    const criterioId = obj.criterioId;
-    if (typeof cita !== "string" || cita.trim().length === 0) continue;
-    if (!isSeveridad(severidad)) continue;
-    if (typeof mensaje !== "string" || mensaje.trim().length === 0) continue;
-    const reemplazoClean =
-      typeof reemplazoRaw === "string" && reemplazoRaw.trim().length > 0
-        ? stripMetaPrefix(reemplazoRaw)
-        : "";
-    out.push({
-      cita: cita.trim(),
-      severidad,
-      mensaje: mensaje.trim(),
-      reemplazo: reemplazoClean.length > 0 ? reemplazoClean : undefined,
-      criterioId:
-        typeof criterioId === "string" && criterioId.trim().length > 0
-          ? criterioId.trim()
-          : undefined,
-    });
-  }
-  return out;
-}
+export { parseAnotaciones, parseAnnotationsDetailed } from "../../../sidecar/src/annotation-parser";
+import type { RawAnotacion } from "../../../sidecar/src/annotation-parser";
+export type { RawAnotacion } from "../../../sidecar/src/annotation-parser";
 
 function newAnotacionId(): string {
   return crypto.randomUUID();
@@ -338,6 +205,7 @@ export function buildAnotacion(
   pase: Pase,
   generadoEn: string,
   rubrica?: Criterio[],
+  provenance?: ReviewProvenance,
 ): Anotacion {
   // Verify that the criterioId, if present, actually maps to a real
   // criterio in the rubric. Drops phantom ids from the model.
@@ -354,5 +222,7 @@ export function buildAnotacion(
     reemplazo: raw.reemplazo,
     criterioId,
     generadoEn,
+    ...(raw.evidence ? { evidence: raw.evidence } : {}),
+    ...(provenance ? { provenance } : {}),
   };
 }

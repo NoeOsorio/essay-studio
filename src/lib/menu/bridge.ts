@@ -23,6 +23,7 @@
 import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useStore } from "@/lib/store";
+import { applyNativeHistory } from "@/lib/editor/history";
 
 function hasTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -42,6 +43,12 @@ export function useNativeMenuBridge() {
       // no hay current, son no-op silenciosos (el menú no se desactiva
       // visualmente; el disable contextual queda para sesión futura).
       switch (id) {
+        case "edit:undo":
+          applyNativeHistory("undo");
+          break;
+        case "edit:redo":
+          applyNativeHistory("redo");
+          break;
         case "file:new":
           void s.newEssay(s.current?.mode ?? "academico");
           break;
