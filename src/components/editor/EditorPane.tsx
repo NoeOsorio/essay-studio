@@ -19,7 +19,8 @@ import {
 } from "./extensions/SlashCommand";
 import { Annotation } from "./extensions/Annotation";
 import { findCitaRange } from "@/lib/editor/findCita";
-import type { Anotacion } from "@/lib/storage/types";
+import type { Anotacion, ReviewProvenance } from "@/lib/storage/types";
+import { registerDocument } from "@/lib/mcp/document";
 
 export function EditorPane() {
   const current = useStore((s) => s.current);
@@ -52,11 +53,13 @@ export function EditorPane() {
           with the new initial values. */}
       <div key={subtreeKey} className={innerClass}>
         <TitleInput
+          essayId={essayId}
           initialValue={current.title === "Sin título" ? "" : current.title}
           onChange={updateTitle}
         />
         <DocMeta />
         <TipTapEditor
+          essayId={essayId}
           initialContent={current.content}
           onChange={updateContent}
         />
@@ -97,9 +100,11 @@ function SlashHint() {
 }
 
 function TipTapEditor({
+  essayId,
   initialContent,
   onChange,
 }: {
+  essayId: string;
   initialContent: JSONContent;
   onChange: (content: JSONContent, wordCount: number) => void;
 }) {
@@ -189,6 +194,11 @@ function TipTapEditor({
     immediatelyRender: false,
   });
 
+  useEffect(() => {
+    if (!editor) return;
+    return registerDocument(editor, essayId);
+  }, [editor, essayId]);
+
   // Cleanup the floating menu if the editor unmounts mid-suggestion.
   useEffect(() => {
     return () => {
@@ -209,6 +219,7 @@ function TipTapEditor({
         e as CustomEvent<{
           anotaciones: Anotacion[];
           pasadasCubiertas?: Pase[];
+          reviewerRuns?: { pase: Pase; provenance?: ReviewProvenance }[];
         }>
       ).detail;
       if (!detail) return;
@@ -224,7 +235,7 @@ function TipTapEditor({
         // flush settles first — `recordEvaluacion` reads `updatedAt`
         // and syncs `evaluadoEn` to it.
         queueMicrotask(() => {
-          useStore.getState().recordEvaluacion(detail.pasadasCubiertas ?? []);
+          useStore.getState().recordEvaluacion(detail.pasadasCubiertas ?? [], detail.reviewerRuns);
         });
       }
     };
@@ -340,6 +351,8 @@ function applyAnotaciones(editor: Editor, anotaciones: Anotacion[]) {
         mensaje: a.mensaje,
         reemplazo: a.reemplazo ?? null,
         criterioId: a.criterioId ?? null,
+        evidence: a.evidence ?? null,
+        provenance: a.provenance ?? null,
       })
       .run();
   }

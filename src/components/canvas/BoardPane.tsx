@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import {
   createShapeId,
-  getSnapshot,
   loadSnapshot,
   toRichText,
   type Editor,
@@ -21,6 +20,7 @@ import { PergaminoNoteShapeUtil, type PostItMeta } from "./note-shape";
 import { NoteContextPanel } from "./NoteContextPanel";
 import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
 import type { Sage } from "@/lib/storage/types";
+import { persistBoardSnapshot, registerBoard } from "@/lib/mcp/board";
 
 // Tldraw uses DOM APIs, so mount it client-only.
 const Tldraw = dynamic(
@@ -54,11 +54,10 @@ export function BoardPane() {
   const essayId = current?.id ?? "none";
   // Re-mount the canvas on essay switch — tldraw's local store is per
   // canvas, so we hydrate fresh from the new essay's snapshot.
-  return <BoardPaneInner key={essayId} />;
+  return <BoardPaneInner key={essayId} essayId={essayId} />;
 }
 
-function BoardPaneInner() {
-  const updateBoard = useStore((s) => s.updateBoard);
+function BoardPaneInner({ essayId }: { essayId: string }) {
   const initialSnapshot = useStore(
     (s) => s.current?.board as TLStoreSnapshot | null | undefined,
   );
@@ -144,11 +143,11 @@ function BoardPaneInner() {
 
             recomputeCounts(editor, setCounts);
             setZoom(editor.getZoomLevel());
+            const unregisterBoard = registerBoard(editor, essayId);
 
             const unlistenStore = editor.store.listen(
               () => {
-                const snap = getSnapshot(editor.store);
-                updateBoard(snap);
+                persistBoardSnapshot(editor);
                 recomputeCounts(editor, setCounts);
               },
               { source: "user", scope: "document" },
@@ -183,6 +182,7 @@ function BoardPaneInner() {
             editor.updateInstanceState({ isToolLocked: false });
 
             return () => {
+              unregisterBoard();
               unlistenStore();
               unlistenCamera();
               unlistenTool();

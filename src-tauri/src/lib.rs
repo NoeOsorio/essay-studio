@@ -1,5 +1,6 @@
 mod history;
 mod menu;
+mod mcp;
 mod sidecar;
 mod storage;
 
@@ -9,6 +10,7 @@ use tauri::Emitter;
 pub fn run() {
   tauri::Builder::default()
     .manage(sidecar::SidecarState::default())
+    .manage(mcp::McpState::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -57,6 +59,11 @@ pub fn run() {
       sidecar::sage_critique,
       sidecar::sage_ping,
       sidecar::sage_status,
+      mcp::mcp_renderer_ready,
+      mcp::mcp_status,
+      mcp::mcp_set_enabled,
+      mcp::mcp_set_working,
+      mcp::mcp_respond,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -474,6 +474,8 @@ struct CritiqueRequest<'a> {
     /// Output language. Optional — sidecar defaults to "es".
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<&'a str>,
+    #[serde(rename = "reviewerProfile", skip_serializing_if = "Option::is_none")]
+    reviewer_profile: Option<&'a str>,
 }
 
 /// Renderer entry point. Generates an opaque id for this turn, writes
@@ -532,6 +534,7 @@ pub async fn sage_critique(
     rubrica: Option<serde_json::Value>,
     fuentes: Option<serde_json::Value>,
     language: Option<String>,
+    reviewer_profile: Option<String>,
 ) -> Result<String, String> {
     if !matches!(sage.as_str(), "em" | "sis" | "pra" | "cri") {
         return Err(format!("unknown sage: {sage}"));
@@ -557,6 +560,7 @@ pub async fn sage_critique(
         rubrica: rubrica.as_ref(),
         fuentes: fuentes.as_ref(),
         language: language.as_deref(),
+        reviewer_profile: reviewer_profile.as_deref(),
     };
     let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     line.push('\n');

@@ -66,7 +66,7 @@ Essay Studio es una app de escritorio para escritura aumentada con IA: un editor
 ## 🚀 Quickstart
 
 > [!IMPORTANT]
-> Para usar a los sabios necesitas tener [Claude Code](https://claude.com/code) instalado y con sesión iniciada en una cuenta **Pro o Max**. El sidecar reutiliza esas credenciales (Keychain de macOS) y consume el crédito mensual del Agent SDK de tu plan. No usa `ANTHROPIC_API_KEY`.
+> Para usar a los sabios necesitas Claude Code con una sesión de suscripción compatible. El sidecar reutiliza esa sesión OAuth y su uso cuenta contra los límites del plan; no promete un crédito mensual separado ni recurre a una API key. Consulta la [guía de Anthropic para usar el SDK con tu plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
 
 **Requisitos**
 
@@ -120,6 +120,77 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 ## ⚙️ Configuración
+
+### Benchmarks de revisores y modelos
+
+La pantalla **Evaluar** permite seleccionar un perfil para las siguientes
+revisiones. El perfil actual se conserva por defecto; los modelos nuevos aparecen
+como candidatos y su acceso no se presupone. El registro de perfiles está en
+`sidecar/src/model-profiles.ts`. Cada evaluación nueva registra el modelo que
+realmente respondió y la procedencia del prompt y las fuentes; las antiguas
+aparecen como «modelo no registrado».
+
+Las anotaciones pueden incluir fragmentos de fuentes con ubicación literal.
+La app distingue una coincidencia literal de la comprobación de que esa fuente
+respalde el diagnóstico. Si el ensayo o sus fuentes cambian durante una revisión,
+es necesario volver a evaluar antes de aplicar el resultado.
+
+```bash
+npm run sidecar:build
+npm --prefix sidecar run eval:validate
+npm --prefix sidecar run eval:dry-run -- --profiles sonnet-5.5,opus-5.5
+```
+
+Estos comandos validan el corpus y preparan una corrida **sin llamar a modelos**.
+El piloto contiene 24 casos contrastantes; sus claves requieren adjudicación
+independiente antes de atribuir puntuaciones de calidad a un modelo. Las pruebas
+de UI con respuestas simuladas tampoco establecen esa calidad. Las instrucciones
+de uso, el protocolo de evaluación ciega y la autorización de consumo están en
+[benchmarks/reviewers/README.md](benchmarks/reviewers/README.md).
+
+### MCP local para trabajar dentro de la app
+
+**[Guía de instalación para Codex, Claude Desktop y Claude Code](docs/mcp-installation.md)**:
+preparación, comandos, configuración, verificación y desinstalación por cliente.
+
+El adaptador MCP permite leer el ensayo abierto y la selección, editar texto y
+título, crear notas/conexiones y organizar sticky notes en cuadrícula o columnas
+por tema. Los cambios usan los editores nativos y su historial de deshacer.
+Requiere **macOS, Node 22+ y la nueva versión de Essay Studio abierta**.
+
+```bash
+npm --prefix mcp ci --ignore-scripts
+npm --prefix mcp run build
+codex mcp add essay-studio -- node /RUTA/essay-studio/mcp/dist/mcp/src/server.js
+```
+
+Usa la ruta absoluta al repositorio. La configuración local de MCP en Codex se
+describe en la [documentación oficial](https://learn.chatgpt.com/docs/extend/mcp?surface=app).
+Comprueba que `essay-studio` y sus herramientas estén disponibles en el chat antes
+de usarlo; registrar el servidor no demuestra que un chat existente lo haya cargado.
+
+La barra de la app indica si el MCP está disponible, conectado o trabajando.
+**Desconectar** revoca la sesión local; **Conectar MCP** crea una nueva.
+La conexión usa un socket local autenticado y archivos privados del usuario.
+No hay endpoint público, acceso a archivos arbitrarios, ejecución de código ni
+llamadas automáticas a los sabios. Windows/Linux no están verificados.
+
+Flujo del agente: `get_basic_info` → leer documento/tablero → editar usando el
+`essayId` y la `revision` recibidos → `get_board_image` para comprobar el resultado
+→ `finish_work`. Si cambias el contenido durante una operación, una revisión
+antigua se rechaza. Si el guardado falla o el resultado es incierto, el agente
+debe leer el estado y reintentar el guardado, sin repetir a ciegas la edición.
+
+`organize_notes` acepta todas las notas, una selección o IDs explícitos. Puede
+ordenar en cuadrícula, alinear, distribuir o colocar grupos por tema en columnas.
+Conserva texto, colores y conexiones; respeta notas bloqueadas y obstáculos.
+La organización se deshace como una sola acción. Los grupos semánticos los
+propone el agente después de leer las notas, sin otra llamada a un modelo.
+
+Para QA nativo aislado, el lanzador puede definir `ESSAY_STUDIO_DATA_DIR` como
+una carpeta absoluta desechable. El adaptador encuentra esa instancia mediante
+`ESSAY_STUDIO_MCP_CONNECTION_FILE=<carpeta>/mcp/connection.json`. Estas opciones
+pertenecen al entorno del proceso; ninguna herramienta permite cambiar rutas.
 
 No hace falta `.env`. Estas variables opcionales sirven como override para setups poco comunes:
 

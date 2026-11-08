@@ -5,8 +5,12 @@ import type { Editor } from "@tiptap/core";
 
 import { Avatar, type SageKey } from "@/components/ui/Avatar";
 import { useStore } from "@/lib/store";
+import { ReviewEvidenceDetails } from "@/components/ReviewEvidenceDetails";
+import type { ReviewEvidence, ReviewProvenance } from "@/lib/storage/types";
 
 type Open = {
+  evidence?: ReviewEvidence[] | null;
+  provenance?: ReviewProvenance | null;
   rect: DOMRect;
   id: string;
   sage: SageKey;
@@ -53,6 +57,7 @@ const SEV_TONE: Record<string, string> = {
 export function AnnotationPopover({ editor }: { editor: Editor | null }) {
   const [open, setOpen] = useState<Open | null>(null);
   const rubrica = useStore((s) => s.current?.rubrica);
+  const fuentes = useStore((s) => s.current?.fuentes);
 
   useEffect(() => {
     if (!editor) return;
@@ -76,9 +81,16 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
         el.dataset.reemplazo ?? el.dataset.sugerencia ?? null;
       const criterioId = el.dataset.criterioId ?? null;
       if (!id || !sage || !pase || !severidad || !mensaje) return;
+      let details: { evidence?: ReviewEvidence[] | null; provenance?: ReviewProvenance | null } = {};
+      // Read the native mark, not serialized HTML attributes supplied by pasted text.
+      editor.state.doc.descendants((node) => {
+        const mark = node.marks.find((candidate) => candidate.type.name === "annotation" && candidate.attrs.id === id);
+        if (mark) details = { evidence: mark.attrs.evidence, provenance: mark.attrs.provenance };
+      });
       e.preventDefault();
       e.stopPropagation();
       setOpen({
+        ...details,
         rect: el.getBoundingClientRect(),
         id,
         sage,
@@ -149,7 +161,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
     <div
       data-anno-popover
       style={{ position: "fixed", left, top, width: W, zIndex: 70 }}
-      className="bg-paper-2 border border-rule-2 rounded-[10px] shadow-(--shadow-pop) overflow-hidden"
+      className="bg-paper-2 border border-rule-2 rounded-[10px] shadow-(--shadow-pop) overflow-y-auto max-h-[75vh] thin-scroll"
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-rule-1 bg-paper">
         <Avatar
@@ -191,6 +203,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
             })()
           : null}
         <div>{open.mensaje}</div>
+        <ReviewEvidenceDetails evidence={open.evidence} sources={fuentes} provenance={open.provenance} />
       </div>
 
       {open.reemplazo ? (

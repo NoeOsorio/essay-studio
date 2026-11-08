@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.2.0"
 description = "Essay Studio: consejo de sabios de IA que interroga, anota y puntúa tus ensayos"
 authors = ["Noé Osorio <business@noeosorio.com>"]
 license = "MIT"
@@ -23,4 +23,6 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.1", features = [] }
 tauri-plugin-log = "2"
-tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros"] }
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros", "net", "time"] }
+# UUID v4 uses the OS RNG; this version was already locked transitively.
+uuid = { version = "=1.23.1", features = ["v4"] }

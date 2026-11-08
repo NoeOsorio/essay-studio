@@ -13,7 +13,8 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": false,
     "sourceMap": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src/**/*.ts"]
 }

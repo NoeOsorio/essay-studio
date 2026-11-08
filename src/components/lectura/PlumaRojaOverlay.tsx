@@ -8,18 +8,22 @@ import { useStore } from "@/lib/store";
 import {
   buildAnotacion,
   critique,
-  parseAnotaciones,
+  parseAnnotationsDetailed,
   type RawAnotacion,
 } from "@/lib/agents";
+import { ReviewEvidenceDetails } from "@/components/ReviewEvidenceDetails";
+import { REVIEWER_PROFILES, DEFAULT_REVIEWER_PROFILE } from "../../../sidecar/src/model-profiles";
 import { defaultPasesForMode } from "@/lib/sages";
 import type {
   Anotacion,
   Criterio,
   EssayLanguage,
   EssayMode,
+  Essay,
   Fuente,
   Pase,
   Rubrica,
+  ReviewProvenance,
   Sage,
 } from "@/lib/storage/types";
 
@@ -75,6 +79,10 @@ const SEV_TONE: Record<"alta" | "media" | "baja", string> = {
   baja: "bg-sis",
 };
 
+function reviewFingerprint(essay: Essay | null): string {
+  return essay ? JSON.stringify([essay.id, essay.content, essay.fuentes ?? [], essay.rubrica ?? null, essay.mode, essay.language ?? "es"]) : "closed";
+}
+
 type PasePane = {
   pase: Pase;
   sage: Sage;
@@ -85,6 +93,8 @@ type PasePane = {
   checked: Record<number, boolean>;
   error: string | null;
   costUsd?: number;
+  provenance?: ReviewProvenance;
+  invalidLines?: number;
 };
 
 function emptyPane(pase: Pase, sage: Sage): PasePane {
@@ -123,6 +133,11 @@ export function PlumaRojaOverlay() {
         onClick={(e) => e.stopPropagation()}
       >
         <PlumaInner
+          key={current.id}
+          reviewKey={reviewFingerprint(current)}
+          reviewerProfile={current.reviewerProfile}
+          onProfileChange={(profile) => useStore.getState().updateReviewerProfile(profile)}
+          previousRuns={current.evaluacionMeta?.reviewerRuns}
           mode={current.mode}
           language={current.language ?? "es"}
           rubrica={current.rubrica}
@@ -130,10 +145,10 @@ export function PlumaRojaOverlay() {
           essayTitle={current.title}
           essayText={extractPlainText(current.content)}
           onClose={() => setOverlay(null)}
-          onApply={(applied, pasadasCubiertas) => {
+          onApply={(applied, pasadasCubiertas, reviewerRuns) => {
             window.dispatchEvent(
               new CustomEvent("pluma-roja:apply", {
-                detail: { anotaciones: applied, pasadasCubiertas },
+                detail: { anotaciones: applied, pasadasCubiertas, reviewerRuns },
               }),
             );
             setOverlay(null);
@@ -145,6 +160,10 @@ export function PlumaRojaOverlay() {
 }
 
 function PlumaInner({
+  reviewKey,
+  reviewerProfile,
+  onProfileChange,
+  previousRuns,
   mode,
   language,
   rubrica,
@@ -154,6 +173,10 @@ function PlumaInner({
   onClose,
   onApply,
 }: {
+  reviewKey: string;
+  reviewerProfile?: string;
+  onProfileChange: (profile: string) => void;
+  previousRuns?: { pase: Pase; provenance?: ReviewProvenance }[];
   mode: EssayMode;
   language: EssayLanguage;
   rubrica?: Rubrica;
@@ -161,8 +184,14 @@ function PlumaInner({
   essayTitle: string;
   essayText: string;
   onClose: () => void;
-  onApply: (anotaciones: Anotacion[], pasadasCubiertas: Pase[]) => void;
+  onApply: (anotaciones: Anotacion[], pasadasCubiertas: Pase[], reviewerRuns: { pase: Pase; provenance?: ReviewProvenance }[]) => void;
 }) {
+  const selectedProfile = reviewerProfile ?? DEFAULT_REVIEWER_PROFILE;
+  const [reviewedKey, setReviewedKey] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState(false);
+  const staleReview = reviewedKey !== null && reviewedKey !== reviewKey;
+  const knownProfile = REVIEWER_PROFILES.some((profile) => profile.id === selectedProfile);
+
   // Which pasadas to run. Defaults adapt to the essay mode:
   //   academico → coherencia + estilo + argumento + APA
   //   blog      → coherencia + estilo + argumento  (APA n/a)
@@ -206,7 +235,10 @@ function PlumaInner({
   };
 
   const start = async () => {
-    if (essayText.trim().length === 0 || anyRunning) return;
+    if (essayText.trim().length === 0 || anyRunning || !knownProfile) return;
+    const capturedProfile = selectedProfile;
+    setReviewedKey(reviewKey);
+    setApplyError(false);
 
     setPanes((prev) => {
       const next = { ...prev };
@@ -222,13 +254,14 @@ function PlumaInner({
     await Promise.all(
       passes.map(async (p) => {
         try {
-          const { result, costUsd } = await critique({
+          const { result, costUsd, provenance } = await critique({
             sage: p.sageKey,
             pase: p.pase,
             text: essayText,
             rubrica: criterios,
             fuentes,
             language,
+            reviewerProfile: capturedProfile,
             onUpdate: (u) => {
               if (u.kind === "token") {
                 setPanes((prev) => ({
@@ -241,7 +274,8 @@ function PlumaInner({
               }
             },
           });
-          const anotaciones = parseAnotaciones(result);
+          const parsed = parseAnnotationsDetailed(result, fuentes ?? []);
+          const anotaciones = parsed.annotations;
           const checked: Record<number, boolean> = {};
           for (let i = 0; i < anotaciones.length; i++) checked[i] = true;
           updatePane(p.pase, {
@@ -250,6 +284,8 @@ function PlumaInner({
             anotaciones,
             checked,
             costUsd,
+            provenance,
+            invalidLines: parsed.invalidLines.length,
           });
         } catch (err) {
           updatePane(p.pase, {
@@ -262,6 +298,11 @@ function PlumaInner({
   };
 
   const apply = () => {
+    // Recheck live state at the mutation boundary: MCP can edit while open.
+    if (!reviewedKey || reviewedKey !== reviewFingerprint(useStore.getState().current)) {
+      setApplyError(true);
+      return;
+    }
     const generadoEn = new Date().toISOString();
     const out: Anotacion[] = [];
     for (const p of passes) {
@@ -269,7 +310,7 @@ function PlumaInner({
       if (pane.phase !== "done") continue;
       pane.anotaciones.forEach((raw, i) => {
         if (pane.checked[i] === false) return;
-        out.push(buildAnotacion(raw, p.sageKey, p.pase, generadoEn, criterios));
+        out.push(buildAnotacion(raw, p.sageKey, p.pase, generadoEn, criterios, pane.provenance));
       });
     }
     // Always notify — even with 0 anotaciones. That's a legitimate
@@ -277,7 +318,8 @@ function PlumaInner({
     // needs to distinguish it from "never evaluated".
     onApply(
       out,
-      passes.filter((p) => panes[p.pase].phase === "done").map((p) => p.pase),
+      passes.filter((p) => panes[p.pase].phase === "done" && !panes[p.pase].invalidLines).map((p) => p.pase),
+      passes.filter((p) => panes[p.pase].phase === "done").map((p) => ({ pase: p.pase, provenance: panes[p.pase].provenance })),
     );
   };
 
@@ -330,6 +372,7 @@ function PlumaInner({
             onClick={start}
             disabled={
               anyRunning ||
+              !knownProfile ||
               essayText.trim().length === 0 ||
               selectedPases.length === 0
             }
@@ -347,6 +390,20 @@ function PlumaInner({
           </button>
         </div>
       </header>
+
+      <div className="flex flex-wrap items-center gap-3 border-b border-rule-1 px-6 py-2 bg-paper-2 font-mono text-[10px] text-ink-3">
+        <label className="flex items-center gap-2">
+          Revisor
+          <select aria-label="Modelo revisor" value={selectedProfile} disabled={anyRunning}
+            onChange={(event) => onProfileChange(event.target.value)}
+            className="max-w-[240px] rounded border border-rule-2 bg-paper px-2 py-1 text-ink-1 disabled:opacity-50">
+            {!knownProfile ? <option value={selectedProfile}>Perfil no disponible</option> : null}
+            {REVIEWER_PROFILES.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+          </select>
+        </label>
+        <span>Se usa en la próxima revisión. Los candidatos aún no están comparados.</span>
+        {previousRuns ? <span>Última evaluación: {[...new Set(previousRuns.map((run) => run.provenance?.resolvedModel ?? "modelo no registrado"))].join(", ")}.</span> : <span>Evaluaciones anteriores: modelo no registrado.</span>}
+      </div>
 
       <PaseSelector
         available={availablePases}
@@ -377,6 +434,7 @@ function PlumaInner({
               hint={p.hint}
               pane={panes[p.pase]}
               criterios={criterios}
+              fuentes={fuentes}
               onToggle={(idx) =>
                 setPanes((prev) => ({
                   ...prev,
@@ -397,12 +455,12 @@ function PlumaInner({
       {anyDone ? (
         <footer className="flex items-center justify-between px-6 py-3 border-t border-rule-1 bg-paper-2">
           <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
-            {summarize(panes, passes)}
+            {staleReview || applyError ? "El ensayo o sus fuentes cambiaron. Vuelve a evaluar antes de aplicar." : summarize(panes, passes)}
           </span>
           <Button
             variant="seal"
             onClick={apply}
-            disabled={anyRunning}
+            disabled={anyRunning || staleReview}
             data-testid="pluma-apply"
           >
             Aplicar al ensayo
@@ -480,6 +538,7 @@ function PaseSelector({
 }
 
 function PasePaneView({
+  fuentes,
   label,
   hint,
   pane,
@@ -490,6 +549,7 @@ function PasePaneView({
   hint: string;
   pane: PasePane;
   criterios?: Criterio[];
+  fuentes?: Fuente[];
   onToggle: (idx: number) => void;
 }) {
   const meta = SAGE_META[pane.sage];
@@ -518,19 +578,23 @@ function PasePaneView({
         </span>
       </div>
       <div className="flex-1 overflow-y-auto thin-scroll p-3 text-[13px] leading-[1.5] font-serif text-ink-1">
-        <PaneBody pane={pane} criterios={criterios} onToggle={onToggle} />
+        <p className="mb-2 font-mono text-[9px] text-ink-3">Modelo: {pane.provenance?.resolvedModel ?? "no registrado"}</p>
+        {pane.invalidLines ? <p role="status" className="mb-2 text-seal font-sans text-[11px]">La respuesta contiene {pane.invalidLines} líneas no válidas. Esta pasada no cuenta como evaluación completa.</p> : null}
+        <PaneBody pane={pane} criterios={criterios} fuentes={fuentes} onToggle={onToggle} />
       </div>
     </div>
   );
 }
 
 function PaneBody({
+  fuentes,
   pane,
   criterios,
   onToggle,
 }: {
   pane: PasePane;
   criterios?: Criterio[];
+  fuentes?: Fuente[];
   onToggle: (idx: number) => void;
 }) {
   if (pane.phase === "idle") {
@@ -558,7 +622,7 @@ function PaneBody({
   if (pane.anotaciones.length === 0) {
     return (
       <span className="font-serif italic text-ink-3 text-[12.5px]">
-        Sin anotaciones en esta pasada.
+        {pane.invalidLines ? "No se obtuvo una evaluación válida completa." : "Sin anotaciones en esta pasada."}
       </span>
     );
   }
@@ -613,6 +677,7 @@ function PaneBody({
                 <div className="text-[12.5px] leading-[1.5] text-ink-1">
                   {a.mensaje}
                 </div>
+                <ReviewEvidenceDetails evidence={a.evidence} sources={fuentes} provenance={pane.provenance} />
                 {a.reemplazo ? (
                   <div className="mt-1.5 pt-1.5 border-t border-rule-1">
                     <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 mb-0.5">

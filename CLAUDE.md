@@ -1151,3 +1151,14 @@ Esperar a que Noé use el flujo unos días antes de decidir.
 - `next/font/google` carga las 3 familias y expone CSS variables (`--font-newsreader`, `--font-inter`, `--font-jetbrains-mono`) que usamos en `@theme`.
 - Hay un `~/package-lock.json` huérfano en el HOME que hace ruido a Turbopack. Pinneado con `turbopack.root` en `next.config.ts`. Si Noé limpia ese archivo, podemos quitar el pin.
 - Rust 1.84.1 no compila Tauri 2 (varias crates piden `edition2024`). `rustup update stable` lo lleva a 1.95+ y fluye.
+
+
+## 2026-11-07 — Live MCP and reviewer benchmark pilot
+
+Approved scope tracked in NOE-544 and NOE-545 and specs/001-live-mcp, specs/002-reviewer-benchmarks. Native MCP adapter lives in mcp/ (Node22), shared tool registry shared/mcp.ts, authenticated owner-only macOS socket in src-tauri/src/mcp.rs, renderer adapters src/lib/mcp/. Revisions, native transactions, safety versions and serialized durable saves prevent stale writes. Sticky organization respects real rotated bounds, locked/unselected obstacles and native one-action undo. Native Undo/Redo route via custom menu to the focused TipTap/tldraw history; WebKit predefined Undo does not handle their programmatic transactions. Note SVG export preserves Pergamino author colors and header.
+
+Reviewer production parsing is shared with the offline harness in sidecar/src/annotation-parser.ts and review-contract.ts. Profiles are centrally versioned in model-profiles.ts; baseline runtime default remains unchanged and candidates are unmeasured. New annotation evidence stores source IDs and literal ranges; UI distinguishes literal presence from semantic support and flags invalid/missing evidence. Provenance preserves requested/resolved model and prompt/source hashes. Pluma Roja rejects stale application using the live essay/source fingerprint.
+
+The pinned SDK0.2.141 incorrectly types legacy apiKeySource oauth; actual CLI emits none for subscription sessions. runner.ts gates streaming input on accountInfo subscription checks before prompt release; empty tools/MCP/settings and no alternate-provider/key fallback. Do not claim actual OAuth/model generation tested: Noe explicitly approved implementation WITHOUT model runs. The24-case synthetic pilot has12 sources and separate12/12 source-family splits; all answer keys are provisional until adjudication. Dry-run/report commands make zero model calls and cannot establish model quality.
+
+Packaging must include sidecar/dist/**/* after the runtime was split into modules. Native bundled ping verified startup without inference. Existing110 E2E and33 Rust tests plus lint/typecheck/build passed. Global registration and installed-app update were completed after separate explicit Noe authorization; the installed0.2.0 app and configured SDK client were verified. Never log descriptor credentials or private sources.

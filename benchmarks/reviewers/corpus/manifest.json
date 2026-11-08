@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "Essay Studio reviewer pilot — synthetic and provisional",
+  "createdAt": "2026-11-07",
+  "files": {
+    "sourcesSha256": "6461df3189b39276bf13e8c3cb3e3ed5a17f5c033ae531fc75657d8052613ab9",
+    "casesSha256": "469472dd07a87f987afe9e31b7f48a70eefc5671d1ab11d288b3f7d71cb278b7"
+  },
+  "policy": "No human answer-key adjudication yet. Synthetic fixtures are not scientific evidence. Split is by independent fictional source family. No model quality measured.",
+  "sources": 12,
+  "cases": 24
+}

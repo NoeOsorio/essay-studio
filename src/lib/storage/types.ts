@@ -1,4 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
+import type { ReviewEvidence, ReviewProvenance } from "../../../sidecar/src/review-contract";
+export type { ReviewEvidence, ReviewProvenance } from "../../../sidecar/src/review-contract";
 
 export type EssayMode = "academico" | "blog";
 
@@ -94,6 +96,8 @@ export type EvaluacionMeta = {
   evaluadoEn: string;
   /** Which pasadas were active in the run that produced this meta. */
   pasadasCubiertas: Pase[];
+  /** Captured per pass; absent on legacy evaluations. */
+  reviewerRuns?: { pase: Pase; provenance?: ReviewProvenance }[];
 };
 
 /**
@@ -104,6 +108,8 @@ export type EvaluacionMeta = {
  * passed through the dispatched apply event.
  */
 export type Anotacion = {
+  evidence?: ReviewEvidence[];
+  provenance?: ReviewProvenance;
   /** UUID for this anotación; matches the mark's `id` attr in the doc. */
   id: string;
   sage: Sage;
@@ -140,6 +146,8 @@ export type Anotacion = {
 export type BoardSnapshot = unknown;
 
 export type Essay = {
+  /** Profile for future reviews. Older saved evaluations keep their own provenance. */
+  reviewerProfile?: string;
   id: string;
   title: string;
   /** TipTap JSON document. */

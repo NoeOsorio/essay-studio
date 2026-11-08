@@ -1,9 +1,11 @@
 "use client";
 
 import {
+  Box,
   HTMLContainer,
   NoteShapeUtil,
   RichTextLabel,
+  RichTextSVG,
   toRichText,
   useEditor,
   useValue,
@@ -120,6 +122,34 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
 
   override component(shape: TLNoteShape) {
     return <PergaminoNoteRenderer shape={shape} />;
+  }
+
+  override toSvg(shape: TLNoteShape) {
+    // Export the same semantic colors/header and body typography as the live
+    // note; the inherited export otherwise turns every author's note yellow.
+    const meta = shape.meta as PostItMeta;
+    const author = meta.author ?? "tu";
+    const kind = meta.kind ?? "concepto";
+    const theme = AUTHOR_THEME[author];
+    const style = getComputedStyle(document.documentElement);
+    const color = (value: string) => value.startsWith("var(")
+      ? style.getPropertyValue(value.slice(4, -1)).trim() : value;
+    const serif = style.getPropertyValue("--font-serif").trim() || "serif";
+    const mono = style.getPropertyValue("--font-mono").trim() || "monospace";
+    const height = NOTE_H + shape.props.growY;
+    return <>
+      <rect width={NOTE_W} height={height} rx={8} fill={color(theme.bg)} stroke={color(theme.border)} />
+      <rect x={72} y={0} width={56} height={5} fill="rgba(120,100,60,0.20)" />
+      <circle cx={25} cy={19} r={11} fill={color(theme.iniBg)} stroke={color(theme.accent)} />
+      <text x={25} y={22} textAnchor="middle" fontFamily={mono} fontSize={9} fill={color(theme.accent)}>{AUTHOR_INITIALS[author]}</text>
+      <text x={44} y={22} fontFamily={mono} fontSize={9} letterSpacing="0.14em" fill={color(theme.accent)}>{KIND_LABEL[kind].toUpperCase()}</text>
+      <g transform={`translate(0 ${HEADER_HEIGHT})`}>
+        <RichTextSVG fontSize={14} fontFamily={serif} lineHeight={1.5}
+          textAlign="start" verticalAlign="start" richText={shape.props.richText}
+          labelColor={color(theme.ink)} bounds={new Box(0, 0, NOTE_W, height - HEADER_HEIGHT)}
+          padding={14} showTextOutline={false} />
+      </g>
+    </>;
   }
 }
 
