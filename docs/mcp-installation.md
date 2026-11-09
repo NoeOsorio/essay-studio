@@ -240,3 +240,13 @@ devolver los datos inline. Solo se elimina un adjunto que no esté referenciado.
 La verificación local comprobó el descubrimiento de herramientas en Codex y la
 conexión de Claude Code. La comprobación de Claude Desktop con una sesión iniciada
 está pendiente en NOE-550; no se presupone compatibilidad verificada de ese cliente.
+
+La prueba completa de herramientas se puede repetir con
+`npm --prefix mcp run verify:native -- --app "/Applications/Essay Studio.app" --output "/private/tmp/essay-studio-mcp-report"`.
+Usa una copia de la app, datos temporales y un proveedor simulado que no ejecuta
+modelos. El JSON resultante incluye cada herramienta y sus comprobaciones.
+
+`get_document` acepta `includeEvaluation: true` para leer puntuación, cobertura,
+criterios y estado de una evaluación guardada, incluso sin anotaciones. Usa
+`set_app_view` con `scorebarVisible` para controlar su visibilidad; el contexto
+devuelve `activePanel` y `scorebarDismissed`.

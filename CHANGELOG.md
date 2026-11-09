@@ -1,5 +1,11 @@
 # Cambios
 
+## 0.3.1
+
+- Prueba nativa reproducible de todas las herramientas MCP con biblioteca temporal y generación simulada.
+- El límite de páginas de resultados coincide con el anunciado por el MCP.
+- Lectura de puntuación, cobertura y estado de evaluaciones guardadas; control de visibilidad y consulta del panel activo.
+
 ## 0.3.0
 
 - MCP ampliado para objetos, encabezados, formato, selección, versiones, fuentes y rúbrica.

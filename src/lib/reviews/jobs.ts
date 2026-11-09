@@ -1,5 +1,6 @@
 import { critique, interrogate, parsePreguntas, parseAnnotationsDetailed, buildAnotacion } from "@/lib/agents";
 import { useStore } from "@/lib/store";
+import { MAX_PAGE_SIZE } from "@/lib/mcp/collections";
 import { getDocumentEditor } from "@/lib/mcp/document";
 import { defaultPasesForMode, defaultSagesForMode, ALL_SAGES } from "@/lib/sages";
 import { REVIEWER_PROFILES, DEFAULT_REVIEWER_PROFILE } from "../../../sidecar/src/model-profiles";
@@ -14,7 +15,7 @@ const operations = new Map<string, string>();
 const listeners = new Set<() => void>();
 const LEDGER_PREFIX = "essay-studio:review-operation:";
 // Keep individual tool responses comfortably below the existing 2 MiB IPC frame.
-const PAGE_LIMIT = 100;
+const PAGE_LIMIT = MAX_PAGE_SIZE;
 const TEXT_LIMIT = 32_768;
 export const reviewFingerprint = (essay: Essay | null): string => essay ? JSON.stringify([essay.id, essay.content, essay.fuentes ?? [], essay.rubrica ?? null, essay.mode, essay.language ?? "es"]) : "closed";
 export function subscribeReviewJobs(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }
@@ -35,7 +36,7 @@ export function getReviewJob(args: { essayId: string; jobId: string; offset?: nu
   const job = lookup(args);
   const offset = args.offset ?? 0;
   const limit = args.limit ?? 50;
-  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > PAGE_LIMIT) throw new ToolError("INVALID_ARGUMENTS", "Use a nonnegative offset and limit from 1 to 100.");
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > PAGE_LIMIT) throw new ToolError("INVALID_ARGUMENTS", `Use a nonnegative offset and limit from 1 to ${PAGE_LIMIT}.`);
   const query = (args.query ?? "").toLowerCase();
   const all = job.kind === "review" ? job.tasks.flatMap((task) => task.annotations.map((a) => ({ kind: "annotation", ...a }))) : job.tasks.flatMap((task) => task.questions.map((q) => ({ kind: "question", ...q })));
   const filtered = query ? all.filter((item) => JSON.stringify(item).toLowerCase().includes(query)) : all;

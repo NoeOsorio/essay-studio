@@ -1,6 +1,16 @@
 # Consistency and verification
 
-The approved plan is implemented in an isolated worktree based on merged main. The concurrent monochrome redesign was not modified. Board, document and review slices had separate owners; independent review covered registry authorization, persistence, native transactions, references and asset input handling. No new dependencies or unit tests were added. No model inference was executed.
+The advertised MCP extension is implemented in an isolated worktree based on merged main. Full parity with every manual UI action remains incomplete as recorded below. The concurrent monochrome redesign was not modified. Board, document and review slices had separate owners; independent review covered registry authorization, persistence, native transactions, references and asset input handling. No new dependencies or unit tests were added. No model inference was executed.
+
+## Complete advertised-tool acceptance
+
+The reproducible runner in mcp/scripts/verify-all-tools.mjs passed all 50 advertised tool names on the signed native 0.3.1 app, through MCP stdio and authenticated local IPC. Its final report contains 288 calls, 93 passing state assertions and no errors. Independent review checked the exact shared-registry inventory, successful calls, assertions, fixture hash and process ownership. The temporary essay library ended empty.
+
+The controlled sidecar recorded 10 unique generation requests: nine completed and one was actually cancelled. It imports only Node builtins and does not invoke the model SDK. These results verify native tool execution and job control, not real model access or quality. The final successful run did not exercise unknown-outcome recovery; earlier startup attempts are not counted as passing acceptance.
+
+This audit reproduced and fixed get_review_job accepting a schema limit of 200 but rejecting it internally at 100. It also found the missing read path for persisted score state. get_document now exposes the UI's existing benchmark calculation through includeEvaluation, with bounded criterion summaries; active panels and score visibility can be inspected and controlled. Never-evaluated, clean partial, clean full, stale, cleared and reopened clean evaluations passed native checks.
+
+The original broad manual-parity claim was premature. Native tldraw grouping/ungrouping and page management are reachable through the enabled context menu but remain outside the current tools. SVG/HTML import is deliberately refused, and the document/board history tool does not expose the separate title field history. These limits must not be represented as completed merely because every advertised tool passed.
 
 ## Real acceptance
 

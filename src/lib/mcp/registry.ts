@@ -69,7 +69,9 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   const essayId = args.essayId as string;
   if (name === "get_basic_info") {
     const state = useStore.getState();
+    const panelNames = { fuentes: "sources", rubrica: "rubric", history: "history", pluma: "review", lectura: "interrogation" } as const;
     return envelope({ app: "Essay Studio", view: state.view, saveStatus: state.saveStatus.kind,
+      activePanel: state.overlay ? panelNames[state.overlay] : null, scorebarDismissed: state.scorebarDismissed,
       essay: state.current ? { id: state.current.id, title: state.current.title, mode: state.current.mode, language: state.current.language ?? "es", wordCount: state.current.wordCount } : null,
       board: { open: state.boardOpen, ...getBoardSummary() },
       capabilities: { protocolVersion: PROTOCOL_VERSION, capabilityVersion: CAPABILITY_VERSION, platform: "macos", tools: TOOL_DEFINITIONS.map(tool => ({ name: tool.name, effect: tool.effect })) } });
@@ -146,6 +148,8 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
     if (name === "set_app_view") {
       const state = useStore.getState();
       if (typeof args.boardOpen === "boolean" && state.boardOpen !== args.boardOpen) state.toggleBoard();
+      if (args.scorebarVisible === false) useStore.getState().dismissScorebar();
+      else if (args.scorebarVisible === true) useStore.getState().showScorebar();
       const panels = { sources: "fuentes", rubric: "rubrica", history: "history", review: "pluma", interrogation: "lectura", none: null } as const;
       if (args.panel === "history") useStore.getState().openHistory();
       else if (args.panel !== undefined) useStore.getState().setOverlay(panels[args.panel as keyof typeof panels]);

@@ -6,6 +6,7 @@ import type { Transaction } from "@tiptap/pm/state";
 import { useStore } from "@/lib/store";
 import { ToolError, MAX_REQUEST_BYTES, type JsonObject } from "../../../shared/mcp";
 import { validateRichContent, validateFormatting, applyFormatting, nativeDocumentTransaction, type Formatting } from "./document-content";
+import { readEvaluation } from "./evaluation";
 
 let liveDocument: { editor: Editor; essayId: string } | null = null;
 let titleInput: { essayId: string; replace: (title: string) => boolean } | null = null;
@@ -157,6 +158,7 @@ export function readDocument(args: JsonObject): JsonObject {
     ...(args.includeRubric ? { rubric: essay.rubrica ? { criterios: criteria.slice(0, MAX_PAGE_BLOCKS) } : null,
       rubricTruncated: criteria.length > MAX_PAGE_BLOCKS } : {}),
     ...(args.includeAnnotations ? { annotations } : {}),
+    ...(args.includeEvaluation ? { evaluation: readEvaluation(essay, args, useStore.getState().scorebarDismissed) } : {}),
   });
 }
 
