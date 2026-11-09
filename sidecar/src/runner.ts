@@ -157,6 +157,7 @@ export async function runReview(req: ReviewRequest, config: RunReviewOptions = {
         completed = true;
       }
     }
+    if (config.signal?.aborted) throw new ReviewRunError("CANCELLED", "Review was cancelled.");
     if (!completed) throw new ReviewRunError("INCOMPLETE_REVIEW", "Reviewer ended without a successful completion event.");
     return { result: result.trim(), costUsd, usage, modelUsage, provenance };
   } catch (error) {

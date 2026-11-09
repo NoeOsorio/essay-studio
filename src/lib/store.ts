@@ -74,7 +74,7 @@ type State = {
   /** Load the essay list and switch to list view. */
   loadList: () => Promise<void>;
   /** Create a new essay (initial empty doc), open it in the editor. */
-  newEssay: (mode?: EssayMode) => Promise<void>;
+  newEssay: (mode?: EssayMode) => Promise<string | null>;
   /** Open an existing essay by id. */
   openEssay: (id: string, expectedCurrentId?: string | null) => Promise<void>;
   /** Close the current essay and go back to the list, flushing pending writes. */
@@ -162,12 +162,12 @@ type State = {
   /** Append a snapshot of `current` with the given kind. Flushes any
    *  pending autosave first so the snapshot captures the persisted
    *  state, not a transient one. */
-  snapshotNow: (kind: SnapshotKind) => Promise<void>;
+  snapshotNow: (kind: SnapshotKind) => Promise<string | null>;
   /** Fetch the full snapshot for preview (without applying it). */
   previewSnapshot: (takenAt: string) => Promise<Snapshot | null>;
   /** Restore an older version. Snapshots the current state first
    *  (kind="before-restore") so the user can always undo. */
-  restoreVersion: (takenAt: string) => Promise<void>;
+  restoreVersion: (takenAt: string, beforeApply?: () => void) => Promise<boolean>;
 
   /** Force-flush any pending save. */
   flush: () => Promise<void>;
@@ -208,6 +208,7 @@ function upsertMeta(list: EssayMeta[], meta: EssayMeta): EssayMeta[] {
 // prevent an older async open from replacing a newer human choice.
 let activeFlush: Promise<void> | null = null;
 let navigationGeneration = 0;
+const deletingEssayIds = new Set<string>();
 
 export const useStore = create<State>((set, get) => ({
   view: "list",
@@ -242,7 +243,7 @@ export const useStore = create<State>((set, get) => ({
     const navigation = ++navigationGeneration;
     if (get().current) {
       await get().flush();
-      if (navigation !== navigationGeneration || get().saveStatus.kind !== "saved") return;
+      if (navigation !== navigationGeneration || get().saveStatus.kind !== "saved") return null;
     }
     const previous = get().current;
     const now = nowIso();
@@ -257,25 +258,28 @@ export const useStore = create<State>((set, get) => ({
     };
     try {
       await writeEssay(essay);
-      if (navigation !== navigationGeneration || get().current !== previous) return;
+      if (navigation !== navigationGeneration || get().current !== previous) return null;
       set((s) => ({
         current: essay,
         view: "editor",
         list: upsertMeta(s.list, essayToMeta(essay)),
         saveStatus: { kind: "saved", at: Date.now() },
       }));
+      return essay.id;
     } catch (err) {
-      if (navigation !== navigationGeneration || get().current !== previous) return;
+      if (navigation !== navigationGeneration || get().current !== previous) return null;
       set({
         saveStatus: {
           kind: "error",
           message: err instanceof Error ? err.message : String(err),
         },
       });
+      return null;
     }
   },
 
   async openEssay(id, expectedCurrentId) {
+    if (deletingEssayIds.has(id)) return;
     const previousId = get().current?.id ?? null;
     if (expectedCurrentId !== undefined && previousId !== expectedCurrentId) return;
     const navigation = ++navigationGeneration;
@@ -288,6 +292,7 @@ export const useStore = create<State>((set, get) => ({
       if (previousId === id) return;
       previous = get().current;
       const essay = await readEssay(id);
+      if (deletingEssayIds.has(id)) return;
       // Typing does not navigate, but it still invalidates this pending open.
       // Preserve that live version even if autosave already completed it.
       if (navigation !== navigationGeneration || get().current !== previous) return;
@@ -343,11 +348,15 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async removeEssay(id) {
+    if (get().current?.id === id) throw new Error("Close the essay before deleting it.");
+    deletingEssayIds.add(id);
     try {
       await deleteEssay(id);
       set((s) => ({ list: s.list.filter((m) => m.id !== id) }));
     } catch (err) {
       console.error("removeEssay failed", err);
+    } finally {
+      deletingEssayIds.delete(id);
     }
   },
 
@@ -651,9 +660,11 @@ export const useStore = create<State>((set, get) => ({
     // Flush first so the snapshot reflects what's persisted on disk,
     // not a transient typing state. recordEvaluacion uses the same
     // pattern (queueMicrotask) for the same reason.
-    await get().flush();
     const cur = get().current;
-    if (!cur) return;
+    const navigation = navigationGeneration;
+    if (!cur) return null;
+    await get().flush();
+    if (navigation !== navigationGeneration || get().current !== cur || get().saveStatus.kind !== "saved") return null;
     const snapshot: Snapshot = {
       takenAt: nowIso(),
       kind,
@@ -661,9 +672,12 @@ export const useStore = create<State>((set, get) => ({
     };
     try {
       await appendSnapshot(snapshot);
+      if (navigation !== navigationGeneration || get().current !== cur) return null;
       await get().loadHistory();
+      return navigation === navigationGeneration && get().current === cur ? snapshot.takenAt : null;
     } catch (err) {
       console.error("snapshotNow failed", err);
+      return null;
     }
   },
 
@@ -678,19 +692,25 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async restoreVersion(takenAt) {
+  async restoreVersion(takenAt, beforeApply) {
     const cur = get().current;
-    if (!cur) return;
+    const navigation = navigationGeneration;
+    if (!cur) return false;
     // 1) Snapshot the current state as a safety net.
-    await get().snapshotNow("before-restore");
+    if (!await get().snapshotNow("before-restore")) return false;
+    if (navigation !== navigationGeneration || get().current !== cur) return false;
     // 2) Read the target snapshot.
     let target: Snapshot;
     try {
       target = await readSnapshot(cur.id, takenAt);
     } catch (err) {
       console.error("restoreVersion: read failed", err);
-      return;
+      return false;
     }
+    // Reading a version can race with typing, navigation or another restore.
+    // Never overwrite the live document that was not captured by our backup.
+    if (navigation !== navigationGeneration || get().current !== cur || target.essay.id !== cur.id) return false;
+    beforeApply?.();
     // 3) Apply: replace the current essay's mutable fields with the
     //    snapshot's. We keep id/createdAt from the live essay (those
     //    are identity), but everything else comes from the target.
@@ -708,7 +728,9 @@ export const useStore = create<State>((set, get) => ({
       restoreNonce: s.restoreNonce + 1,
     }));
     await get().flush();
+    if (get().current !== restored || get().saveStatus.kind !== "saved") return false;
     await get().loadHistory();
+    return get().current === restored;
   },
 
   async flush() {

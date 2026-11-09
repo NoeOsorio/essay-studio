@@ -37,7 +37,7 @@ desconectado, pulsa **Conectar MCP**. El adaptador encuentra automáticamente el
 socket privado de la app. No copies el contenido de `connection.json` ni añadas
 tokens o API keys a las configuraciones siguientes.
 
-Conectar el MCP no ejecuta los sabios ni un benchmark. Las respuestas del cliente
+Conectar el MCP no ejecuta los revisores ni un benchmark. Las respuestas del cliente
 de IA y las evaluaciones que solicites después usan las condiciones de sus
 respectivos planes.
 
@@ -94,12 +94,12 @@ claude mcp remove --scope user essay-studio
 
 ## 4. Claude Desktop
 
-1. Abre **Settings → Developer → Edit Config** en Claude Desktop.
-2. Localiza `~/Library/Application Support/Claude/claude_desktop_config.json`.
-3. Añade una entrada `essay-studio` dentro de `mcpServers`, conservando los
+- Abre **Settings → Developer → Edit Config** en Claude Desktop.
+- Localiza `~/Library/Application Support/Claude/claude_desktop_config.json`.
+- Añade una entrada `essay-studio` dentro de `mcpServers`, conservando los
    servidores y demás ajustes existentes.
-4. Guarda JSON válido y cierra completamente Claude Desktop; después ábrelo.
-5. Comprueba `essay-studio` y sus herramientas en las conexiones del cliente.
+- Guarda JSON válido y cierra completamente Claude Desktop; después ábrelo.
+- Comprueba `essay-studio` y sus herramientas en las conexiones del cliente.
 
 Ejemplo de configuración; sustituye ambas rutas por las de tu Mac:
 
@@ -139,13 +139,13 @@ Con Essay Studio abierto, pide al cliente:
 
 La herramienta devuelve el contexto vivo. Si estás en la lista de ensayos,
 `essay` puede ser `null`: no es un fallo de conexión. Abre un ensayo para leer el
-documento o el tablero. El registro actual expone **15 herramientas**; la
+documento o el tablero. El registro actual expone las capacidades anunciadas por `get_basic_info`; la
 comprobación útil es que una llamada real responda, no sólo ver sus nombres.
 
 Para editar: leer el documento/tablero, usar el `essayId` y la `revision`
 recibidos, aplicar el cambio y cerrar el lote con `finish_work`. Para organizar
 notas se usa `organize_notes`; `get_board_image` permite comprobar el resultado.
-Las herramientas no dependen de que la interfaz de los sabios esté disponible.
+Las herramientas no dependen de que la interfaz de los revisores esté disponible.
 
 El registro en Codex y la conexión nativa se han probado en este proyecto.
 Las instrucciones de Claude Desktop y Claude Code se contrastaron con sus guías
@@ -191,3 +191,52 @@ privado: no contiene ni sustituye el token.
 La configuración normal no necesita ninguna de esas variables. No compartas ni
 versiones descriptores de conexión, configuraciones personales o bibliotecas
 privadas.
+
+## Capacidades ampliadas
+
+Actualiza y compila tanto la app como el adaptador. `get_basic_info` devuelve
+`capabilities.capabilityVersion` y la lista de herramientas con su efecto.
+La versión de capacidades debe ser al menos `2` para usar las operaciones nuevas.
+Un cliente que conserva herramientas antiguas debe reconectarse antes de trabajar.
+
+El MCP permite editar objetos y encabezados, conexiones, formato del documento,
+selección y cámara, fuentes, rúbrica, ensayos y versiones. `editor_history` recibe
+`surface: "document"` o `surface: "board"` y `direction: "undo"` o `"redo"`.
+Los encabezados son objetos de texto; organizar por temas no crea contenedores.
+
+Usa un `operationId` estable, preferiblemente un UUID, para cada acción nueva.
+Conserva ese mismo identificador al consultar un resultado incierto. Reutilizarlo
+con otros argumentos se rechaza. Tras reiniciar la app, una operación previamente
+registrada no se ejecuta otra vez: primero consulta el estado guardado. Los
+clientes antiguos conservan sus herramientas, pero deben adoptar identificadores
+para obtener esta protección en sus ediciones.
+
+Las colecciones aceptan `query`, `offset` y `limit`; la respuesta indica la
+continuación. Fuentes, anotaciones y versiones permiten pedir el contenido por
+rangos. `get_document` ofrece bloques y contenido enriquecido con `format: "json"`.
+Sus posiciones siguen siendo las del documento nativo, no índices del texto plano.
+
+`start_review` y `start_interrogation` requieren `userRequested: true` y una petición
+explícita del usuario. Inician un trabajo y devuelven su identificador; no aplican
+resultados. Consulta `get_review_job`, cancela con `cancel_review_job` y aplica
+selecciones mediante `apply_review_results`. Editar, ordenar y consultar no ejecuta
+modelos. No hay fallback a API keys ni promoción automática de perfiles candidatos.
+
+`delete_essay` y `restore_version` requieren `confirm: true`. Borrar fuentes o
+criterios también exige confirmación explícita. Una restauración se detiene si
+falla el respaldo o cambia el contenido mientras se carga la versión.
+
+Las importaciones reciben contenido proporcionado por el cliente. Ninguna
+herramienta recibe rutas arbitrarias para leer archivos ni ejecuta código.
+
+Para adjuntos del tablero, `create_asset` admite una fuente HTTPS explícita;
+`import_board_asset` recibe bytes base64 mediante begin, append y finish. Cada
+fragmento lleva su propio identificador de operación y el desplazamiento en bytes
+decodificados. Begin devuelve también el assetId para comprobar un guardado
+incierto con `get_asset`. Si editas el ensayo durante la carga, cancela y vuelve a
+iniciarla con la revisión nueva. `list_assets` permite localizar adjuntos sin
+devolver los datos inline. Solo se elimina un adjunto que no esté referenciado.
+
+La verificación local comprobó el descubrimiento de herramientas en Codex y la
+conexión de Claude Code. La comprobación de Claude Desktop con una sesión iniciada
+está pendiente en NOE-550; no se presupone compatibilidad verificada de ese cliente.

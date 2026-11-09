@@ -5,7 +5,7 @@ import { EditorContent, ReactRenderer, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
-import type { Editor, JSONContent } from "@tiptap/core";
+import type { JSONContent } from "@tiptap/core";
 
 import { useStore } from "@/lib/store";
 import type { Pase } from "@/lib/storage/types";
@@ -18,7 +18,7 @@ import {
   type SlashSuggestionProps,
 } from "./extensions/SlashCommand";
 import { Annotation } from "./extensions/Annotation";
-import { findCitaRange } from "@/lib/editor/findCita";
+import { applyEvaluation, editAnnotations } from "@/lib/reviews/actions";
 import type { Anotacion, ReviewProvenance } from "@/lib/storage/types";
 import { registerDocument } from "@/lib/mcp/document";
 
@@ -91,9 +91,7 @@ function SlashHint() {
   return (
     <div className="font-mono text-[11px] text-ink-3 tracking-[0.04em] flex items-center gap-2.5 mt-8">
       <span className="kbd">/</span> insertar bloque
-      <span className="text-ink-4">·</span>
       <span className="kbd">⌘ B</span> negrita
-      <span className="text-ink-4">·</span>
       <span className="kbd">⌘ I</span> cursiva
     </div>
   );
@@ -223,21 +221,9 @@ function TipTapEditor({
         }>
       ).detail;
       if (!detail) return;
-      // Apply any anotaciones the user kept (may be empty — "clean" run).
-      if (detail.anotaciones && detail.anotaciones.length > 0) {
-        applyAnotaciones(editor, detail.anotaciones);
-      }
-      // Record the evaluation event itself, so the Benchmark knows
-      // the council ran (vs. "never evaluated"). Pasadas cubiertas
-      // drives the partial-coverage gate on a perfect 10/10.
-      if (detail.pasadasCubiertas && detail.pasadasCubiertas.length > 0) {
-        // Defer one tick so the mark-application's `updateContent`
-        // flush settles first — `recordEvaluacion` reads `updatedAt`
-        // and syncs `evaluadoEn` to it.
-        queueMicrotask(() => {
-          useStore.getState().recordEvaluacion(detail.pasadasCubiertas ?? [], detail.reviewerRuns);
-        });
-      }
+      const essayId = useStore.getState().current?.id;
+      if (!essayId) return;
+      applyEvaluation(essayId, detail.anotaciones ?? [], detail.pasadasCubiertas ?? [], detail.reviewerRuns);
     };
     window.addEventListener("pluma-roja:apply", handler as EventListener);
     return () =>
@@ -255,7 +241,8 @@ function TipTapEditor({
     const handler = (e: Event) => {
       const id = (e as CustomEvent<{ id: string }>).detail?.id;
       if (!id) return;
-      editor.commands.removeAnnotationById(id);
+      const essayId = useStore.getState().current?.id;
+      if (essayId) editAnnotations({ essayId, operation: "discard", ids: [id] });
     };
     window.addEventListener("pluma-roja:dismiss", handler as EventListener);
     return () =>
@@ -293,15 +280,10 @@ function TipTapEditor({
         e as CustomEvent<{ id: string; reemplazo: string }>
       ).detail;
       if (!detail?.id || !detail.reemplazo) return;
-      const applied = editor.commands.applyAnnotationReemplazo(
-        detail.id,
-        detail.reemplazo,
-      );
-      if (!applied) {
-        window.alert(
-          "El reemplazo cruza varios bloques (párrafo/heading). Aplicalo manualmente.",
-        );
-      }
+      const essayId = useStore.getState().current?.id;
+      if (!essayId) return;
+      try { editAnnotations({ essayId, operation: "apply", ids: [detail.id] }); }
+      catch { window.alert("No se puede aplicar este reemplazo. Edita el texto directamente."); }
     };
     window.addEventListener(
       "pluma-roja:apply-reemplazo",
@@ -323,50 +305,6 @@ function TipTapEditor({
   );
 }
 
-/**
- * Walk a batch of anotaciones, resolve each cita to a ProseMirror
- * range, and add the annotation mark. The `seenCitaCounts` map lets
- * repeated citas resolve to successive occurrences (avoids two flags
- * landing on top of each other for the same span).
- */
-function applyAnotaciones(editor: Editor, anotaciones: Anotacion[]) {
-  const seenCitaCounts = new Map<string, number>();
-  const unresolved: Anotacion[] = [];
-  for (const a of anotaciones) {
-    const key = a.cita;
-    const skip = seenCitaCounts.get(key) ?? 0;
-    const range = findCitaRange(editor, a.cita, skip);
-    if (!range) {
-      unresolved.push(a);
-      continue;
-    }
-    seenCitaCounts.set(key, skip + 1);
-    editor
-      .chain()
-      .setAnnotation(range.from, range.to, {
-        id: a.id,
-        sage: a.sage,
-        pase: a.pase,
-        severidad: a.severidad,
-        mensaje: a.mensaje,
-        reemplazo: a.reemplazo ?? null,
-        criterioId: a.criterioId ?? null,
-        evidence: a.evidence ?? null,
-        provenance: a.provenance ?? null,
-      })
-      .run();
-  }
-  if (unresolved.length > 0) {
-    // Bubble unresolved anotaciones up via a follow-up event so the UI
-    // can surface them (e.g. as a small list in the topbar). Not
-    // surfaced in v1 — the click-popover only renders applied ones.
-    window.dispatchEvent(
-      new CustomEvent("pluma-roja:unresolved", {
-        detail: { anotaciones: unresolved },
-      }),
-    );
-  }
-}
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - Date.parse(iso);

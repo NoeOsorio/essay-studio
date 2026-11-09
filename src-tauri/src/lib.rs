@@ -57,6 +57,7 @@ pub fn run() {
       history::history_append,
       sidecar::sage_interrogate,
       sidecar::sage_critique,
+      sidecar::sage_cancel,
       sidecar::sage_ping,
       sidecar::sage_status,
       mcp::mcp_renderer_ready,

@@ -44,15 +44,24 @@ function runSidecarCommand(args: {
   args: Record<string, unknown>;
   id: string;
   onUpdate?: (update: InterrogateUpdate) => void;
+  signal?: AbortSignal;
 }): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
-  const { command, args: invokeArgs, id, onUpdate } = args;
+  const { command, args: invokeArgs, id, onUpdate, signal } = args;
   return new Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }>(
     (resolveOuter, reject) => {
       let unlisten: UnlistenFn | null = null;
+      let stopStatus: UnlistenFn | null = null;
       let settled = false;
+      let sent = false;
+      const abort = () => {
+        if (sent) void invoke("sage_cancel", { id }).catch(() => undefined);
+        finish(null, new Error("Review was cancelled."));
+      };
 
       const cleanup = () => {
         if (unlisten) unlisten();
+        if (stopStatus) stopStatus();
+        signal?.removeEventListener("abort", abort);
       };
       const finish = (
         ok: { result: string; costUsd?: number; provenance?: ReviewProvenance } | null,
@@ -65,6 +74,8 @@ function runSidecarCommand(args: {
         else reject(err);
       };
 
+      if (signal?.aborted) { finish(null, new Error("Review was cancelled.")); return; }
+      signal?.addEventListener("abort", abort, { once: true });
       void listen<SidecarEvent>("sage://event", (e) => {
         const ev = e.payload;
         if (ev.id !== id) return;
@@ -89,14 +100,22 @@ function runSidecarCommand(args: {
             finish(null, new Error(ev.message));
             break;
         }
-      }).then((un) => {
+      }).then(async (un) => {
         unlisten = un;
+        if (settled || signal?.aborted) { un(); return; }
+        stopStatus = await listen<{ state: string }>("sage://status", (event) => {
+          if (event.payload.state === "down") finish(null, new Error("The review process stopped. No incomplete result was applied."));
+        });
+        if (settled || signal?.aborted) { stopStatus(); return; }
         // Now send the request. We invoke AFTER listen() has resolved
         // so we don't miss the first event.
-        invoke<string>(command, invokeArgs).catch((err) => {
+        invoke<string>(command, invokeArgs).then(() => {
+          sent = true;
+          if (signal?.aborted) void invoke("sage_cancel", { id }).catch(() => undefined);
+        }).catch((err) => {
           finish(null, err instanceof Error ? err : new Error(String(err)));
         });
-      });
+      }).catch(() => finish(null, new Error("The review event channel is unavailable.")));
     },
   );
 }
@@ -113,6 +132,7 @@ export async function interrogate(args: {
   /** Output language. Defaults to "es". */
   language?: EssayLanguage;
   onUpdate?: (update: InterrogateUpdate) => void;
+  signal?: AbortSignal;
 }): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const id = newId();
   return runSidecarCommand({
@@ -125,6 +145,7 @@ export async function interrogate(args: {
     },
     id,
     onUpdate: args.onUpdate,
+    signal: args.signal,
   });
 }
 
@@ -147,6 +168,7 @@ export async function critique(args: {
   language?: EssayLanguage;
   reviewerProfile?: string;
   onUpdate?: (update: InterrogateUpdate) => void;
+  signal?: AbortSignal;
 }): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const id = newId();
   const rubricaPayload = args.rubrica && args.rubrica.length > 0
@@ -168,6 +190,7 @@ export async function critique(args: {
     },
     id,
     onUpdate: args.onUpdate,
+    signal: args.signal,
   });
 }
 

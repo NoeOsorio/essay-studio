@@ -4,13 +4,13 @@ import { useRef, useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
-import { interrogate, parsePreguntas } from "@/lib/agents";
+import { parsePreguntas } from "@/lib/agents";
+import { startInterrogation, waitReviewJob, getReviewJobState, applyReviewResults, cancelReviewJob } from "@/lib/reviews/jobs";
 import { ALL_SAGES, defaultSagesForMode } from "@/lib/sages";
 import type {
   EssayLanguage,
   EssayMode,
   Fuente,
-  Interrogatorio,
   Sage,
 } from "@/lib/storage/types";
 
@@ -21,22 +21,22 @@ const SAGE_META: Record<
 > = {
   em: {
     initials: "EM",
-    name: "el Empirista",
+    name: "Evidencia",
     tagline: "Calidad de la evidencia, métodos, replicación",
   },
   sis: {
     initials: "SI",
-    name: "el Sistémico",
+    name: "Estructura",
     tagline: "Loops, niveles, leverage points",
   },
   pra: {
     initials: "PR",
-    name: "el Práctico",
+    name: "Aplicación",
     tagline: "¿Qué cambia el lunes? Aplicación real",
   },
   cri: {
     initials: "CR",
-    name: "el Crítico",
+    name: "Argumentación",
     tagline: "Steelman, lo no dicho, análisis de poder",
   },
 };
@@ -54,7 +54,6 @@ const SAGE_META: Record<
 export function LecturaOverlay() {
   const overlay = useStore((s) => s.overlay);
   const setOverlay = useStore((s) => s.setOverlay);
-  const addInterrogatorio = useStore((s) => s.addInterrogatorio);
   const current = useStore((s) => s.current);
 
   if (overlay !== "lectura") return null;
@@ -71,10 +70,6 @@ export function LecturaOverlay() {
       >
         <LecturaInner
           onClose={() => setOverlay(null)}
-          onSave={(entries) => {
-            for (const entry of entries) addInterrogatorio(entry);
-            setOverlay(null);
-          }}
           essayTitle={current?.title}
           essayMode={current?.mode ?? "academico"}
           essayLanguage={current?.language ?? "es"}
@@ -101,14 +96,11 @@ function makePane(sage: Sage): SagePane {
 
 function LecturaInner({
   onClose,
-  onSave,
   essayTitle,
   essayMode,
-  essayLanguage,
   fuentes,
 }: {
   onClose: () => void;
-  onSave: (entries: Interrogatorio[]) => void;
   essayTitle?: string;
   essayMode: EssayMode;
   essayLanguage: EssayLanguage;
@@ -122,6 +114,8 @@ function LecturaInner({
   const initialText = useStore.getState().lecturaPrefill;
 
   const [text, setText] = useState(initialText);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [activeFuenteId, setActiveFuenteId] = useState<string | null>(null);
   // Council-mode sage selection: defaults adapt to the essay mode
   // (academico → EM/SI/CR; blog → SI/PR/CR). Lives only in the modal
@@ -159,70 +153,34 @@ function LecturaInner({
       return next;
     });
 
-    await Promise.all(
-      activeSages.map(async (s) => {
-        try {
-          const { result, costUsd } = await interrogate({
-            sage: s,
-            text,
-            language: essayLanguage,
-            onUpdate: (u) => {
-              if (u.kind === "token") {
-                setPanes((prev) => ({
-                  ...prev,
-                  [s]: { ...prev[s], raw: prev[s].raw + u.delta },
-                }));
-              }
-            },
-          });
-          // Default every parsed question to checked.
-          const preguntas = parsePreguntas(result);
+    const essay = useStore.getState().current;
+    if (!essay) return;
+    setSaveError(null);
+    try {
+      const started = startInterrogation({ essayId: essay.id, operationId: crypto.randomUUID(), userRequested: true, text, sages: activeSages });
+      setJobId(started.jobId);
+      await waitReviewJob(started.jobId, (job) => {
+        for (const task of job.tasks) {
           const checked: Record<number, boolean> = {};
-          for (let i = 0; i < preguntas.length; i++) checked[i] = true;
-          setPane(s, { phase: "done", raw: result, costUsd, checked });
-        } catch (err) {
-          setPane(s, {
-            phase: "error",
-            error: err instanceof Error ? err.message : String(err),
-          });
+          task.questions.forEach((_, i) => { checked[i] = true; });
+          setPane(task.sage, { phase: job.status === "cancelled" ? "error" : task.status === "completed" ? "done" : task.status === "failed" ? "error" : "running",
+            raw: task.raw, checked, error: task.error ?? null, costUsd: task.costUsd });
         }
-      }),
-    );
+      });
+    } catch (error) {
+      for (const reviewer of activeSages) setPane(reviewer, { phase: "error", error: error instanceof Error ? error.message : "No se pudo iniciar la interrogación." });
+    }
   };
 
   const save = () => {
-    const entries: Interrogatorio[] = [];
-    const materialize: { sage: Sage; preguntas: string[] }[] = [];
-    const generadoEn = new Date().toISOString();
-
-    for (const s of activeSages) {
-      const pane = panes[s];
-      if (pane.phase !== "done") continue;
-      const all = parsePreguntas(pane.raw);
-      const kept = all.filter((_, i) => pane.checked[i] !== false);
-      if (kept.length === 0) continue;
-      entries.push({
-        sage: s,
-        preguntas: kept,
-        generadoEn,
-        costoUsd: pane.costUsd,
-      });
-      materialize.push({ sage: s, preguntas: kept });
-    }
-    if (entries.length === 0) {
+    const essay = useStore.getState().current;
+    const job = jobId ? getReviewJobState(jobId) : undefined;
+    if (!essay || !job) return;
+    const questionIds = job.tasks.flatMap((task) => task.questions.filter((_, i) => panes[task.sage].checked[i] !== false).map((question) => question.id));
+    try {
+      applyReviewResults({ essayId: essay.id, jobId: job.id, questionIds });
       onClose();
-      return;
-    }
-    onSave(entries);
-
-    // Materialize on the board. The board listener handles layout
-    // (cascade for single sage, columns when multiple sages arrive
-    // in the same dispatch).
-    window.dispatchEvent(
-      new CustomEvent("sage:materialize-preguntas", {
-        detail: { batches: materialize },
-      }),
-    );
+    } catch (error) { setSaveError(error instanceof Error ? error.message : "No se pudieron guardar las preguntas."); }
   };
 
   const onFile = async (file: File | null) => {
@@ -263,13 +221,13 @@ function LecturaInner({
             sage={mode === "single" ? sage : "em"}
             initials={mode === "single" ? SAGE_META[sage].initials : "C"}
             size={36}
-            title={mode === "single" ? SAGE_META[sage].name : "El consejo"}
+            title={mode === "single" ? SAGE_META[sage].name : "Revisores"}
           />
           <div className="min-w-0">
             <h2 className="font-serif italic text-[20px] text-ink-1 leading-tight truncate">
               {mode === "single"
                 ? `Interrogatorio — ${SAGE_META[sage].name}`
-                : "Interrogatorio — el consejo"}
+                : "Preguntas"}
             </h2>
             <p className="font-mono text-[10px] text-ink-3 mt-1 tracking-[0.04em] truncate">
               {mode === "single"
@@ -277,7 +235,7 @@ function LecturaInner({
                 : `${selectedSages.length} ${
                     selectedSages.length === 1 ? "voz" : "voces"
                   } sobre el mismo texto`}
-              {essayTitle ? ` · sobre ${essayTitle}` : ""}
+              {essayTitle ? `, sobre ${essayTitle}` : ""}
             </p>
           </div>
         </div>
@@ -336,9 +294,10 @@ function LecturaInner({
             disabled={anyRunning}
           />
           <div className="flex items-center justify-between mt-1">
-            <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
-              {text.length.toLocaleString("es")} caracteres
-            </span>
+            {anyRunning && jobId ? <Button onClick={() => {
+              const essay = useStore.getState().current;
+              if (essay) cancelReviewJob({ essayId: essay.id, jobId });
+            }}>Cancelar</Button> : null}
             <Button
               variant="dark"
               onClick={start}
@@ -351,7 +310,7 @@ function LecturaInner({
             >
               {anyRunning
                 ? mode === "council"
-                  ? "El consejo piensa…"
+                  ? "Generando preguntas…"
                   : `${SAGE_META[sage].name.replace(/^el /, "El ")} piensa…`
                 : "Interrogar"}
             </Button>
@@ -399,7 +358,7 @@ function LecturaInner({
       {anyDone ? (
         <footer className="flex items-center justify-between px-6 py-3 border-t border-rule-1 bg-paper-2">
           <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
-            {summarize(panes, activeSages)}
+            {saveError ?? summarize(panes, activeSages)}
           </span>
           <Button variant="seal" onClick={save} disabled={anyRunning}>
             Guardar seleccionadas
@@ -435,13 +394,13 @@ function ModeAndSageControls({
         className="inline-flex p-[3px] bg-paper-3 border border-rule-1 rounded-full"
       >
         <ModeTab
-          label="Consejo"
+          label="Varios revisores"
           active={mode === "council"}
           onClick={() => onModeChange("council")}
           disabled={disabled}
         />
         <ModeTab
-          label="Un sabio"
+          label="Un revisor"
           active={mode === "single"}
           onClick={() => onModeChange("single")}
           disabled={disabled}
@@ -452,7 +411,7 @@ function ModeAndSageControls({
         <div
           className="flex items-center gap-1.5"
           role="tablist"
-          aria-label="Elegir sabio"
+          aria-label="Elegir revisor"
         >
           {ALL_SAGES.map((s) => {
             const active = s === sage;
@@ -481,7 +440,7 @@ function ModeAndSageControls({
       ) : (
         <div
           className="flex items-center gap-1.5"
-          aria-label="Sabios que participan"
+          aria-label="Revisores que participan"
           data-testid="lectura-sage-selector"
         >
           {ALL_SAGES.map((s) => {
@@ -682,7 +641,7 @@ function PaneBody({
   if (pane.phase === "error") {
     return (
       <span className="font-mono text-[11px] text-err tracking-[0.04em]">
-        error · {pane.error ?? "desconocido"}
+        error, {pane.error ?? "desconocido"}
       </span>
     );
   }
@@ -727,7 +686,7 @@ function phaseLabel(pane: SagePane): string {
       return "pensando…";
     case "done":
       return pane.costUsd !== undefined
-        ? `done · $${pane.costUsd.toFixed(4)}`
+        ? `done, $${pane.costUsd.toFixed(4)}`
         : "done";
     case "error":
       return "error";

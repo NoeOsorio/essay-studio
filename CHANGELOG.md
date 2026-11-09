@@ -1,5 +1,13 @@
 # Cambios
 
+## 0.3.0
+
+- MCP ampliado para objetos, encabezados, formato, selección, versiones, fuentes y rúbrica.
+- Revisiones e interrogaciones como trabajos compartidos con la interfaz, cancelables y separados de su aplicación.
+- Consultas por páginas y rangos, identificadores de operación y protección ante reintentos.
+- Restauración detenida ante fallos del respaldo o edición concurrente.
+- Verificación de modelos sin inferencia durante esta implementación.
+
 ## 0.2.0 — 2026-11-07
 
 - MCP local para leer y editar ensayos y organizar notas por temas, cuadrícula,

@@ -6,20 +6,16 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
 import {
-  buildAnotacion,
-  critique,
-  parseAnnotationsDetailed,
   type RawAnotacion,
 } from "@/lib/agents";
+import { startReview, waitReviewJob, getReviewJobState, applyReviewResults, cancelReviewJob, reviewFingerprint } from "@/lib/reviews/jobs";
 import { ReviewEvidenceDetails } from "@/components/ReviewEvidenceDetails";
 import { REVIEWER_PROFILES, DEFAULT_REVIEWER_PROFILE } from "../../../sidecar/src/model-profiles";
 import { defaultPasesForMode } from "@/lib/sages";
 import type {
-  Anotacion,
   Criterio,
   EssayLanguage,
   EssayMode,
-  Essay,
   Fuente,
   Pase,
   Rubrica,
@@ -67,10 +63,10 @@ const PASE_META: {
 ];
 
 const SAGE_META: Record<Sage, { initials: string; name: string }> = {
-  em: { initials: "EM", name: "el Empirista" },
-  sis: { initials: "SI", name: "el Sistémico" },
-  pra: { initials: "PR", name: "el Práctico" },
-  cri: { initials: "CR", name: "el Crítico" },
+  em: { initials: "EM", name: "Evidencia" },
+  sis: { initials: "SI", name: "Estructura" },
+  pra: { initials: "PR", name: "Aplicación" },
+  cri: { initials: "CR", name: "Argumentación" },
 };
 
 const SEV_TONE: Record<"alta" | "media" | "baja", string> = {
@@ -79,9 +75,6 @@ const SEV_TONE: Record<"alta" | "media" | "baja", string> = {
   baja: "bg-sis",
 };
 
-function reviewFingerprint(essay: Essay | null): string {
-  return essay ? JSON.stringify([essay.id, essay.content, essay.fuentes ?? [], essay.rubrica ?? null, essay.mode, essay.language ?? "es"]) : "closed";
-}
 
 type PasePane = {
   pase: Pase;
@@ -95,6 +88,7 @@ type PasePane = {
   costUsd?: number;
   provenance?: ReviewProvenance;
   invalidLines?: number;
+  unavailable?: number[];
 };
 
 function emptyPane(pase: Pase, sage: Sage): PasePane {
@@ -145,14 +139,7 @@ export function PlumaRojaOverlay() {
           essayTitle={current.title}
           essayText={extractPlainText(current.content)}
           onClose={() => setOverlay(null)}
-          onApply={(applied, pasadasCubiertas, reviewerRuns) => {
-            window.dispatchEvent(
-              new CustomEvent("pluma-roja:apply", {
-                detail: { anotaciones: applied, pasadasCubiertas, reviewerRuns },
-              }),
-            );
-            setOverlay(null);
-          }}
+
         />
       </div>
     </div>
@@ -165,13 +152,11 @@ function PlumaInner({
   onProfileChange,
   previousRuns,
   mode,
-  language,
   rubrica,
   fuentes,
   essayTitle,
   essayText,
   onClose,
-  onApply,
 }: {
   reviewKey: string;
   reviewerProfile?: string;
@@ -184,11 +169,11 @@ function PlumaInner({
   essayTitle: string;
   essayText: string;
   onClose: () => void;
-  onApply: (anotaciones: Anotacion[], pasadasCubiertas: Pase[], reviewerRuns: { pase: Pase; provenance?: ReviewProvenance }[]) => void;
 }) {
   const selectedProfile = reviewerProfile ?? DEFAULT_REVIEWER_PROFILE;
   const [reviewedKey, setReviewedKey] = useState<string | null>(null);
   const [applyError, setApplyError] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
   const staleReview = reviewedKey !== null && reviewedKey !== reviewKey;
   const knownProfile = REVIEWER_PROFILES.some((profile) => profile.id === selectedProfile);
 
@@ -251,50 +236,25 @@ function PlumaInner({
       return next;
     });
 
-    await Promise.all(
-      passes.map(async (p) => {
-        try {
-          const { result, costUsd, provenance } = await critique({
-            sage: p.sageKey,
-            pase: p.pase,
-            text: essayText,
-            rubrica: criterios,
-            fuentes,
-            language,
-            reviewerProfile: capturedProfile,
-            onUpdate: (u) => {
-              if (u.kind === "token") {
-                setPanes((prev) => ({
-                  ...prev,
-                  [p.pase]: {
-                    ...prev[p.pase],
-                    raw: prev[p.pase].raw + u.delta,
-                  },
-                }));
-              }
-            },
-          });
-          const parsed = parseAnnotationsDetailed(result, fuentes ?? []);
-          const anotaciones = parsed.annotations;
+    const essay = useStore.getState().current;
+    if (!essay) return;
+    try {
+      const started = startReview({ essayId: essay.id, operationId: crypto.randomUUID(), userRequested: true,
+        pases: passes.map((p) => p.pase), reviewerProfile: capturedProfile });
+      setJobId(started.jobId);
+      await waitReviewJob(started.jobId, (job) => {
+        for (const task of job.tasks) {
+          if (!task.pase) continue;
           const checked: Record<number, boolean> = {};
-          for (let i = 0; i < anotaciones.length; i++) checked[i] = true;
-          updatePane(p.pase, {
-            phase: "done",
-            raw: result,
-            anotaciones,
-            checked,
-            costUsd,
-            provenance,
-            invalidLines: parsed.invalidLines.length,
-          });
-        } catch (err) {
-          updatePane(p.pase, {
-            phase: "error",
-            error: err instanceof Error ? err.message : String(err),
-          });
+          task.annotations.forEach((annotation, i) => { checked[i] = !task.unavailableAnnotationIds?.includes(annotation.id); });
+          updatePane(task.pase, { phase: job.status === "cancelled" ? "error" : task.status === "completed" ? "done" : task.status === "failed" ? "error" : "running",
+            raw: task.raw, anotaciones: task.annotations, checked, error: task.error ?? null,
+            costUsd: task.costUsd, provenance: task.provenance, invalidLines: task.invalidLines, unavailable: task.annotations.flatMap((annotation, i) => task.unavailableAnnotationIds?.includes(annotation.id) ? [i] : []) });
         }
-      }),
-    );
+      });
+    } catch (error) {
+      for (const pass of passes) updatePane(pass.pase, { phase: "error", error: error instanceof Error ? error.message : "No se pudo iniciar la revisión." });
+    }
   };
 
   const apply = () => {
@@ -303,24 +263,14 @@ function PlumaInner({
       setApplyError(true);
       return;
     }
-    const generadoEn = new Date().toISOString();
-    const out: Anotacion[] = [];
-    for (const p of passes) {
-      const pane = panes[p.pase];
-      if (pane.phase !== "done") continue;
-      pane.anotaciones.forEach((raw, i) => {
-        if (pane.checked[i] === false) return;
-        out.push(buildAnotacion(raw, p.sageKey, p.pase, generadoEn, criterios, pane.provenance));
-      });
-    }
-    // Always notify — even with 0 anotaciones. That's a legitimate
-    // outcome ("the council found nothing to flag") and the Scorebar
-    // needs to distinguish it from "never evaluated".
-    onApply(
-      out,
-      passes.filter((p) => panes[p.pase].phase === "done" && !panes[p.pase].invalidLines).map((p) => p.pase),
-      passes.filter((p) => panes[p.pase].phase === "done").map((p) => ({ pase: p.pase, provenance: panes[p.pase].provenance })),
-    );
+    const essay = useStore.getState().current;
+    const job = jobId ? getReviewJobState(jobId) : undefined;
+    if (!essay || !job) { setApplyError(true); return; }
+    const annotationIds = job.tasks.flatMap((task) => task.annotations.filter((_, i) => panes[task.pase!].checked[i] !== false).map((annotation) => annotation.id));
+    try {
+      applyReviewResults({ essayId: essay.id, jobId: job.id, annotationIds });
+      onClose();
+    } catch { setApplyError(true); }
   };
 
   return (
@@ -334,15 +284,7 @@ function PlumaInner({
             <h2 className="font-serif italic text-[20px] text-ink-1 leading-tight truncate">
               Evaluar — {essayTitle || "sin título"}
             </h2>
-            <p className="font-mono text-[10px] text-ink-3 mt-1 tracking-[0.04em]">
-              {selectedPases.length === 0
-                ? "Sin pasadas seleccionadas"
-                : `${selectedPases.length} ${
-                    selectedPases.length === 1 ? "pasada" : "pasadas"
-                  } en paralelo sobre el ensayo completo.`}{" "}
-              {essayText.length.toLocaleString("es")} caracteres ·{" "}
-              {wordCount(essayText)} palabras
-            </p>
+
           </div>
         </div>
 
@@ -354,17 +296,17 @@ function PlumaInner({
               data-testid="pluma-rubrica-indicator"
             >
               <span className="w-[7px] h-[7px] rounded-full bg-sis" />
-              Rúbrica · {criterios.length}
+              Rúbrica
             </span>
           ) : null}
           {fuentes && fuentes.length > 0 ? (
             <span
               className="inline-flex items-center gap-1.5 px-2 h-[22px] rounded-full border border-rule-2 bg-paper font-mono text-[9.5px] uppercase tracking-[0.12em] text-ink-3"
-              title={`Inyectando ${fuentes.length} fuentes al consejo`}
+              title="Fuentes incluidas en la revisión"
               data-testid="pluma-fuentes-indicator"
             >
               <span className="w-[7px] h-[7px] rounded-full bg-em" />
-              Fuentes · {fuentes.length}
+              Fuentes
             </span>
           ) : null}
           <Button
@@ -378,8 +320,12 @@ function PlumaInner({
             }
             data-testid="pluma-start"
           >
-            {anyRunning ? "El consejo revisa…" : anyDone ? "Volver a revisar" : "Iniciar revisión"}
+            {anyRunning ? "Revisando…" : anyDone ? "Volver a revisar" : "Iniciar revisión"}
           </Button>
+          {anyRunning && jobId ? <Button onClick={() => {
+            const essay = useStore.getState().current;
+            if (essay) cancelReviewJob({ essayId: essay.id, jobId });
+          }}>Cancelar</Button> : null}
           <button
             type="button"
             onClick={onClose}
@@ -570,7 +516,7 @@ function PasePaneView({
             {label}
           </span>
           <span className="font-mono text-[8.5px] text-ink-3 tracking-[0.04em]">
-            {meta.name} · {hint}
+            {meta.name}, {hint}
           </span>
         </div>
         <span className="ml-auto font-mono text-[9px] text-ink-3 tracking-[0.06em]">
@@ -607,7 +553,7 @@ function PaneBody({
   if (pane.phase === "error") {
     return (
       <span className="font-mono text-[11px] text-err tracking-[0.04em]">
-        error · {pane.error ?? "desconocido"}
+        error, {pane.error ?? "desconocido"}
       </span>
     );
   }
@@ -646,6 +592,7 @@ function PaneBody({
               <input
                 type="checkbox"
                 checked={isOn}
+                disabled={pane.unavailable?.includes(i)}
                 onChange={() => onToggle(i)}
                 aria-label={`Anotación ${i + 1}`}
                 className="mt-[3px] accent-ink-1 cursor-pointer"
@@ -671,12 +618,13 @@ function PaneBody({
                     </span>
                   ) : null}
                 </div>
-                <div className="font-serif italic text-[11.5px] text-ink-2 mb-1.5 leading-snug border-l-2 border-rule-2 pl-2">
+                <div className="font-serif italic text-[11.5px] text-ink-2 mb-1.5 leading-snug ">
                   “{a.cita}”
                 </div>
                 <div className="text-[12.5px] leading-[1.5] text-ink-1">
                   {a.mensaje}
                 </div>
+                {pane.unavailable?.includes(i) ? <p className="mt-2 text-[12px] text-ink-3">No se pudo asignar este comentario a un fragmento distinto.</p> : null}
                 <ReviewEvidenceDetails evidence={a.evidence} sources={fuentes} provenance={pane.provenance} />
                 {a.reemplazo ? (
                   <div className="mt-1.5 pt-1.5 border-t border-rule-1">
@@ -705,7 +653,7 @@ function phaseLabel(pane: PasePane): string {
       return "pensando…";
     case "done":
       return pane.costUsd !== undefined
-        ? `${pane.anotaciones.length} · $${pane.costUsd.toFixed(4)}`
+        ? `${pane.anotaciones.length}, $${pane.costUsd.toFixed(4)}`
         : `${pane.anotaciones.length}`;
     case "error":
       return "error";
@@ -729,13 +677,6 @@ function summarize(
   return `${kept} de ${total} anotaciones seleccionadas`;
 }
 
-function wordCount(text: string): number {
-  const t = text.trim();
-  if (!t) return 0;
-  return t.split(/\s+/).length;
-}
-
-/** Flatten a TipTap JSON document down to plain text for the sages. */
 function extractPlainText(content: unknown): string {
   const out: string[] = [];
   const walk = (node: unknown): void => {

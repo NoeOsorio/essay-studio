@@ -18,7 +18,7 @@
 ![Next.js](https://img.shields.io/badge/Next.js_16-18181b?style=for-the-badge&logo=nextdotjs&logoColor=bef264)
 ![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-18181b?style=for-the-badge&logo=claude&logoColor=bef264)
 
-[Features](#-features) · [Quickstart](#-quickstart) · [Arquitectura](#️-arquitectura) · [Roadmap](ROADMAP.md)
+[Features](#-features) , [Quickstart](#-quickstart) , [Arquitectura](#️-arquitectura) , [Roadmap](ROADMAP.md)
 
 </div>
 
@@ -150,6 +150,12 @@ de uso, el protocolo de evaluación ciega y la autorización de consumo están e
 
 ### MCP local para trabajar dentro de la app
 
+La ampliación permite editar encabezados y objetos del tablero, conexiones y
+formato del documento, gestionar fuentes, rúbrica y versiones, e iniciar trabajos
+de revisión únicamente por pedido explícito. Incluye importación de imágenes y
+video por fragmentos, consultas paginadas y protección ante reintentos. Consulta
+`get_basic_info` para descubrir las capacidades de la app conectada.
+
 **[Guía de instalación para Codex, Claude Desktop y Claude Code](docs/mcp-installation.md)**:
 preparación, comandos, configuración, verificación y desinstalación por cliente.
 
@@ -218,12 +224,12 @@ Los datos viven en `~/Library/Application Support/com.noeosorio.essaystudio/essa
 
 ```mermaid
 flowchart LR
-    subgraph UI["Renderer · Next.js 16 + React 19"]
+    subgraph UI["Renderer , Next.js 16 + React 19"]
         ED[Editor TipTap<br/>anotaciones inline]
         BO[Tablero tldraw<br/>post-its]
         ST[(Zustand store)]
     end
-    subgraph RS["Tauri 2 · Rust"]
+    subgraph RS["Tauri 2 , Rust"]
         STO[storage.rs<br/>history.rs]
         SC[sidecar.rs]
         MN[menu.rs]
@@ -237,8 +243,8 @@ flowchart LR
     ST -- invoke --> SC
     MN -- "app:menu" --> ST
     STO --> FS[("essays/*.json<br/>*.history.jsonl")]
-    SC -- "JSON Lines · stdin" --> SG
-    SG -- "tokens · stdout" --> SC
+    SC -- "JSON Lines , stdin" --> SG
+    SG -- "tokens , stdout" --> SC
     SC -- "sage://event" --> ST
     SG --> P["prompts/*.md"]
     SG --> SDK -- "OAuth de Claude Code" --> CL((Claude))
@@ -298,6 +304,6 @@ Distribuido bajo licencia MIT. Ver [`LICENSE`](LICENSE).
 
 <div align="center">
 
-Hecho con ☕ por [Noé Osorio](https://noeosorio.com) · [business@noeosorio.com](mailto:business@noeosorio.com)
+Hecho con ☕ por [Noé Osorio](https://noeosorio.com) , [business@noeosorio.com](mailto:business@noeosorio.com)
 
 </div>

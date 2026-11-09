@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.0"
+version = "0.3.0"
 description = "Essay Studio: consejo de sabios de IA que interroga, anota y puntúa tus ensayos"
 authors = ["Noé Osorio <business@noeosorio.com>"]
 license = "MIT"

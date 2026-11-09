@@ -578,6 +578,19 @@ pub async fn sage_critique(
     Ok(id)
 }
 
+/// Cancel one active request without interrupting unrelated reviews.
+#[tauri::command]
+pub async fn sage_cancel(state: State<'_, SidecarState>, id: String) -> Result<(), String> {
+    if id.is_empty() || id.len() > 256 { return Err("invalid review id".to_string()); }
+    let mut line = serde_json::to_string(&serde_json::json!({ "id": id, "type": "cancel" }))
+        .map_err(|_| "cannot serialize cancellation".to_string())?;
+    line.push('\n');
+    let mut guard = state.stdin.lock().await;
+    let stdin = guard.as_mut().ok_or_else(|| "review sidecar is not running".to_string())?;
+    stdin.write_all(line.as_bytes()).await.map_err(|_| "cannot cancel review".to_string())?;
+    stdin.flush().await.map_err(|_| "cannot flush cancellation".to_string())
+}
+
 /// Convenience for the renderer / tests.
 #[tauri::command]
 pub async fn sage_ping(

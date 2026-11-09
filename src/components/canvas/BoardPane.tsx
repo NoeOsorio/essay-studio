@@ -20,6 +20,8 @@ import { PergaminoNoteShapeUtil, type PostItMeta } from "./note-shape";
 import { NoteContextPanel } from "./NoteContextPanel";
 import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
 import type { Sage } from "@/lib/storage/types";
+import { ToolError } from "../../../shared/mcp";
+import { registerReviewBoard } from "@/lib/reviews/actions";
 import { persistBoardSnapshot, registerBoard } from "@/lib/mcp/board";
 
 // Tldraw uses DOM APIs, so mount it client-only.
@@ -144,6 +146,10 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
             recomputeCounts(editor, setCounts);
             setZoom(editor.getZoomLevel());
             const unregisterBoard = registerBoard(editor, essayId);
+            const unregisterReviews = registerReviewBoard(essayId, (batches) => {
+              materializePreguntas(editor, batches);
+              persistBoardSnapshot(editor);
+            }, (batches) => validateQuestionBatches(editor, batches));
 
             const unlistenStore = editor.store.listen(
               () => {
@@ -182,6 +188,7 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
             editor.updateInstanceState({ isToolLocked: false });
 
             return () => {
+              unregisterReviews();
               unregisterBoard();
               unlistenStore();
               unlistenCamera();
@@ -201,7 +208,7 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
           else if (t === "arrow") editor.setCurrentTool("arrow");
           else editor.setCurrentTool("select");
         }}
-        onMicTeaser={() => alert("Dictado · próximamente.")}
+        onMicTeaser={() => alert("Dictado próximamente.")}
       />
 
       <BoardZoom
@@ -235,6 +242,7 @@ function materializePreguntas(
   editor: Editor,
   batches: { sage: Sage; preguntas: string[] }[],
 ) {
+  validateQuestionBatches(editor, batches);
   const nonEmpty = batches.filter((b) => b.preguntas.length > 0);
   if (nonEmpty.length === 0) return;
 
@@ -308,7 +316,21 @@ function materializePreguntas(
     });
   }
 
-  editor.createShapes(shapes);
+  const mark = editor.markHistoryStoppingPoint("review-questions");
+  try {
+    editor.run(() => {
+      editor.createShapes(shapes.map((shape) => ({ ...shape, parentId: editor.getCurrentPageId() })));
+      if (shapes.some((shape) => !shape.id || !editor.getShape(shape.id))) throw new ToolError("EDIT_REJECTED", "The board did not create every selected question.");
+    });
+    editor.markHistoryStoppingPoint("review-questions:end");
+  } catch (error) { editor.bailToMark(mark); throw error; }
+}
+
+function validateQuestionBatches(editor: Editor, batches: { sage: Sage; preguntas: string[] }[]): void {
+  if (editor.getIsReadonly()) throw new ToolError("READ_ONLY", "The board is read-only.");
+  if (!Array.isArray(batches) || batches.some((batch) => !batch || !["em", "sis", "pra", "cri"].includes(batch.sage) || !Array.isArray(batch.preguntas) || batch.preguntas.some((text) => typeof text !== "string" || !text.trim()))) throw new ToolError("INVALID_ARGUMENTS", "Provide valid selected questions.");
+  const count = batches.reduce((sum, batch) => sum + batch.preguntas.length, 0);
+  if (editor.getCurrentPageShapeIds().size + count > editor.options.maxShapesPerPage) throw new ToolError("BOARD_CAPACITY", "The selected questions exceed the board capacity.");
 }
 
 function buildNoteShape(args: {

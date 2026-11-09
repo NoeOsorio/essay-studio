@@ -65,7 +65,7 @@ test("interrogate calls forward the chosen language", async ({ page }) => {
     .getByPlaceholder(/Pega aquí un fragmento, o sube un \.txt/)
     .fill("Some text in English to interrogate.");
   const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    has: page.getByRole("heading", { name: /^Preguntas$/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
   // Wait for the streamed answers to settle.
