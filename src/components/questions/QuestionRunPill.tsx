@@ -24,7 +24,7 @@ function useBoardSpot(on: boolean): Spot | null {
             const r = board.getBoundingClientRect();
             return { x: r.left + r.width / 2, top: r.top + 8 };
           })()
-        : { x: window.innerWidth / 2, top: 64 };
+        : { x: window.innerWidth / 2, top: 72 };
       setSpot((prev) => (prev && prev.x === next.x && prev.top === next.top ? prev : next));
     };
     const first = requestAnimationFrame(measure);

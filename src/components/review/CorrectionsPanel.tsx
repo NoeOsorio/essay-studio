@@ -243,7 +243,7 @@ export function CorrectionsPanel({
     <Popover anchor={anchor} open={open} onClose={onClose} instant={instant} width={width} offset={{ x: 116, y: 3 }} persistent testId="corrections-panel">
       <div
         className="flex flex-col font-sans"
-        style={narrowed ? { maxHeight: "calc(100vh - 67px)" } : { height: "calc(100vh - 67px)" }}
+        style={narrowed ? { maxHeight: "calc(100vh - 75px)" } : { height: "calc(100vh - 75px)" }}
       >
         {narrowed && breakdown ? (
           <div className="flex-none px-[22px] pt-[8px]">

@@ -139,6 +139,7 @@ Gathered by the implementers: see Decisions taken below.
 - `MAX_INGEST_CHARS` above `MAX_SOURCE_CHARS` is accepted: an oversized source is stored and reviewed by prefix, and Hazme preguntas says it is too long for it, with no run started.
 - Stale stamp: a click opens the report card, as the 005 contract says, not a new review. Any edit makes the stamp stale, so a click that re-reviews would cut off the corrections and spend calls by accident. Revisar ensayo sits next to it. The caption on the Slice 0 state artboard is read that way.
 - Report card and Correcciones are `Popover`s anchored on the stamp (R5.1, R4.2), not centered `Panel`s. Correcciones stays open on outside clicks so the text behind stays editable; Esc and its close button dismiss it.
+- Window bar is 64 pt tall, 8 more than Paper's 56, at Noe's request (2026-11-10: «se ve todo super pegado arriba»). Window controls are centered on it with `trafficLightPosition.y` 34 (the center lands about 2 pt above that value). Panels hanging below the bar start at 72.
 
 ## Decisions taken (2026-11-08)
 

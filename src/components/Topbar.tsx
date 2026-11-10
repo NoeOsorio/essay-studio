@@ -56,7 +56,7 @@ function EditorBar() {
   return (
     <div
       data-tauri-drag-region
-      className={`flex items-center justify-between flex-none h-[56px] bg-paper pr-[16px] ${LIGHTS_INSET}`}
+      className={`flex items-center justify-between flex-none h-[64px] bg-paper pr-[16px] ${LIGHTS_INSET}`}
     >
       <div data-tauri-drag-region className="flex items-center gap-[8px] min-w-0">
         <Tooltip label="Volver a Ensayos" shortcut="⌘W">

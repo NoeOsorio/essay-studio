@@ -29,7 +29,7 @@ export function ReviewNotice() {
       role="status"
       data-testid="review-notice"
       onClick={() => clear(null)}
-      className="fixed top-[68px] left-1/2 z-[950] flex h-[44px] -translate-x-1/2 cursor-pointer items-center rounded-[12px] bg-sheet px-[18px] font-sans text-[14px] leading-[18px] text-ink-1 shadow-[0_0_0_1px_#1D1B1814,0_12px_28px_-12px_#3C2D0A29]"
+      className="fixed top-[76px] left-1/2 z-[950] flex h-[44px] -translate-x-1/2 cursor-pointer items-center rounded-[12px] bg-sheet px-[18px] font-sans text-[14px] leading-[18px] text-ink-1 shadow-[0_0_0_1px_#1D1B1814,0_12px_28px_-12px_#3C2D0A29]"
     >
       Cerraste el ensayo y la revisión se canceló.
     </div>

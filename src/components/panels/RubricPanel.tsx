@@ -305,7 +305,7 @@ export function RubricPanel() {
         className={`${SHEET_CLASS} fixed z-[900] flex flex-col ${instant ? "" : "sheet-in"}`}
         style={{
           right: 12,
-          top: 64,
+          top: 72,
           bottom: 12,
           width: 540,
           maxWidth: "calc(100% - 24px)",

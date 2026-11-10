@@ -39,7 +39,7 @@ export function HistoryPanel() {
       ref={sheet}
       tabIndex={-1}
       data-testid="history-overlay"
-      className={`${SHEET_CLASS} fixed bottom-[12px] right-[12px] top-[64px] z-[900] flex flex-col gap-[20px] px-[20px] pb-[32px] pt-[28px] ${
+      className={`${SHEET_CLASS} fixed bottom-[12px] right-[12px] top-[72px] z-[900] flex flex-col gap-[20px] px-[20px] pb-[32px] pt-[28px] ${
         instant ? "" : "sheet-in"
       }`}
       style={{

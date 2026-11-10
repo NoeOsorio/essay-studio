@@ -20,7 +20,7 @@ export function LibraryBar({ showTools = true }: { showTools?: boolean }) {
     <div
       data-tauri-drag-region
       data-testid="library-bar"
-      className={`flex items-center justify-end gap-[10px] flex-none h-[56px] pr-[16px] ${LIGHTS_INSET}`}
+      className={`flex items-center justify-end gap-[10px] flex-none h-[64px] pr-[16px] ${LIGHTS_INSET}`}
     >
       {showTools ? (
         <>

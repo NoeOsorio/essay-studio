@@ -448,7 +448,7 @@ function PanelBody() {
       data-drop-zone
       className={`fixed z-[900] flex flex-col rounded-[16px] bg-sheet font-sans text-ink-1 outline-none ${instant ? "" : "sheet-in"}`}
       style={{
-        top: 64,
+        top: 72,
         right: 12,
         bottom: 12,
         width: 540,
