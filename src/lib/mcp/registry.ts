@@ -1,7 +1,7 @@
 import { useStore } from "@/lib/store";
 import { appendSnapshot, listEssays } from "@/lib/storage";
 import { CAPABILITY_VERSION, PROTOCOL_VERSION, MAX_REQUEST_BYTES, ToolError, TOOL_DEFINITIONS, validateArgs, type BridgeRequest, type BridgeResponse, type JsonObject } from "../../../shared/mcp";
-import { ensureDocument, readDocument, readTextSelection, validateDocumentTool, handleDocumentTool } from "./document";
+import { ensureDocument, ensureTitle, readTitleHistory, readDocument, readTextSelection, validateDocumentTool, handleDocumentTool } from "./document";
 import { ensureBoard, getBoardSelection, getBoardSummary, handleBoardTool, validateBoardTool, applyBoardHistory, prepareBoardAsset, resetBoardUploads } from "./board";
 import { editLibrary, readLibrary, validateLibraryEdit } from "./library";
 import { matches, page } from "./collections";
@@ -65,13 +65,18 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   guard(); validateArgs(request.name, request.args);
   const { name, args } = request;
   const definition = TOOL_DEFINITIONS.find(tool => tool.name === name)!;
-  const effect = name === "import_board_asset" && args.operation !== "finish" ? "job" : definition.effect;
+  const effect = name === "import_board_asset" && args.operation !== "finish" ? "job" : name === "edit_board_page" && args.operation === "delete" ? "destructive" : definition.effect;
   const essayId = args.essayId as string;
   if (name === "get_basic_info") {
     const state = useStore.getState();
+    let titleHistory: JsonObject = { ready: false };
+    if (state.current) {
+      try { titleHistory = { ready: true, ...readTitleHistory(state.current.id) }; }
+      catch (error) { if (!(error instanceof ToolError) || error.code !== "EDITOR_NOT_READY") throw error; }
+    }
     const panelNames = { fuentes: "sources", rubrica: "rubric", history: "history", pluma: "review", lectura: "interrogation" } as const;
     return envelope({ app: "Essay Studio", view: state.view, saveStatus: state.saveStatus.kind,
-      activePanel: state.overlay ? panelNames[state.overlay] : null, scorebarDismissed: state.scorebarDismissed,
+      titleHistory, activePanel: state.overlay ? panelNames[state.overlay] : null, scorebarDismissed: state.scorebarDismissed,
       essay: state.current ? { id: state.current.id, title: state.current.title, mode: state.current.mode, language: state.current.language ?? "es", wordCount: state.current.wordCount } : null,
       board: { open: state.boardOpen, ...getBoardSummary() },
       capabilities: { protocolVersion: PROTOCOL_VERSION, capabilityVersion: CAPABILITY_VERSION, platform: "macos", tools: TOOL_DEFINITIONS.map(tool => ({ name: tool.name, effect: tool.effect })) } });
@@ -85,7 +90,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   if (["open_essay", "create_essay", "close_essay", "delete_essay"].includes(name)) {
     if (args.revision !== undefined) checkRevision(args.revision);
     const state = useStore.getState(); const before = state.current;
-    if (name === "create_essay" && typeof args.title === "string" && /[\r\n]/u.test(args.title)) throw new ToolError("INVALID_ARGUMENTS", "Essay titles must use a single line.");
+    if (name === "create_essay" && typeof args.title === "string" && /[\r\n\u2028\u2029]/u.test(args.title)) throw new ToolError("INVALID_ARGUMENTS", "Essay titles must use a single line.");
     if (name === "close_essay" || name === "delete_essay") assertContext(essayId);
     if (before) { await flushDurable(before.id); guard(); if (args.revision !== undefined) checkRevision(args.revision); }
     if (name === "open_essay") {
@@ -96,7 +101,9 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
       const created = useStore.getState().current;
       if (!createdId || !created || created.id !== createdId || useStore.getState().saveStatus.kind !== "saved") throw new ToolError("CREATE_FAILED", "The essay was not created or navigation changed; inspect the library before retrying.");
       const captured = created;
-      await ensureDocument(created.id); guard(true);
+      await ensureDocument(created.id);
+      if (args.title !== undefined) await ensureTitle(created.id);
+      guard(true);
       if (useStore.getState().current !== captured) throw new ToolError("OUTCOME_UNKNOWN", "The new essay changed before initialization completed. Read it before continuing.");
       if (args.title !== undefined) handleDocumentTool("edit_document", { essayId: created.id, operation: "rename", title: args.title });
       if (args.language !== undefined) useStore.getState().updateLanguage(args.language as "es" | "en");
@@ -125,6 +132,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   const boardSurface = definition.surface === "board" || name === "editor_history" && args.surface === "board" || name === "apply_review_results" && args.questionIds !== undefined;
   if (boardSurface) { await ensureBoard(essayId); guard(); assertContext(essayId); }
   if (definition.surface === "document" || definition.surface === "review") { await ensureDocument(essayId); guard(); assertContext(essayId); }
+  if (name === "edit_document" && args.operation === "rename" || name === "editor_history" && args.surface === "title") { await ensureTitle(essayId); guard(); assertContext(essayId); }
   if (effect !== "read") checkRevision(args.revision);
   if (name === "import_board_asset") {
     if (args.operation !== "finish") return envelope(handleBoardTool(name, args), essayId);
@@ -156,9 +164,13 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
       return envelope({ changed: true }, essayId);
     }
     const value = boardSurface ? handleBoardTool(name, args) : handleDocumentTool(name, args);
+    if (name === "set_board_page") {
+      await flushDurable(essayId); guard(true);
+      if (getBoardSummary().currentPageId !== args.pageId) throw new ToolError("VIEW_CHANGED", "The active page changed while saving. Read app context before continuing.");
+    }
     return envelope(value, essayId);
   }
-  if (name === "edit_document") validateDocumentTool(name, args);
+  if (name === "edit_document" || name === "editor_history" && args.surface !== "board") validateDocumentTool(name, args);
   else if (boardSurface && name !== "editor_history" && name !== "apply_review_results") validateBoardTool(name, args);
   else if (name === "edit_source" || name === "edit_rubric" || name === "update_essay") validateLibraryEdit(name, args);
   if (name === "apply_review_results") validateReviewApplication(args as Parameters<typeof validateReviewApplication>[0]);

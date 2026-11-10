@@ -1,6 +1,7 @@
 import { AssetRecordType, DEFAULT_MAX_ASSET_SIZE, FileHelpers, getAssetInfo, type Editor, type TLAsset, type TLAssetId } from "tldraw";
 import { MAX_REQUEST_BYTES, ToolError, type JsonObject } from "../../../shared/mcp";
 import { matches, page, textRange } from "./collections";
+import { prepareSvgImage } from "./svg-image";
 
 type Upload = {
   editor: Editor; essayId: string; revision: string; type: "image" | "video";
@@ -9,7 +10,7 @@ type Upload = {
   chunks: Uint8Array<ArrayBuffer>[]; prepared?: TLAsset; preparing?: Promise<void>;
 };
 const uploads = new Map<string, Upload>();
-const MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "video/webm"]);
+const MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "video/mp4", "video/webm"]);
 let epoch = 0;
 
 /** Revocation cannot be undone by an async file decoder finishing later. */
@@ -93,8 +94,9 @@ export async function prepareBoardAsset(editor: Editor, args: JsonObject): Promi
   if (entry.preparing) return entry.preparing;
   const startEpoch = epoch;
   entry.preparing = (async () => {
-    const file = new File(entry.chunks, entry.fileName, { type: entry.mimeType });
-    verifySignature(new Uint8Array(await file.slice(0, 16).arrayBuffer()), entry.mimeType);
+    let file = new File(entry.chunks, entry.fileName, { type: entry.mimeType });
+    if (entry.mimeType === "image/svg+xml") file = await prepareSvgImage(file, editor.options.maxShapesPerPage);
+    else verifySignature(new Uint8Array(await file.slice(0, 16).arrayBuffer()), entry.mimeType);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let value: TLAsset | undefined;
     try {
@@ -184,9 +186,10 @@ export function handleAssetTool(editor: Editor, name: string, args: JsonObject, 
     const mimeType = args.mimeType as string;
     const fileName = args.fileName as string;
     const total = args.totalBytes as number;
-    if ((type !== "image" && type !== "video") || !MIME_TYPES.has(mimeType) || !mimeType.startsWith(`${type}/`) || !editor.getAssetUtilForMimeType(mimeType)) throw new ToolError("INVALID_UPLOAD", "Provide PNG, JPEG, GIF, WebP, MP4 or WebM content with its matching MIME type.");
+    if ((type !== "image" && type !== "video") || !MIME_TYPES.has(mimeType) || !mimeType.startsWith(`${type}/`) || !editor.getAssetUtilForMimeType(mimeType)) throw new ToolError("INVALID_UPLOAD", "Provide PNG, JPEG, GIF, WebP, SVG, MP4 or WebM content with its matching MIME type.");
     if (typeof fileName !== "string" || !fileName || /[\u0000/\\]/u.test(fileName)) throw new ToolError("INVALID_UPLOAD", "Provide a filename without a path.");
     if (!Number.isSafeInteger(total) || total < 1 || total > DEFAULT_MAX_ASSET_SIZE) throw new ToolError("INVALID_UPLOAD", "The file exceeds the native 10 MiB asset limit.");
+    if (mimeType === "image/svg+xml" && total > MAX_REQUEST_BYTES) throw new ToolError("INVALID_UPLOAD", "SVG XML exceeds the 2 MiB content limit.");
     if ([...uploads.values()].reduce((sum, item) => sum + item.total, 0) + total > DEFAULT_MAX_ASSET_SIZE) throw new ToolError("UPLOAD_CAPACITY", "Finish or cancel pending uploads before starting another file.");
     const id = crypto.randomUUID();
     const assetId = AssetRecordType.createId();

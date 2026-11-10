@@ -89,6 +89,8 @@ type State = {
   updateLanguage: (language: EssayLanguage) => void;
   /** Update the tldraw board snapshot for the open essay. */
   updateBoard: (snapshot: BoardSnapshot | null) => void;
+  /** Persist board navigation without changing content/evaluation timestamps. */
+  updateBoardSession: (snapshot: BoardSnapshot | null) => void;
   /** Append an interrogatorio entry from a sage and flush. */
   addInterrogatorio: (entry: Interrogatorio) => void;
   /** Snapshot the moment of the last Evaluar run. Called by EditorPane
@@ -411,6 +413,15 @@ export const useStore = create<State>((set, get) => ({
     const updated = { ...cur, language, updatedAt: nowIso() };
     set({ current: updated, saveStatus: { kind: "dirty" } });
     void get().flush();
+  },
+
+  updateBoardSession(snapshot) {
+    const cur = get().current;
+    if (!cur) return;
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => { void get().flush(); }, AUTOSAVE_MS);
+    set({ current: { ...cur, board: snapshot }, saveStatus: { kind: "dirty" }, _autosaveTimer: timer });
   },
 
   updateBoard(snapshot) {

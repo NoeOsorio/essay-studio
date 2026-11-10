@@ -1,5 +1,11 @@
 # Implementation
 
+## Remaining manual actions, approved continuation
+
+Noe approved closing the named gaps with "Dale pues" on 2026-11-09. Reuse native tldraw group/ungroup and page APIs, an isolated TipTap title history (browser undo was proved document-global) and the existing asset import pipeline. Extend the shared registry rather than accepting arbitrary commands. Preserve locked descendants, page limits, revision checks, durable snapshots and native undo. Page switching is a view effect; page deletion is explicitly destructive. SVG support must use a bounded, validated image-only subset with no script, foreign HTML, event attributes, external references or active CSS. Unsupported SVG content is rejected before persistence, not silently executed or uploaded.
+
+Delivery: board groups/pages, title undo/redo and safe SVG import have separate owners. Coordinator owns shared contracts, registry integration and expanded native acceptance. Verify every advertised tool and all new operations on a disposable native app with the deterministic sidecar; no model inference. Independent review must inspect the new boundaries and actual reports. Existing test suites remain; no new unit tests.
+
 Cause: the MCP renderer adapters restrict node types and plain text; application and review operations remain tied to UI components. Extend the shared registry and extract reusable actions rather than implementing a second editor or review engine.
 
 Board work owns src/lib/mcp/board.ts and optional board helpers. It adds native shape CRUD, properties, duplication, ordering, connection editing, selection/camera, native undo/redo and paginated summaries. Expose type-specific validated properties from native schemas; preserve locked objects unless explicitly unlocking.

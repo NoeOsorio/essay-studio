@@ -64,7 +64,9 @@ reopening. Criterion summaries use the query/page arguments. `set_app_view`
 accepts `scorebarVisible`; `get_basic_info` exposes its dismissed state and the
 active panel.
 
-Coverage of the advertised tools does not prove every manual UI operation is
-exposed. Native board grouping and page management remain gaps in the broader
-manual-parity goal. SVG/HTML upload is deliberately rejected; document and board
-history do not include the native title field's separate undo history.
+Capability version 3 adds native grouping and page management, explicit title
+history and static SVG image import. The title uses its own existing TipTap history,
+so undo never targets the body or an overlay. SVG is a validated image subset:
+active content, external references, HTML, filters and animation remain rejected.
+Claude Desktop still requires verification in an authenticated client; model
+availability and review quality require separately authorized real-model runs.

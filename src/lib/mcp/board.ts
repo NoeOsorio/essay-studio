@@ -20,9 +20,10 @@ import { useStore } from "@/lib/store";
 import { ToolError, MAX_REQUEST_BYTES, type JsonObject } from "../../../shared/mcp";
 import { page, textRange } from "./collections";
 import { handleAssetTool, prepareBoardAsset as prepareAsset, resetBoardUploads, validateAssetTool } from "./board-assets";
+import { handleBoardPageTool, validateBoardPageTool } from "./board-pages";
 export { resetBoardUploads };
 
-type LiveBoard = { editor: Editor; essayId: string };
+type LiveBoard = { editor: Editor; essayId: string; records: Record<string, unknown> };
 let live: LiveBoard | null = null;
 const mounted = new Set<() => void>();
 
@@ -33,13 +34,17 @@ export function persistBoardSnapshot(editor: Editor): void {
   const current = useStore.getState().current;
   if (!current || current.id !== live.essayId) return;
   const snapshot = getSnapshot(editor.store);
-  const saved = current.board as { document?: { store?: Record<string, unknown> } } | undefined;
+  const saved = current.board as { document?: { store?: Record<string, unknown> }; session?: { currentPageId?: string } } | undefined;
   const records = snapshot.document.store;
-  const previous = saved?.document?.store;
-  if (previous) {
-    const keys = Object.keys(records);
-    if (keys.length === Object.keys(previous).length && keys.every((id) => records[id as keyof typeof records] === previous[id])) return;
+  // Hydration can migrate or clone records. Compare against the registered
+  // editor's baseline so a first page switch does not count as a text edit.
+  const previous = live.records;
+  const keys = Object.keys(records);
+  if (keys.length === Object.keys(previous).length && keys.every((id) => records[id as keyof typeof records] === previous[id])) {
+    if (snapshot.session.currentPageId !== saved?.session?.currentPageId) useStore.getState().updateBoardSession(snapshot);
+    return;
   }
+  live.records = records;
   useStore.getState().updateBoard(snapshot);
 }
 
@@ -47,7 +52,7 @@ export function persistBoardSnapshot(editor: Editor): void {
  * callbacks run synchronously, so optimistic revision checks also cover
  * board edits made during the frame before store.listen is delivered. */
 export function registerBoard(editor: Editor, essayId: string): () => void {
-  const registration = { editor, essayId };
+  const registration = { editor, essayId, records: getSnapshot(editor.store).document.store };
   live = registration;
   let dirty = false;
   const unlisten: (() => void)[] = [];
@@ -56,6 +61,9 @@ export function registerBoard(editor: Editor, essayId: string): () => void {
     unlisten.push(editor.store.sideEffects.registerAfterChangeHandler(type, () => { dirty = true; }));
     unlisten.push(editor.store.sideEffects.registerAfterDeleteHandler(type, () => { dirty = true; }));
   }
+  unlisten.push(editor.store.sideEffects.registerAfterChangeHandler("instance", (previous, next) => {
+    if (previous.currentPageId !== next.currentPageId) dirty = true;
+  }));
   unlisten.push(editor.store.sideEffects.registerOperationCompleteHandler(() => {
     if (!dirty) return;
     dirty = false;
@@ -90,6 +98,8 @@ export function getBoardSummary() {
   const shapes = live.editor.getCurrentPageShapes();
   return {
     ready: true,
+    currentPageId: live.editor.getCurrentPageId(),
+    pageCount: live.editor.getPages().length,
     notes: shapes.filter((s) => s.type === "note").length,
     connections: shapes.filter((s) => s.type === "arrow").length,
     selectedIds: getBoardSelection(),
@@ -515,6 +525,7 @@ function validateConnection(editor: Editor, args: JsonObject): TLArrowShape {
  * repeats validation synchronously at the actual mutation boundary. */
 export function validateBoardTool(name: string, args: JsonObject): void {
   const editor = active(args);
+  if (["group_nodes", "edit_board_page", "set_board_page"].includes(name)) validateBoardPageTool(editor, name, args);
   if (["create_asset", "delete_asset", "import_board_asset"].includes(name)) validateAssetTool(editor, name, args);
   if (name === "create_node") newShape(editor, args);
   if (name === "update_nodes") updates(editor, args);
@@ -528,6 +539,10 @@ export function validateBoardTool(name: string, args: JsonObject): void {
 export function handleBoardTool(name: string, args: JsonObject): unknown | Promise<unknown> {
   const editor = active(args);
   switch (name) {
+    case "group_nodes":
+    case "list_board_pages":
+    case "edit_board_page":
+    case "set_board_page": return boundedResult(handleBoardPageTool(editor, name, args, (operation, fn) => transaction(editor, operation, fn)));
     case "list_assets":
     case "get_asset":
     case "create_asset":

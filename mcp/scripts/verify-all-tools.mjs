@@ -81,7 +81,7 @@ function scoped(name, args = {}) { const definition = tools.find(t => t.name ===
 async function read(name, args = {}) { return call(name, scoped(name, args)); }
 async function info() { const v = await call('get_basic_info'); revision = v.revision; return v; }
 async function edit(name, args = {}) { await info(); return call(name, scoped(name, { revision, operationId: randomUUID(), ...args })); }
-async function refused(name, args, codes) { const { r, value } = await raw(name, scoped(name, { revision, operationId: randomUUID(), ...args })); assert(r.isError && codes.includes(value.error?.code), name + ' rejects ' + codes.join('/')); }
+async function refused(name, args, codes) { const properties = tools.find(t => t.name === name)?.inputSchema.properties ?? {}; const { r, value } = await raw(name, scoped(name, { ...(properties.revision ? { revision } : {}), ...(properties.operationId ? { operationId: randomUUID() } : {}), ...args })); assert(r.isError && codes.includes(value.error?.code), name + ' rejects ' + codes.join('/')); }
 const textOf = node => node.text ?? JSON.stringify(node.props?.richText ?? {});
 async function replaceDoc(text) { const d = await read('get_document'); return edit('edit_document', { operation: 'rich_replace', from: 0, to: d.range.documentSize, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }); }
 async function waitJob(jobId) { const end = Date.now() + 10000; while (Date.now() < end) {
@@ -125,11 +125,13 @@ try {
     const expected = [...(await readFile(root + '/shared/mcp.ts', 'utf8')).matchAll(/tool\("([a-z_]+)"/g)].map(m => m[1]).sort();
     assert(equal(tools.map(t => t.name).sort(), expected), 'Expected registered tool inventory');
     const initial = await info();
-    assert(initial.capabilities.capabilityVersion === 2 && initial.view === 'list', 'Native app context and capability');
+    assert(initial.capabilities.capabilityVersion === 3 && initial.view === 'list', 'Native app context and capability');
     const empty = await read('list_essays');
     assert(empty.total === 0, 'Isolated library initially empty');
     const profiles = await read('list_reviewer_profiles');
     assert(profiles.profiles.length > 0, 'Profiles read without inference');
+    await refused('create_essay', { title: 'Invalid\u2028title' }, ['INVALID_ARGUMENTS']);
+    assert((await read('list_essays')).total === 0, 'Invalid title never creates an essay');
     const created = await edit('create_essay', { title: 'All tools native QA', mode: 'academico', language: 'es' });
     essayId = created.essayId;
     assert(!!essayId, 'Essay created');
@@ -146,6 +148,13 @@ try {
     await edit('edit_document', { operation: 'replace', from: 1, to: 6, text: 'Alpha' });
     await edit('edit_document', { operation: 'rename', title: 'All tools renamed' });
     assert((await info()).essay.title === 'All tools renamed', 'Native title rename');
+    assert((await info()).titleHistory.canUndo, 'Title history availability');
+    const bodyBeforeTitleHistory = (await read('get_document')).text;
+    await edit('editor_history', { surface: 'title', direction: 'undo' });
+    assert((await info()).essay.title === 'All tools native QA', 'Isolated title undo');
+    assert((await read('get_document')).text === bodyBeforeTitleHistory, 'Title undo preserves document');
+    await edit('editor_history', { surface: 'title', direction: 'redo' });
+    assert((await info()).essay.title === 'All tools renamed', 'Isolated title redo');
     await edit('edit_document', { operation: 'format', from: 1, to: 6, formatting: { markType: 'bold' } });
     assert(JSON.stringify(await read('get_document', { format: 'json' })).includes('bold'), 'Native format');
     await edit('set_text_selection', { from: 1, to: 6 });
@@ -170,6 +179,38 @@ try {
     await edit('update_connection', { id: arrow, toId: n3, text: 'Apoyo', props: { color: 'blue' } });
     const a = await read('get_node', { id: arrow });
     assert(a.bindings.some(b => b.terminal === 'end' && b.toId === n3) && a.props.color === 'blue' && textOf(a).includes('Apoyo'), 'Arrow label endpoint and style');
+    const firstPage = (await read('list_board_pages')).currentPageId;
+    const secondPage = (await edit('edit_board_page', { operation: 'create', name: 'Extra page' })).pageId;
+    assert((await info()).board.currentPageId === firstPage, 'Page creation preserves active page');
+    await edit('edit_board_page', { operation: 'rename', pageId: secondPage, name: 'Outcomes page' });
+    assert((await read('list_board_pages', { query: 'Outcomes', limit: 1 })).items[0].id === secondPage, 'Page filter and bounded list');
+    await refused('edit_board_page', { operation: 'move_nodes', pageId: secondPage, ids: [n1] }, ['CROSS_PAGE_BINDING']);
+    let group = (await edit('group_nodes', { operation: 'group', ids: [n1, n3, arrow] })).groupId;
+    assert((await read('get_node', { id: n1 })).parentId === group, 'Native group parent');
+    await edit('editor_history', { surface: 'board', direction: 'undo' });
+    assert((await read('get_node', { id: n1 })).parentId === firstPage, 'Group undo');
+    await edit('editor_history', { surface: 'board', direction: 'redo' });
+    assert((await read('get_node', { id: n1 })).parentId === group, 'Group redo');
+    await edit('update_nodes', { nodes: [{ id: n3, isLocked: true }] });
+    await refused('group_nodes', { operation: 'ungroup', ids: [group] }, ['NODE_LOCKED']);
+    await refused('edit_board_page', { operation: 'move_nodes', pageId: secondPage, ids: [group] }, ['NODE_LOCKED']);
+    await edit('update_nodes', { nodes: [{ id: n3, isLocked: false }] });
+    await edit('edit_board_page', { operation: 'move_nodes', pageId: secondPage, ids: [group] });
+    assert((await info()).board.currentPageId === secondPage, 'Connected group moves to native page');
+    assert((await read('get_node', { id: arrow })).bindings.length === 2, 'Cross-page group preserves bindings');
+    await edit('set_board_page', { pageId: firstPage });
+    await refused('get_node', { id: n1 }, ['NODE_NOT_FOUND']);
+    await edit('close_essay');
+    await read('open_essay', { essayId });
+    await read('list_board_pages');
+    assert((await info()).board.currentPageId === firstPage, 'Current board page durably restored');
+    await edit('set_board_page', { pageId: secondPage });
+    await edit('edit_board_page', { operation: 'move_nodes', pageId: firstPage, ids: [group] });
+    await edit('group_nodes', { operation: 'ungroup', ids: [group] });
+    assert((await read('get_node', { id: n1 })).parentId === firstPage, 'Ungroup restores page parent');
+    await refused('edit_board_page', { operation: 'delete', pageId: secondPage }, ['CONFIRMATION_REQUIRED']);
+    await edit('edit_board_page', { operation: 'delete', pageId: secondPage, confirm: true });
+    await refused('edit_board_page', { operation: 'delete', pageId: firstPage, confirm: true }, ['LAST_PAGE']);
     const clone = (await edit('duplicate_nodes', { ids: [n1, n3, arrow], offsetX: 0, offsetY: 600 })).changedIds;
     assert(clone.length === 3 && clone.every(id => ![n1, n3, arrow].includes(id)), 'Native clones distinct');
     const cloneArrow = (await Promise.all(clone.map(id => read('get_node', { id })))).find(n => n.type === 'arrow');
@@ -216,6 +257,36 @@ try {
     await edit('import_board_asset', { operation: 'finish', uploadId: u.uploadId });
     const asset = await read('get_asset', { id: u.assetId });
     assert(asset.props?.w === 1 && asset.props?.h === 1, 'Decoded image metadata');
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><defs><linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient><rect id="r" width="80" height="40" fill="url(#g)"/></defs><use href="#r"/><text x="4" y="55">MCP</text></svg>');
+    const svgUpload = await edit('import_board_asset', { operation: 'begin', type: 'image', mimeType: 'image/svg+xml', fileName: 'vector.svg', totalBytes: svg.length });
+    await edit('import_board_asset', { operation: 'append', uploadId: svgUpload.uploadId, offset: 0, data: svg.toString('base64') });
+    await edit('import_board_asset', { operation: 'finish', uploadId: svgUpload.uploadId });
+    assert((await read('get_asset', { id: svgUpload.assetId })).props.w === 120, 'Static SVG native metadata');
+    const svgNode = (await edit('create_node', { type: 'image', x: 1000, y: 100, props: { assetId: svgUpload.assetId, w: 120, h: 60 } })).changedIds[0];
+    await refused('delete_asset', { id: svgUpload.assetId }, ['ASSET_IN_USE']);
+    await edit('close_essay');
+    await read('open_essay', { essayId });
+    await read('list_board_pages');
+    const durableSvg = await read('get_asset', { id: svgUpload.assetId, fields: ['data'], textLimit: 2000 });
+    assert(durableSvg.data.text.startsWith('data:image/svg+xml'), 'Static SVG durable inline source after reopen');
+    const assetCountBeforeUnsafe = (await read('list_assets')).total;
+    for (const unsafe of [
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div>HTML</div></foreignObject></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><use href="https://example.com/remote.svg#x"/></svg>',
+        '<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://example.com/a)"/></svg>'
+    ]) {
+        const bytes = Buffer.from(unsafe);
+        const upload = await edit('import_board_asset', { operation: 'begin', type: 'image', mimeType: 'image/svg+xml', fileName: 'unsafe.svg', totalBytes: bytes.length });
+        await edit('import_board_asset', { operation: 'append', uploadId: upload.uploadId, offset: 0, data: bytes.toString('base64') });
+        await refused('import_board_asset', { operation: 'finish', uploadId: upload.uploadId }, ['INVALID_SVG']);
+        await edit('import_board_asset', { operation: 'cancel', uploadId: upload.uploadId });
+    }
+    assert((await read('list_assets')).total === assetCountBeforeUnsafe, 'Unsafe SVG never persists an asset');
+    await edit('delete_nodes', { ids: [svgNode] });
+    await edit('delete_asset', { id: svgUpload.assetId });
     const partial = await edit('import_board_asset', { operation: 'begin', type: 'image', mimeType: 'image/gif', fileName: 'cancel.gif', totalBytes: gif.length });
     await edit('import_board_asset', { operation: 'cancel', uploadId: partial.uploadId });
     await refused('import_board_asset', { operation: 'append', uploadId: partial.uploadId, offset: 0, data: gif.toString('base64') }, ['UPLOAD_NOT_FOUND']);
@@ -259,6 +330,7 @@ try {
     await applyReview();
     await edit('edit_annotations', { operation: 'clear' });
     assert((await read('list_annotations')).total === 0, 'Clear evaluation annotations');
+    const scorePage = (await edit('edit_board_page', { operation: 'create', name: 'Evaluation view' })).pageId;
     await replaceDoc('CLEAN_NATIVE_FIXTURE');
     const partialClean = await waitJob((await edit('start_review', { userRequested: true, pases: ['coherencia'] })).jobId);
     await edit('apply_review_results', { jobId: partialClean.jobId, annotationIds: [] });
@@ -270,8 +342,17 @@ try {
     assert(evaluation.wasEvaluated && evaluation.overall === 10 && !evaluation.isStale && evaluation.criteria.total === 1, 'Full clean evaluation score exposed');
     await edit('close_essay');
     await read('open_essay', { essayId });
+    await read('list_board_pages');
     evaluation = (await read('get_document', { includeEvaluation: true })).evaluation;
     assert(evaluation.wasEvaluated && evaluation.overall === 10, 'Clean evaluation persists after reopen');
+    await edit('set_board_page', { pageId: scorePage });
+    assert(!(await read('get_document', { includeEvaluation: true })).evaluation.isStale, 'Page switch preserves evaluation freshness');
+    await edit('close_essay');
+    await read('open_essay', { essayId });
+    await read('list_board_pages');
+    assert((await info()).board.currentPageId === scorePage, 'Nondefault page persists across reopen');
+    await edit('set_board_page', { pageId: firstPage });
+    assert(!(await read('get_document', { includeEvaluation: true })).evaluation.isStale, 'Hydrated page switch preserves evaluation freshness');
     await edit('set_app_view', { scorebarVisible: false });
     assert((await info()).scorebarDismissed === true && !(await read('get_document', { includeEvaluation: true })).evaluation.visible, 'Score visibility hidden');
     await edit('set_app_view', { scorebarVisible: true });
@@ -327,6 +408,7 @@ try {
     assert((await info()).view === 'list', 'Essay closed');
     assert((await read('list_essays', { query: 'All tools renamed' })).total === 1, 'Saved essay searchable');
     await read('open_essay', { essayId });
+    await read('list_board_pages');
     assert((await read('get_board')).total === boardCount, 'Board durable reopen');
     const deletedId = essayId;
     await edit('delete_essay', { confirm: true });
@@ -336,7 +418,7 @@ try {
     assert(reopen.r.isError, 'Deleted essay cannot reopen');
     const missing = tools.filter(t => !coverage.has(t.name)).map(t => t.name);
     assert(missing.length === 0, 'Every advertised tool has a successful call');
-    const report = { status: errors.length ? 'failed' : 'passed', native: true, appVersion, binarySha256, transport: 'MCP stdio -> authenticated Unix socket -> installed Tauri app -> native editors', provider: 'fixture JSON-lines sidecar, no SDK/model inference', fixtureHash, fixtureProcessVerified: true, tools: tools.map(t => ({ name: t.name, successfulCalls: coverage.get(t.name) ?? 0, providerSimulation: ['start_review', 'start_interrogation', 'get_review_job', 'cancel_review_job', 'apply_review_results'].includes(t.name) })), checks, calls, errors, fixtureAudit: await auditLines(), remainingLimits: ['Actual model access and review quality were not tested', 'Panel and score visibility state observed through MCP; pixels not compared', 'Native board grouping and page management are not yet exposed', 'SVG/HTML import is deliberately rejected; separate title undo history is not exposed'], dataDir: data };
+    const report = { status: errors.length ? 'failed' : 'passed', native: true, appVersion, binarySha256, transport: 'MCP stdio -> authenticated Unix socket -> installed Tauri app -> native editors', provider: 'fixture JSON-lines sidecar, no SDK/model inference', fixtureHash, fixtureProcessVerified: true, tools: tools.map(t => ({ name: t.name, successfulCalls: coverage.get(t.name) ?? 0, providerSimulation: ['start_review', 'start_interrogation', 'get_review_job', 'cancel_review_job', 'apply_review_results'].includes(t.name) })), checks, calls, errors, fixtureAudit: await auditLines(), remainingLimits: ['Actual model access and review quality were not tested', 'Panel and score visibility state observed through MCP; pixels not compared', 'SVG import supports static vectors; active content and HTML are deliberately rejected', 'Claude Desktop connection still requires verification in its authenticated client'], dataDir: data };
     await writeFile(outputs + '/essay-studio-all-tools-native.json', JSON.stringify(report, null, 2));
     console.log(JSON.stringify({ status: report.status, toolCount: tools.length, covered: coverage.size, checks: checks.length, errors, dataDir: data }));
     if (errors.length)

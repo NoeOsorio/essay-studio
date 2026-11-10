@@ -9,7 +9,7 @@ import { validateRichContent, validateFormatting, applyFormatting, nativeDocumen
 import { readEvaluation } from "./evaluation";
 
 let liveDocument: { editor: Editor; essayId: string } | null = null;
-let titleInput: { essayId: string; replace: (title: string) => boolean } | null = null;
+let titleInput: { essayId: string; replace: (title: string) => boolean; editor?: Editor } | null = null;
 const blockIds = new WeakMap<ProseMirrorNode, string>();
 
 /** The instance, rather than a saved JSON copy, is the editable document. */
@@ -44,10 +44,50 @@ export function registerDocument(editor: Editor, essayId: string): () => void {
   };
 }
 
-export function registerTitleInput(essayId: string, replace: (title: string) => boolean): () => void {
-  const registration = { essayId, replace };
+export function registerTitleInput(essayId: string, replace: (title: string) => boolean, editor?: Editor): () => void {
+  const registration = { essayId, replace, editor };
   titleInput = registration;
   return () => { if (titleInput === registration) titleInput = null; };
+}
+
+export function getTitleEditor(essayId: string): Editor {
+  const editor = titleInput?.essayId === essayId ? titleInput.editor : undefined;
+  if (useStore.getState().current?.id !== essayId || !editor || editor.isDestroyed) {
+    throw new ToolError("EDITOR_NOT_READY", "The requested essay's title is not ready.");
+  }
+  return editor;
+}
+
+export async function ensureTitle(essayId: string): Promise<Editor> {
+  const deadline = performance.now() + 2000;
+  while (performance.now() < deadline) {
+    if (useStore.getState().current?.id !== essayId) throw new ToolError("ESSAY_CHANGED", "The open essay changed.");
+    try { return getTitleEditor(essayId); } catch (err) {
+      if (!(err instanceof ToolError) || err.code !== "EDITOR_NOT_READY") throw err;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 16));
+  }
+  throw new ToolError("EDITOR_NOT_READY", "The requested essay's title did not mount.");
+}
+
+export function isTitleInputFocused(essayId: string): boolean {
+  const editor = titleInput?.essayId === essayId ? titleInput.editor : undefined;
+  return !!editor && !editor.isDestroyed && editor.view.dom.contains(document.activeElement);
+}
+
+export function readTitleHistory(essayId: string): JsonObject {
+  const editor = getTitleEditor(essayId);
+  return { canUndo: editor.can().undo(), canRedo: editor.can().redo() };
+}
+
+export function applyTitleHistory(essayId: string, direction: "undo" | "redo"): JsonObject {
+  const editor = getTitleEditor(essayId);
+  if (editor.view.composing || !editor.isEditable) throw new ToolError("EDITOR_BUSY", "Finish the title input composition before editing.");
+  const changed = editor.commands[direction]();
+  if (changed && useStore.getState().current?.title !== editor.state.doc.textContent) {
+    useStore.getState().updateTitle(editor.state.doc.textContent);
+  }
+  return { changed, title: editor.state.doc.textContent, ...readTitleHistory(essayId) };
 }
 
 export function getDocumentEditor(essayId: string): Editor {
@@ -182,11 +222,12 @@ export function validateDocumentEdit(args: JsonObject): void {
   const editor = getDocumentEditor(args.essayId as string);
   if (editor.view.composing) throw new ToolError("EDITOR_BUSY", "Finish the current input composition before editing.");
   if (args.operation === "rename") {
-    if (typeof args.title !== "string" || args.title.includes("\n") || args.title.includes("\r")
+    if (typeof args.title !== "string" || /[\r\n\u2028\u2029]/u.test(args.title)
       || args.text !== undefined || args.from !== undefined || args.to !== undefined || args.content !== undefined || args.formatting !== undefined) {
       throw new ToolError("INVALID_ARGUMENTS", "Rename requires a single-line title and no text range.");
     }
-    if (titleInput?.essayId !== args.essayId) throw new ToolError("EDITOR_NOT_READY", "The essay title is not ready.");
+    const titleEditor = getTitleEditor(args.essayId as string);
+    if (titleEditor.view.composing || !titleEditor.isEditable) throw new ToolError("EDITOR_BUSY", "Finish the title input composition before editing.");
     return;
   }
   const insertion = args.operation === "insert" || args.operation === "rich_insert";
@@ -214,6 +255,12 @@ export function validateDocumentEdit(args: JsonObject): void {
 
 export function validateDocumentTool(name: string, args: JsonObject): void {
   if (name === "edit_document") return validateDocumentEdit(args);
+  if (name === "editor_history" && args.surface === "title") {
+    const editor = getTitleEditor(args.essayId as string);
+    if (editor.view.composing || !editor.isEditable) throw new ToolError("EDITOR_BUSY", "Finish the title input composition before editing.");
+    if (args.direction !== "undo" && args.direction !== "redo") throw new ToolError("INVALID_ARGUMENTS", "Choose undo or redo.");
+    return;
+  }
   const editor = getDocumentEditor(args.essayId as string);
   if (editor.view.composing) throw new ToolError("EDITOR_BUSY", "Finish the current input composition first.");
   if (name === "set_text_selection") {
@@ -231,6 +278,7 @@ export function validateDocumentTool(name: string, args: JsonObject): void {
 export function handleDocumentTool(name: string, args: JsonObject): JsonObject {
   validateDocumentTool(name, args);
   if (name === "edit_document") return editDocument(args);
+  if (name === "editor_history" && args.surface === "title") return applyTitleHistory(args.essayId as string, args.direction as "undo" | "redo");
   const editor = getDocumentEditor(args.essayId as string);
   if (name === "set_text_selection") {
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, args.from as number, (args.to ?? args.from) as number)).scrollIntoView());

@@ -1,5 +1,12 @@
 # Cambios
 
+## 0.4.0
+
+- Agrupación y páginas nativas del tablero, con conexiones y objetos bloqueados protegidos.
+- Historial independiente del título mediante el editor existente, disponible por MCP y menú nativo.
+- Importación de SVG estático con validación previa y almacenamiento duradero.
+- Capacidades MCP ampliadas sin cambiar el protocolo ni agregar dependencias.
+
 ## 0.3.1
 
 - Prueba nativa reproducible de todas las herramientas MCP con biblioteca temporal y generación simulada.

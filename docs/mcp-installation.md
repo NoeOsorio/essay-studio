@@ -5,7 +5,7 @@ leer ensayos, editar texto y organizar sticky notes. El servidor actual es local
 usa transporte **stdio** y requiere **macOS**. El adaptador y Essay Studio deben
 ejecutarse con el mismo usuario del Mac.
 
-## 1. Preparación común
+## Preparación común
 
 Necesitas:
 
@@ -41,7 +41,7 @@ Conectar el MCP no ejecuta los revisores ni un benchmark. Las respuestas del cli
 de IA y las evaluaciones que solicites después usan las condiciones de sus
 respectivos planes.
 
-## 2. Codex: app y CLI
+## Codex: app y CLI
 
 Registra el servidor con rutas absolutas:
 
@@ -65,7 +65,7 @@ codex mcp remove essay-studio
 
 [Documentación oficial de OpenAI: MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=app).
 
-## 3. Claude Code
+## Claude Code
 
 Usa alcance de usuario para que el servidor esté disponible en tus proyectos:
 
@@ -92,7 +92,7 @@ claude mcp remove --scope user essay-studio
 
 [Documentación oficial de Claude Code: MCP](https://code.claude.com/docs/en/mcp).
 
-## 4. Claude Desktop
+## Claude Desktop
 
 - Abre **Settings → Developer → Edit Config** en Claude Desktop.
 - Localiza `~/Library/Application Support/Claude/claude_desktop_config.json`.
@@ -130,7 +130,7 @@ Para desinstalar la conexión, elimina sólo la entrada `essay-studio` de
 
 [Guía oficial del protocolo: servidores locales en Claude Desktop](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
 
-## 5. Confirmar que funciona
+## Confirmar que funciona
 
 Con Essay Studio abierto, pide al cliente:
 
@@ -151,7 +151,7 @@ El registro en Codex y la conexión nativa se han probado en este proyecto.
 Las instrucciones de Claude Desktop y Claude Code se contrastaron con sus guías
 y la ayuda de la CLI; no implican una instalación o prueba en esos clientes.
 
-## 6. Problemas frecuentes
+## Problemas frecuentes
 
 - **El servidor existe, pero el chat no tiene sus herramientas:** comprueba la
   conexión en ese cliente y vuelve a abrirlo/chat si hace falta. Cada cliente
@@ -171,7 +171,7 @@ y la ayuda de la CLI; no implican una instalación o prueba en esos clientes.
 **Desconectar** en Essay Studio revoca el acceso de todos los clientes de esa
 sesión. Quitar el registro de un cliente no borra ensayos ni notas.
 
-## 7. Claude web y otros equipos
+## Claude web y otros equipos
 
 Esta implementación no ofrece un endpoint HTTP público ni un conector remoto.
 La configuración stdio anterior está destinada a clientes que pueden ejecutar
@@ -179,7 +179,7 @@ el adaptador en el Mac donde está abierta la app. No es una URL para pegar en
 Claude web ni permite conectarse desde otro equipo. Windows/Linux no están
 soportados por el puente actual.
 
-## 8. Desarrollo con datos aislados
+## Desarrollo con datos aislados
 
 Para QA, inicia la app con `ESSAY_STUDIO_DATA_DIR` apuntando a una carpeta
 absoluta desechable. Configura **en el entorno del adaptador**, no como argumento
@@ -196,12 +196,12 @@ privadas.
 
 Actualiza y compila tanto la app como el adaptador. `get_basic_info` devuelve
 `capabilities.capabilityVersion` y la lista de herramientas con su efecto.
-La versión de capacidades debe ser al menos `2` para usar las operaciones nuevas.
+La versión de capacidades debe ser al menos `3` para usar las operaciones nuevas.
 Un cliente que conserva herramientas antiguas debe reconectarse antes de trabajar.
 
 El MCP permite editar objetos y encabezados, conexiones, formato del documento,
 selección y cámara, fuentes, rúbrica, ensayos y versiones. `editor_history` recibe
-`surface: "document"` o `surface: "board"` y `direction: "undo"` o `"redo"`.
+`surface: "document"`, `surface: "board"` o `surface: "title"` y `direction: "undo"` o `"redo"`.
 Los encabezados son objetos de texto; organizar por temas no crea contenedores.
 
 Usa un `operationId` estable, preferiblemente un UUID, para cada acción nueva.
@@ -250,3 +250,16 @@ modelos. El JSON resultante incluye cada herramienta y sus comprobaciones.
 criterios y estado de una evaluación guardada, incluso sin anotaciones. Usa
 `set_app_view` con `scorebarVisible` para controlar su visibilidad; el contexto
 devuelve `activePanel` y `scorebarDismissed`.
+
+`group_nodes` agrupa y desagrupa objetos mediante el historial nativo.
+`list_board_pages` busca páginas y devuelve resultados acotados; `edit_board_page`
+crea, renombra, elimina o mueve objetos conectados a otra página. Eliminar exige
+`confirm: true`, respeta objetos bloqueados y nunca elimina la última página.
+`set_board_page` cambia y guarda la página activa sin invalidar una evaluación.
+El máximo de páginas lo fija tldraw y aparece en la consulta.
+
+La importación acepta `image/svg+xml` para vectores estáticos, texto y referencias
+locales. Rechaza scripts, HTML, eventos, referencias externas, animación, filtros
+y grafos de referencias excesivos antes de guardar. No admite SVG activo ni HTML.
+`get_basic_info.titleHistory` indica si el título está listo y permite deshacer
+o rehacer. El título conserva su propio historial, aislado del cuerpo y las fuentes.
