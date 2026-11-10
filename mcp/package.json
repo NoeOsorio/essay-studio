@@ -1,6 +1,6 @@
 {
   "name": "essay-studio-mcp",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Local live-app MCP adapter for Essay Studio",
@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/mcp/src/server.js",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "verify:native": "node scripts/verify-all-tools.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2"

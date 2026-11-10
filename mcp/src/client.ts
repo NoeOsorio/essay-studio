@@ -6,8 +6,8 @@ import { createConnection, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { MAX_REQUEST_BYTES, PROTOCOL_VERSION, ToolError, validateArgs, type BridgeResponse, type JsonObject } from "../../shared/mcp.js";
 
-// PNG responses have a separate bounded budget; requests remain capped at 2 MiB.
-const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+// Both directions share the existing authenticated frame budget.
+const MAX_RESPONSE_BYTES = MAX_REQUEST_BYTES;
 const RESPONSE_TIMEOUT_MS = 35_000; // native dispatch timeout is 30 seconds
 
 type Descriptor = { socketPath: string; token: string; sessionId: string; protocolVersion: number };

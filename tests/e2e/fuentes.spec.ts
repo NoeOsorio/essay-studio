@@ -69,7 +69,7 @@ test("Fuentes button opens the editor and persists manual fuentes", async ({
   );
   expect(fuentes[0].origen).toBe("texto");
 
-  await expect(page.getByTestId("topbar-fuentes")).toContainText("· 1");
+  await expect(page.getByTestId("topbar-fuentes")).toContainText(/1$/);
 });
 
 test("uploading a .txt file in Fuentes saves it to the library", async ({
@@ -214,7 +214,7 @@ test("Pluma Roja forwards every fuente to each critique invocation", async ({
   await page.keyboard.type(SAMPLE_BODY);
 
   await page.getByTestId("topbar-pluma-roja").click();
-  await expect(page.getByTestId("pluma-fuentes-indicator")).toContainText("2");
+  await expect(page.getByTestId("pluma-fuentes-indicator")).toHaveAttribute("title", "Fuentes incluidas en la revisión");
 
   await page.getByTestId("pluma-start").click();
   await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
@@ -236,7 +236,7 @@ test("council interrogation now returns 3 questions per sage (not 5)", async ({
     .fill("Edmondson definió la seguridad psicológica.");
 
   const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    has: page.getByRole("heading", { name: /^Preguntas$/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
 

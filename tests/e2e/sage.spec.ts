@@ -25,7 +25,7 @@ test("'Interrogar' button opens the overlay in council mode", async ({
   await openNewEssay(page);
   await page.getByRole("button", { name: "Interrogar", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    page.getByRole("heading", { name: /^Preguntas$/i }),
   ).toBeVisible();
 });
 
@@ -38,7 +38,7 @@ test("'Interrogar' auto-shows the board when it was hidden", async ({
 
   await page.getByRole("button", { name: "Interrogar", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    page.getByRole("heading", { name: /^Preguntas$/i }),
   ).toBeVisible();
   await expect(page.locator(".tl-container")).toBeVisible();
 });
@@ -58,7 +58,7 @@ test("council mode (academico default) runs 3 sages and materialises 9 notes on 
     );
 
   const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    has: page.getByRole("heading", { name: /^Preguntas$/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
 
@@ -99,7 +99,7 @@ test("unchecking questions skips them from materialisation and persistence", asy
     .fill("Un texto cualquiera.");
 
   const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
+    has: page.getByRole("heading", { name: /Interrogatorio — Evidencia/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
   await expect(page.locator("input[type=checkbox]")).toHaveCount(3);
@@ -134,7 +134,7 @@ test("clicking a council avatar opens lectura in single mode for that sage", asy
     .click();
 
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Cr.tico/i }),
+    page.getByRole("heading", { name: /Interrogatorio — Argumentación/i }),
   ).toBeVisible();
 
   await page
@@ -142,7 +142,7 @@ test("clicking a council avatar opens lectura in single mode for that sage", asy
     .fill("Texto para disparar el stub.");
 
   const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el Cr.tico/i }),
+    has: page.getByRole("heading", { name: /Interrogatorio — Argumentación/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
 
@@ -167,19 +167,19 @@ test("switching mode and sage tabs updates the overlay header", async ({
 
   // Default = council.
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    page.getByRole("heading", { name: /^Preguntas$/i }),
   ).toBeVisible();
 
   // Switch to single mode.
-  await page.getByRole("tab", { name: "Un sabio" }).click();
+  await page.getByRole("tab", { name: "Un revisor" }).click();
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
+    page.getByRole("heading", { name: /Interrogatorio — Evidencia/i }),
   ).toBeVisible();
 
   // Change sage via the avatar tabs.
-  await page.getByRole("tab", { name: /el Sist.mico/i }).click();
+  await page.getByRole("tab", { name: /^Estructura$/i }).click();
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Sist.mico/i }),
+    page.getByRole("heading", { name: /Interrogatorio — Estructura/i }),
   ).toBeVisible();
 });
 
@@ -239,7 +239,7 @@ test("clicking a sage in the bubble menu opens the overlay prefilled", async ({
     .click();
 
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Sist.mico/i }),
+    page.getByRole("heading", { name: /Interrogatorio — Estructura/i }),
   ).toBeVisible();
   await expect(page.getByPlaceholder(SOURCE_PLACEHOLDER)).toHaveValue(
     new RegExp(selected),
@@ -253,7 +253,7 @@ test("Esc / click outside closes the overlay without saving", async ({
   await page.getByRole("button", { name: "Interrogar", exact: true }).click();
   await page.mouse.click(20, 20);
   await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    page.getByRole("heading", { name: /^Preguntas$/i }),
   ).toHaveCount(0);
 
   const essays = await dumpEssays(page);

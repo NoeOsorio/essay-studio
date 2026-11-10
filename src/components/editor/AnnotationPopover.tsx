@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Editor } from "@tiptap/core";
 
 import { Avatar, type SageKey } from "@/components/ui/Avatar";
+import { editAnnotations } from "@/lib/reviews/actions";
 import { useStore } from "@/lib/store";
 import { ReviewEvidenceDetails } from "@/components/ReviewEvidenceDetails";
 import type { ReviewEvidence, ReviewProvenance } from "@/lib/storage/types";
@@ -22,10 +23,10 @@ type Open = {
 };
 
 const SAGE_NAME: Record<SageKey, string> = {
-  em: "el Empirista",
-  sis: "el Sistémico",
-  pra: "el Práctico",
-  cri: "el Crítico",
+  em: "Evidencia",
+  sis: "Estructura",
+  pra: "Aplicación",
+  cri: "Argumentación",
 };
 
 const SAGE_INITIALS: Record<SageKey, string> = {
@@ -127,23 +128,18 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
   if (!open || !editor) return null;
 
   const dismiss = () => {
-    editor.commands.removeAnnotationById(open.id);
+    const essayId = useStore.getState().current?.id;
+    if (!essayId) return;
+    editAnnotations({ essayId, operation: "discard", ids: [open.id] });
     setOpen(null);
   };
 
   const applyReemplazo = () => {
     if (!open.reemplazo) return;
-    const applied = editor.commands.applyAnnotationReemplazo(
-      open.id,
-      open.reemplazo,
-    );
-    if (!applied) {
-      // Multi-block range — refuse and tell the user.
-      window.alert(
-        "El reemplazo cruza varios bloques (párrafo/heading). Aplicalo manualmente seleccionando el texto y sustituyéndolo.",
-      );
-      return;
-    }
+    const essayId = useStore.getState().current?.id;
+    if (!essayId) return;
+    try { editAnnotations({ essayId, operation: "apply", ids: [open.id] }); }
+    catch { window.alert("No se puede aplicar este reemplazo. Edita el texto directamente."); return; }
     setOpen(null);
   };
 
@@ -171,7 +167,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
           title={SAGE_NAME[open.sage]}
         />
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-2 font-semibold">
-          {SAGE_NAME[open.sage]} · {PASE_LABEL[open.pase] ?? open.pase}
+          {SAGE_NAME[open.sage]}, {PASE_LABEL[open.pase] ?? open.pase}
         </span>
         <span className="ml-auto inline-flex items-center gap-1.5">
           <span

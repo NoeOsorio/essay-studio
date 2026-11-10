@@ -100,7 +100,7 @@ test("toggling a sage on then off updates panes count and persists choice", asyn
     .getByPlaceholder(/Pega aquí un fragmento, o sube un \.txt/)
     .fill("Texto de prueba.");
   const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
+    has: page.getByRole("heading", { name: /^Preguntas$/i }),
   });
   await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
 
