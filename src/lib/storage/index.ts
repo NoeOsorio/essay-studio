@@ -3,10 +3,28 @@
 // filesystem directly.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { Essay, EssayMeta, Snapshot, SnapshotMeta } from "./types";
+import type {
+  Essay,
+  EssayMeta,
+  LibraryEntry,
+  SearchHit,
+  SearchResult,
+  Snapshot,
+  SnapshotMeta,
+} from "./types";
 
 export async function listEssays(): Promise<EssayMeta[]> {
   return invoke<EssayMeta[]>("essay_list");
+}
+
+/** The library list, newest first. Answers from the derived index. */
+export async function loadLibrary(): Promise<LibraryEntry[]> {
+  return invoke<LibraryEntry[]>("library_list");
+}
+
+export async function searchLibrary(query: string): Promise<SearchHit[]> {
+  const out = await invoke<SearchResult>("library_search", { query });
+  return out.hits;
 }
 
 export async function readEssay(id: string): Promise<Essay> {
@@ -41,4 +59,11 @@ export async function appendSnapshot(snapshot: Snapshot): Promise<void> {
   await invoke("history_append", { snapshot });
 }
 
-export type { Essay, EssayMeta, EssayMode } from "./types";
+export type {
+  Essay,
+  EssayMeta,
+  EssayMode,
+  LibraryEntry,
+  SearchHit,
+  Segment,
+} from "./types";

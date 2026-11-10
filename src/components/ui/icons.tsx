@@ -1,4 +1,4 @@
-import type { SVGProps } from "react";
+import type { ReactNode, SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
@@ -123,5 +123,87 @@ export function PanelRightIcon({ active = false, ...p }: IconProps & { active?: 
         <rect x="10" y="3" width="4" height="10" fill="currentColor" stroke="none" />
       ) : null}
     </svg>
+  );
+}
+
+/* ---------------------------------------------------------
+   Agent glyphs. 16 px grid, 1.6 stroke, colored by the caller
+   through `currentColor` (copied from the Paper agent chips).
+   --------------------------------------------------------- */
+type GlyphProps = { size?: number };
+
+function glyph(size: number | undefined, children: ReactNode) {
+  const s = size ?? 16;
+  return (
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: "inline-block", flexShrink: 0 }}
+    >
+      {children}
+    </svg>
+  );
+}
+
+/** Evidencia: magnifier. */
+export function GlyphEvidencia({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <circle cx="7" cy="7" r="4.25" />
+      <path d="M10.2 10.2L13.5 13.5" />
+    </>,
+  );
+}
+
+/** Sistemas: two arrows chasing each other. */
+export function GlyphSistemas({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M12.6 6.2A5 5 0 0 0 3.6 5" />
+      <path d="M3.4 9.8a5 5 0 0 0 9 1.2" />
+      <path d="M3.2 2.6v2.6h2.6M12.8 13.4v-2.6h-2.6" />
+    </>,
+  );
+}
+
+/** Práctica: target. */
+export function GlyphPractica({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="2.2" fill="currentColor" />
+    </>,
+  );
+}
+
+/** Objeciones: opposing arrows. */
+export function GlyphObjeciones({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M2.5 5.5h10M10 3l2.5 2.5L10 8" />
+      <path d="M13.5 10.5h-10M6 8l-2.5 2.5L6 13" />
+    </>,
+  );
+}
+
+/** Tú: pencil. */
+export function GlyphTu({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M3 13l.8-3L10.6 3.2a1.4 1.4 0 0 1 2 0l.2.2a1.4 1.4 0 0 1 0 2L6 12.2z" />
+      <path d="M9.4 4.4l2.2 2.2" />
+    </>,
   );
 }

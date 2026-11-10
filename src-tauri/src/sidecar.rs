@@ -315,7 +315,8 @@ pub async fn spawn(app: AppHandle) -> Result<(), String> {
     let path = match sidecar_path(&app) {
         Some(p) => p,
         None => {
-            let msg = "No encontramos `sage.js` — el consejo no podrá responder. Reconstruí la app con `npm run tauri:build:full`.".to_string();
+            log::error!("sage.js not found; rebuild with `npm run tauri:build:full`");
+            let msg = "No encontramos sus archivos. Vuelve a instalar la app.".to_string();
             set_status(&app, SidecarStatus::Down { message: msg.clone() }).await;
             return Err(msg);
         }
@@ -327,7 +328,7 @@ pub async fn spawn(app: AppHandle) -> Result<(), String> {
     let node = match resolve_node() {
         Some(n) => n,
         None => {
-            let msg = "No encontramos Node.js en esta Mac. El consejo necesita Node 20+ para correr. Instalalo desde nodejs.org (o con Homebrew: `brew install node`) y reabrí la app.".to_string();
+            let msg = "Necesitan Node.js 20 o superior y no lo encontramos en esta Mac. Instálalo desde nodejs.org y abre la app otra vez.".to_string();
             log::error!("node not found in PATH nor well-known locations");
             set_status(&app, SidecarStatus::Down { message: msg.clone() }).await;
             return Err(msg);
@@ -351,10 +352,8 @@ pub async fn spawn(app: AppHandle) -> Result<(), String> {
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let msg = format!(
-                "No pudimos arrancar el consejo con Node en {}. Detalle: {e}",
-                node.display()
-            );
+            log::error!("failed to spawn sidecar with node at {}: {e}", node.display());
+            let msg = "Cierra y vuelve a abrir la app.".to_string();
             set_status(&app, SidecarStatus::Down { message: msg.clone() }).await;
             return Err(msg);
         }
@@ -416,11 +415,11 @@ pub async fn spawn(app: AppHandle) -> Result<(), String> {
         let exit = match child.wait().await {
             Ok(status) => {
                 log::warn!("sage sidecar exited: {status}");
-                format!("El consejo cerró inesperadamente ({status}). Reiniciá la app.")
+                "Cierra y vuelve a abrir la app.".to_string()
             }
             Err(err) => {
                 log::warn!("sage sidecar wait failed: {err}");
-                format!("El consejo se desconectó: {err}. Reiniciá la app.")
+                "Cierra y vuelve a abrir la app.".to_string()
             }
         };
         {
@@ -457,6 +456,18 @@ struct InterrogateRequest<'a> {
 }
 
 #[derive(Debug, Serialize)]
+struct AskRequest<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    sage: &'a str,
+    text: &'a str,
+    question: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
 struct CritiqueRequest<'a> {
     id: &'a str,
     #[serde(rename = "type")]
@@ -474,6 +485,17 @@ struct CritiqueRequest<'a> {
     /// Output language. Optional — sidecar defaults to "es".
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<&'a str>,
+    #[serde(rename = "reviewerProfile", skip_serializing_if = "Option::is_none")]
+    reviewer_profile: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExtractRequest<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    task: &'a str,
+    text: &'a str,
     #[serde(rename = "reviewerProfile", skip_serializing_if = "Option::is_none")]
     reviewer_profile: Option<&'a str>,
 }
@@ -503,6 +525,50 @@ pub async fn sage_interrogate(
         kind: "interrogate",
         sage: &sage,
         text: &text,
+        language: language.as_deref(),
+    };
+    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    line.push('\n');
+
+    let mut stdin_guard = state.stdin.lock().await;
+    let stdin = stdin_guard
+        .as_mut()
+        .ok_or_else(|| "sage sidecar is not running".to_string())?;
+    stdin
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| format!("write to sidecar: {e}"))?;
+    stdin.flush().await.map_err(|e| format!("flush sidecar: {e}"))?;
+
+    Ok(id)
+}
+
+/// Renderer entry point for the writer's own question about one source.
+/// Same validation as `sage_interrogate`; the answer arrives on `complete`.
+#[tauri::command]
+pub async fn sage_ask(
+    state: State<'_, SidecarState>,
+    id: String,
+    sage: String,
+    text: String,
+    question: String,
+    language: Option<String>,
+) -> Result<String, String> {
+    if !matches!(sage.as_str(), "em" | "sis" | "pra" | "cri") {
+        return Err(format!("unknown sage: {sage}"));
+    }
+    if let Some(l) = language.as_deref() {
+        if !matches!(l, "es" | "en") {
+            return Err(format!("unknown language: {l}"));
+        }
+    }
+
+    let payload = AskRequest {
+        id: &id,
+        kind: "ask",
+        sage: &sage,
+        text: &text,
+        question: &question,
         language: language.as_deref(),
     };
     let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
@@ -578,6 +644,44 @@ pub async fn sage_critique(
     Ok(id)
 }
 
+/// Renderer entry point for reading material: one citation or one rubric
+/// proposal out of a source or an assignment. No persona; the sidecar
+/// validates the text length and answers on the shared `sage://event` channel.
+#[tauri::command]
+pub async fn sage_extract(
+    state: State<'_, SidecarState>,
+    id: String,
+    task: String,
+    text: String,
+    reviewer_profile: Option<String>,
+) -> Result<String, String> {
+    if !matches!(task.as_str(), "citation" | "rubric") {
+        return Err(format!("unknown task: {task}"));
+    }
+
+    let payload = ExtractRequest {
+        id: &id,
+        kind: "extract",
+        task: &task,
+        text: &text,
+        reviewer_profile: reviewer_profile.as_deref(),
+    };
+    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    line.push('\n');
+
+    let mut stdin_guard = state.stdin.lock().await;
+    let stdin = stdin_guard
+        .as_mut()
+        .ok_or_else(|| "sage sidecar is not running".to_string())?;
+    stdin
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| format!("write to sidecar: {e}"))?;
+    stdin.flush().await.map_err(|e| format!("flush sidecar: {e}"))?;
+
+    Ok(id)
+}
+
 /// Convenience for the renderer / tests.
 #[tauri::command]
 pub async fn sage_ping(
@@ -585,6 +689,29 @@ pub async fn sage_ping(
     id: String,
 ) -> Result<String, String> {
     let line = format!("{{\"id\":\"{}\",\"type\":\"ping\"}}\n", id);
+    let mut stdin_guard = state.stdin.lock().await;
+    let stdin = stdin_guard
+        .as_mut()
+        .ok_or_else(|| "sage sidecar is not running".to_string())?;
+    stdin
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    stdin.flush().await.map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Cancels an in-flight request. The sidecar aborts it and answers with a
+/// `CANCELLED` error event for that id.
+#[tauri::command]
+pub async fn sage_cancel(
+    state: State<'_, SidecarState>,
+    id: String,
+) -> Result<String, String> {
+    let line = format!(
+        "{}\n",
+        serde_json::json!({ "id": id, "type": "cancel" })
+    );
     let mut stdin_guard = state.stdin.lock().await;
     let stdin = stdin_guard
         .as_mut()

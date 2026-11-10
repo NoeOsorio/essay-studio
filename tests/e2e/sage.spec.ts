@@ -1,208 +1,170 @@
 import { test, expect } from "@playwright/test";
-import { dumpEssays, installTauriStub, openNewEssay } from "./setup";
+import {
+  dumpEssays,
+  installTauriStub,
+  openNewEssay,
+  openSingleAgent,
+  hazmeButton,
+  pickSource,
+} from "./setup";
 
 /**
- * Coverage for the Lectura overlay. Two modes:
- *   - council  → all 4 sages run in parallel (default when launched
- *                from the topbar's main "Interrogar" button)
- *   - single   → one sage at a time (default when launched from a
- *                council avatar or the editor selection bubble)
- *
- * Plus: checkboxes per question (save only the ones you keep), file
- * upload for txt/md, and the existing keyboard/Esc plumbing.
+ * Coverage for Hazme preguntas: the panel (source, agents, Preguntar), the
+ * questions landing on the board as notes, discarding one through the hover
+ * actions, file upload for txt/md, the selection bubble and the usual Esc and
+ * click-outside plumbing.
  */
 
-const SOURCE_PLACEHOLDER =
-  "Pega aquí un fragmento, o sube un .txt / .md desde el botón.";
+const HEADING = "Los agentes te preguntan";
+const NOTES = '.tl-shape[data-shape-type="note"]';
+
+type Entry = { sage: string; preguntas: string[] };
 
 test.beforeEach(async ({ page }) => {
   await installTauriStub(page);
 });
 
-test("'Interrogar' button opens the overlay in council mode", async ({
-  page,
-}) => {
+test("Hazme preguntas opens the panel", async ({ page }) => {
   await openNewEssay(page);
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
-  ).toBeVisible();
+  await hazmeButton(page).click();
+  await expect(page.getByRole("heading", { name: HEADING })).toBeVisible();
 });
 
-test("'Interrogar' auto-shows the board when it was hidden", async ({
+test("Hazme preguntas auto-shows the board when it was hidden", async ({
   page,
 }) => {
   await openNewEssay(page);
-  await page.getByRole("button", { name: /Ocultar tablero/ }).click();
+  await page.getByTestId("topbar-view-editor").click();
   await expect(page.locator(".tl-container")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
-  ).toBeVisible();
+  await hazmeButton(page).click();
+  await expect(page.getByRole("heading", { name: HEADING })).toBeVisible();
   await expect(page.locator(".tl-container")).toBeVisible();
 });
 
-test("council mode (academico default) runs 3 sages and materialises 9 notes on save", async ({
+test("academico default runs 3 agents and lands 9 notes, with 3 entries and no save step", async ({
   page,
 }) => {
-  // Academico defaults to EM/SI/CR (no Práctico). PR can be added by
-  // the user clicking its avatar in the sage selector.
+  // Academico defaults to EM/SI/CR (no Práctica). Práctica can be added by
+  // pressing its tile.
   await openNewEssay(page);
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
+  await hazmeButton(page).click();
+  await pickSource(
+    page,
+    "Edmondson definió la seguridad psicológica como la creencia compartida.",
+  );
+  await page.getByTestId("lectura-interrogar").click();
 
-  await page
-    .getByPlaceholder(SOURCE_PLACEHOLDER)
-    .fill(
-      "Edmondson definió la seguridad psicológica como la creencia compartida.",
-    );
-
-  const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
-  });
-  await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
-
-  // 3 sages (EM/SI/CR) × 3 preguntas = 9 checkboxes in the result panes.
-  await expect(page.locator("input[type=checkbox]")).toHaveCount(9);
-
-  await overlay.getByRole("button", { name: /Guardar seleccionadas/ }).click();
-  await page.waitForTimeout(400);
+  // 3 agents (EM/SI/CR) x 3 questions = 9 notes, with nothing to confirm.
+  await expect(page.locator(NOTES)).toHaveCount(9);
+  await page.waitForTimeout(1200);
 
   const essays = await dumpEssays(page);
   expect(essays.length).toBe(1);
-  const interrogatorios = essays[0].interrogatorios as Array<{
-    sage: string;
-    preguntas: string[];
-  }>;
-  expect(interrogatorios).toHaveLength(3);
-  const sages = interrogatorios.map((i) => i.sage).sort();
-  expect(sages).toEqual(["cri", "em", "sis"]);
-
-  // 9 notes materialised on the board.
-  await expect(
-    page.locator('.tl-shape[data-shape-type="note"]'),
-  ).toHaveCount(9);
+  const entries = essays[0].interrogatorios as Entry[];
+  expect(entries).toHaveLength(3);
+  expect(entries.map((i) => i.sage).sort()).toEqual(["cri", "em", "sis"]);
 });
 
-test("unchecking questions skips them from materialisation and persistence", async ({
+test("discarding one landed note leaves 2 questions kept for that agent", async ({
   page,
 }) => {
   await openNewEssay(page);
-  // Single sage to keep the test focused.
-  await page
-    .getByRole("button", { name: /Interrogar como El Empirista/ })
-    .first()
-    .click();
+  // Single agent to keep the test focused.
+  await openSingleAgent(page, "Evidencia");
+  await pickSource(page, "Un texto cualquiera.");
+  await page.getByTestId("lectura-interrogar").click();
+  await expect(page.locator(NOTES)).toHaveCount(3);
 
-  await page
-    .getByPlaceholder(SOURCE_PLACEHOLDER)
-    .fill("Un texto cualquiera.");
-
-  const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
-  });
-  await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
-  await expect(page.locator("input[type=checkbox]")).toHaveCount(3);
-
-  // Uncheck question 1 (index 0). Keep 2 and 3.
-  const checkboxes = page.locator("input[type=checkbox]");
-  await checkboxes.nth(0).uncheck();
-
-  await overlay.getByRole("button", { name: /Guardar seleccionadas/ }).click();
-  await page.waitForTimeout(300);
+  // Discard the first note through the hover actions.
+  const first = page.locator(NOTES).first();
+  await first.hover();
+  await page.getByTestId("landed-discard").click();
+  await expect(page.locator(NOTES)).toHaveCount(2);
+  await page.waitForTimeout(1200);
 
   const essays = await dumpEssays(page);
-  const entry = (essays[0].interrogatorios as Array<{
-    sage: string;
-    preguntas: string[];
-  }>)[0];
+  const entry = (essays[0].interrogatorios as Entry[])[0];
+  expect(entry.sage).toBe("em");
   expect(entry.preguntas).toHaveLength(2);
-
-  await expect(
-    page.locator('.tl-shape[data-shape-type="note"]'),
-  ).toHaveCount(2);
 });
 
-test("clicking a council avatar opens lectura in single mode for that sage", async ({
-  page,
-}) => {
+test("opening for one agent leaves only that agent on", async ({ page }) => {
   await openNewEssay(page);
 
-  await page
-    .getByRole("button", { name: /Interrogar como El Cr.tico/i })
-    .first()
-    .click();
+  await openSingleAgent(page, "Objeciones");
 
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Cr.tico/i }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: HEADING })).toBeVisible();
+  for (const id of ["em", "sis", "pra"]) {
+    await expect(page.getByTestId(`lectura-sage-toggle-${id}`)).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+  }
+  await expect(page.getByTestId("lectura-sage-toggle-cri")).toHaveAttribute(
+    "data-active",
+    "true",
+  );
 
-  await page
-    .getByPlaceholder(SOURCE_PLACEHOLDER)
-    .fill("Texto para disparar el stub.");
-
-  const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el Cr.tico/i }),
-  });
-  await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
-
-  await expect(page.locator("input[type=checkbox]")).toHaveCount(3);
-
-  await overlay.getByRole("button", { name: /Guardar seleccionadas/ }).click();
-  await page.waitForTimeout(300);
+  await pickSource(page, "Texto para disparar el stub.");
+  await page.getByTestId("lectura-interrogar").click();
+  await expect(page.locator(NOTES)).toHaveCount(3);
+  await page.waitForTimeout(1200);
 
   const essays = await dumpEssays(page);
-  const entry = (essays[0].interrogatorios as Array<{
-    sage: string;
-    preguntas: string[];
-  }>)[0];
-  expect(entry.sage).toBe("cri");
+  const entries = essays[0].interrogatorios as Entry[];
+  expect(entries).toHaveLength(1);
+  expect(entries[0].sage).toBe("cri");
 });
 
-test("switching mode and sage tabs updates the overlay header", async ({
-  page,
-}) => {
+test("pressing a tile turns that agent on or off", async ({ page }) => {
   await openNewEssay(page);
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
+  await hazmeButton(page).click();
 
-  // Default = council.
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
-  ).toBeVisible();
+  // Academico default: Evidencia on, Práctica off.
+  const em = page.getByTestId("lectura-sage-toggle-em");
+  const pra = page.getByTestId("lectura-sage-toggle-pra");
+  await expect(em).toHaveAttribute("data-active", "true");
+  await expect(pra).toHaveAttribute("data-active", "false");
 
-  // Switch to single mode.
-  await page.getByRole("tab", { name: "Un sabio" }).click();
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Empirista/i }),
-  ).toBeVisible();
-
-  // Change sage via the avatar tabs.
-  await page.getByRole("tab", { name: /el Sist.mico/i }).click();
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Sist.mico/i }),
-  ).toBeVisible();
+  await pra.click();
+  await expect(pra).toHaveAttribute("data-active", "true");
+  await em.click();
+  await expect(em).toHaveAttribute("data-active", "false");
+  await expect(page.getByRole("heading", { name: HEADING })).toBeVisible();
 });
 
-test("uploading a .txt file loads its contents into the textarea", async ({
-  page,
-}) => {
+test("uploading a .txt file shows it as a selected row", async ({ page }) => {
   await openNewEssay(page);
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
+  await hazmeButton(page).click();
 
   const fileBody =
     "Edmondson (1999) midió seguridad psicológica con cirujanos. La muestra fue de 51 equipos en un hospital.";
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "fragment.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from(fileBody, "utf-8"),
-    });
+  await pickSource(page, fileBody, "fragment.txt");
 
-  // After upload, the placeholder may switch (uploading also saves
-  // the file as a fuente in the library, which changes the empty-
-  // state text). Match the textarea by role instead.
-  await expect(page.locator("textarea").first()).toHaveValue(fileBody);
+  const row = page.getByTestId("lectura-fuente-chip");
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute("data-active", "true");
+  await expect(row).toContainText("fragment");
+  await expect(page.getByTestId("lectura-interrogar")).toBeEnabled();
+});
+
+test("a file that is not .txt or .md shows a short line on the zone", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  await hazmeButton(page).click();
+
+  await page.getByTestId("lectura-file-input").setInputFiles({
+    name: "foto.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("x"),
+  });
+
+  await expect(page.getByTestId("lectura-zone-notice")).toHaveText(
+    "No puedo leer este formato",
+  );
+  await expect(page.getByTestId("lectura-fuente-chip")).toHaveCount(0);
 });
 
 test("selecting text in the editor shows the sage bubble menu", async ({
@@ -217,13 +179,13 @@ test("selecting text in the editor shows the sage bubble menu", async ({
   );
   await page.keyboard.press("ControlOrMeta+A");
 
-  await expect(page.getByText("Interrogar", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preguntas", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Interrogar como El Empirista/ }).last(),
+    page.getByRole("button", { name: /Recibir preguntas de Evidencia/ }).last(),
   ).toBeVisible();
 });
 
-test("clicking a sage in the bubble menu opens the overlay prefilled", async ({
+test("clicking an agent in the bubble menu opens the panel with the selection and only that agent", async ({
   page,
 }) => {
   await openNewEssay(page);
@@ -235,26 +197,39 @@ test("clicking a sage in the bubble menu opens the overlay prefilled", async ({
 
   const bubble = page.getByTestId("sage-selection-menu");
   await bubble
-    .getByRole("button", { name: /Interrogar como El Sist.mico/ })
+    .getByRole("button", { name: /Recibir preguntas de Sistemas/ })
     .click();
 
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el Sist.mico/i }),
-  ).toBeVisible();
-  await expect(page.getByPlaceholder(SOURCE_PLACEHOLDER)).toHaveValue(
-    new RegExp(selected),
+  await expect(page.getByRole("heading", { name: HEADING })).toBeVisible();
+  const row = page.getByTestId("lectura-selection-row");
+  await expect(row).toBeVisible();
+  await expect(row).toContainText(selected);
+  await expect(row).toHaveAttribute("data-active", "true");
+  for (const id of ["em", "pra", "cri"]) {
+    await expect(page.getByTestId(`lectura-sage-toggle-${id}`)).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+  }
+  await expect(page.getByTestId("lectura-sage-toggle-sis")).toHaveAttribute(
+    "data-active",
+    "true",
   );
+  await expect(page.getByTestId("lectura-interrogar")).toBeEnabled();
 });
 
-test("Esc / click outside closes the overlay without saving", async ({
+test("Esc / click outside closes the panel without saving", async ({
   page,
 }) => {
   await openNewEssay(page);
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
+  await hazmeButton(page).click();
   await page.mouse.click(20, 20);
-  await expect(
-    page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: HEADING })).toHaveCount(0);
+
+  await hazmeButton(page).click();
+  await expect(page.getByRole("heading", { name: HEADING })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: HEADING })).toHaveCount(0);
 
   const essays = await dumpEssays(page);
   if (essays.length > 0) {

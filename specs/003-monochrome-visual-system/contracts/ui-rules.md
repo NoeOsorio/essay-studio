@@ -18,5 +18,7 @@ rule N as RN (R1 to R11).
 8. No dollar cost rendered in Interrogar or Evaluar panes.
 9. Spanish copy uses tú; no vos verb forms (Picá, Instalalo, reabrí, Reiniciá, etc.).
 10. Every `data-testid` stays unchanged.
+12. MANDATORY: no middle dot «·» between words anywhere in user-visible strings, code strings or
+    comments: `grep -rn "·" src src-tauri/src` returns nothing. Use commas, line breaks or columns.
 11. No vendor, model or tool names in user-visible strings (Claude, Anthropic, model ids, Node,
     Homebrew, MCP) except inside the reviewer-model selector options.

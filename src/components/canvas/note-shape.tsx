@@ -1,17 +1,28 @@
 "use client";
 
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Box,
+  Group2d,
   HTMLContainer,
   NoteShapeUtil,
+  Rectangle2d,
   RichTextLabel,
   RichTextSVG,
+  WeakCache,
+  renderHtmlFromRichTextForMeasurement,
   toRichText,
   useEditor,
   useValue,
+  type Editor,
+  type NoteShapeOptions,
+  type TLHandle,
   type TLNoteShape,
   type TLRichText,
 } from "tldraw";
+import { identityOf } from "@/lib/agent-identity";
+import { NOTE_WIDTH, StickyNote, tiltOf } from "@/components/ui/StickyNote";
+import { consumeLanding, isLanding } from "@/lib/canvas/note-motion";
 
 export type PostItAuthor = "tu" | "em" | "sis" | "pra" | "cri";
 export type PostItKind =
@@ -23,94 +34,131 @@ export type PostItKind =
 
 /**
  * Meta we tack onto every note. Notes created before this util landed
- * (or via tldraw's default tools without going through our context
- * panel) won't have meta; we fall back to "TÚ · concepto" so they
- * re-skin gracefully.
+ * (or via tldraw's default tools) won't have it; they render as Tú.
+ * `createdAt` is still stamped but never drawn. `title` is optional plain
+ * text: absent or empty means no title.
  */
 export type PostItMeta = {
   author?: PostItAuthor;
   kind?: PostItKind;
   createdAt?: number;
+  title?: string;
+  /** Saved source a landed question came from. */
+  fuenteId?: string;
 };
 
-const AUTHOR_INITIALS: Record<PostItAuthor, string> = {
-  tu: "TÚ",
-  em: "EM",
-  sis: "SI",
-  pra: "PR",
-  cri: "CR",
-};
+// Paper R2.1: 22 top padding, 16 header, 10 gap, 20 bottom padding; 18 sides.
+const PAD_TOP = 22;
+const PAD_BOTTOM = 20;
+const PAD_SIDE = 18;
+const HEADER = 16;
+const GAP = 10;
+const TITLE_GAP = 2;
+const LINE = 23;
+const FONT_SIZE = 17;
+const TEXT_WIDTH = NOTE_WIDTH - PAD_SIDE * 2;
+/** Room for a title line and a body line, so an empty note does not jump when editing starts. */
+const MIN_HEIGHT = PAD_TOP + HEADER + GAP + LINE + TITLE_GAP + LINE + PAD_BOTTOM;
+const SERIF = "var(--font-serif)";
+const PLACEHOLDER = "#B9B2A3";
+const RING_GAP = "var(--color-board)";
+const RING = "var(--color-selection)";
 
-const KIND_LABEL: Record<PostItKind, string> = {
-  concepto: "CONCEPTO",
-  pregunta: "PREGUNTA",
-  conexion: "CONEXIÓN",
-  cita: "CITA",
-  critica: "CRÍTICA",
-};
+function titleOf(shape: TLNoteShape): string {
+  const title = (shape.meta as PostItMeta).title;
+  return typeof title === "string" ? title : "";
+}
 
-const AUTHOR_THEME: Record<
-  PostItAuthor,
-  { bg: string; ink: string; border: string; accent: string; iniBg: string }
-> = {
-  tu: {
-    bg: "var(--color-paper-2)",
-    ink: "var(--color-ink-1)",
-    border: "var(--color-rule-2)",
-    accent: "var(--color-ink-2)",
-    iniBg: "var(--color-paper-3)",
-  },
-  em: {
-    bg: "var(--color-em-bg)",
-    ink: "var(--color-em-ink)",
-    border: "rgba(176,122,31,0.3)",
-    accent: "var(--color-em)",
-    iniBg: "transparent",
-  },
-  sis: {
-    bg: "var(--color-sis-bg)",
-    ink: "var(--color-sis-ink)",
-    border: "rgba(46,126,114,0.3)",
-    accent: "var(--color-sis)",
-    iniBg: "transparent",
-  },
-  pra: {
-    bg: "var(--color-pra-bg)",
-    ink: "var(--color-pra-ink)",
-    border: "rgba(177,75,54,0.3)",
-    accent: "var(--color-pra)",
-    iniBg: "transparent",
-  },
-  cri: {
-    bg: "var(--color-cri-bg)",
-    ink: "var(--color-cri-ink)",
-    border: "rgba(110,79,168,0.3)",
-    accent: "var(--color-cri)",
-    iniBg: "transparent",
-  },
-};
-
-const HEADER_HEIGHT = 30;
-const NOTE_W = 200;
-const NOTE_H = 200;
+type Measured = { title: number; body: number };
+const measuredCache = new WeakCache<TLNoteShape, Measured>();
 
 /**
- * Override of tldraw's default note. Reuses all the built-in
- * behaviours (drag, resize, snap, inline rich-text editing, native
- * keyboard shortcuts) and only swaps the visual: paper-tone
- * background tinted by the post-it author, vintage tape on top, and
- * a header row with sage initials + kind label + relative timestamp.
- *
- * The author and kind live in `shape.meta`. They're assigned via the
- * NoteContextPanel that appears when a single note is selected, not
- * via a modal — the creation flow stays 100% native (click N, click
- * canvas, type, Esc).
+ * One measure for geometry, indicator and export: header, title and body
+ * heights, and the note height they add up to. Reads the editing state, so
+ * the placeholder title line counts while editing and the geometry that
+ * depends on it is recomputed when editing starts or ends.
+ */
+export function measureNote(editor: Editor, shape: TLNoteShape) {
+  const measured = measuredCache.get(shape, () => {
+    const base = {
+      fontStyle: "normal",
+      fontFamily: SERIF,
+      fontSize: FONT_SIZE,
+      lineHeight: LINE / FONT_SIZE,
+      maxWidth: TEXT_WIDTH,
+      padding: "0px",
+    };
+    const title = titleOf(shape);
+    const titleHeight = title === ""
+      ? 0
+      : Math.max(LINE, editor.textMeasure.measureText(title, { ...base, fontWeight: "600" }).h);
+    const html = renderHtmlFromRichTextForMeasurement(editor, shape.props.richText);
+    const bodyHeight = Math.max(
+      LINE,
+      editor.textMeasure.measureHtml(html, { ...base, fontWeight: "400" }).h,
+    );
+    return { title: titleHeight, body: bodyHeight };
+  });
+  const editing = editor.getEditingShapeId() === shape.id;
+  const title = measured.title > 0 ? measured.title : editing ? LINE : 0;
+  const text = title + (title > 0 ? TITLE_GAP : 0) + measured.body;
+  const height = Math.max(MIN_HEIGHT, PAD_TOP + HEADER + GAP + text + PAD_BOTTOM);
+  return { header: HEADER, title, body: measured.body, height };
+}
+
+/** The tilted outline of a note, in shape space. */
+function tiltedPath(width: number, height: number, degrees: number): Path2D {
+  const a = (degrees * Math.PI) / 180;
+  const cx = width / 2;
+  const cy = height / 2;
+  const corners: [number, number][] = [[0, 0], [width, 0], [width, height], [0, height]];
+  const path = new Path2D();
+  corners.forEach(([x, y], i) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const px = cx + dx * Math.cos(a) - dy * Math.sin(a);
+    const py = cy + dx * Math.sin(a) + dy * Math.cos(a);
+    if (i === 0) path.moveTo(px, py);
+    else path.lineTo(px, py);
+  });
+  path.closePath();
+  return path;
+}
+
+function boldRichText(text: string): TLRichText {
+  return {
+    type: "doc",
+    content: text.split("\n").map((line) => ({
+      type: "paragraph",
+      ...(line === "" ? {} : { content: [{ type: "text", text: line, marks: [{ type: "bold" }] }] }),
+    })),
+  };
+}
+
+/**
+ * Override of tldraw's default note. Reuses its behaviours (drag, snap,
+ * inline rich-text editing) and swaps the visual for the stationery note
+ * drawn by `ui/StickyNote`. Height is measured at read time from the
+ * content, so old notes size correctly with no write and `growY` is never
+ * written. Author, kind, createdAt and title live in `shape.meta`.
  */
 export class PergaminoNoteShapeUtil extends NoteShapeUtil {
+  override options: NoteShapeOptions = {
+    ...this.options,
+    getCustomDisplayValues: () => ({
+      noteWidth: NOTE_WIDTH,
+      noteHeight: MIN_HEIGHT,
+      labelPadding: PAD_SIDE,
+      labelFontFamily: SERIF,
+      labelFontSize: FONT_SIZE,
+      labelLineHeight: LINE / FONT_SIZE,
+      labelHorizontalAlign: "start",
+      labelVerticalAlign: "start",
+    }),
+  };
+
   override getDefaultProps() {
     const base = super.getDefaultProps();
-    // Smaller font + start-anchored text feels more like a Pergamino
-    // post-it than tldraw's default centered sticky.
     return {
       ...base,
       size: "s",
@@ -120,41 +168,114 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
     } as TLNoteShape["props"];
   }
 
+  // tldraw writes growY and fontSizeAdjustment here. Height is derived at
+  // read time instead, so nothing is ever written on create, edit or open.
+  override onBeforeCreate() {
+    return undefined;
+  }
+
+  override onBeforeUpdate() {
+    return undefined;
+  }
+
+  override getGeometry(shape: TLNoteShape) {
+    const { title, body, height } = measureNote(this.editor, shape);
+    const top = PAD_TOP + HEADER + GAP + title + (title > 0 ? TITLE_GAP : 0);
+    return new Group2d({
+      children: [
+        new Rectangle2d({ width: NOTE_WIDTH, height, isFilled: true }),
+        new Rectangle2d({
+          x: PAD_SIDE,
+          y: top,
+          width: TEXT_WIDTH,
+          height: body,
+          isFilled: true,
+          isLabel: true,
+          excludeFromShapeBounds: true,
+        }),
+      ],
+    });
+  }
+
+  // Clone handles are removed on purpose (FR-012); keyboard creation stays.
+  override getHandles(): TLHandle[] {
+    return [];
+  }
+
+  override hideSelectionBoundsFg() {
+    return true;
+  }
+
+  override getIndicatorPath(shape: TLNoteShape): Path2D {
+    // A single selected note draws its own ring in the renderer.
+    if (this.editor.getOnlySelectedShapeId() === shape.id) return new Path2D();
+    const { height } = measureNote(this.editor, shape);
+    if (shape.rotation !== 0) {
+      const plain = new Path2D();
+      plain.rect(0, 0, NOTE_WIDTH, height);
+      return plain;
+    }
+    return tiltedPath(NOTE_WIDTH, height, tiltOf(shape.id));
+  }
+
   override component(shape: TLNoteShape) {
     return <PergaminoNoteRenderer shape={shape} />;
   }
 
-  override toSvg(shape: TLNoteShape) {
-    // Export the same semantic colors/header and body typography as the live
-    // note; the inherited export otherwise turns every author's note yellow.
+  override toSvg(shape: TLNoteShape, ctx: Parameters<NoteShapeUtil["toSvg"]>[1]) {
     const meta = shape.meta as PostItMeta;
-    const author = meta.author ?? "tu";
-    const kind = meta.kind ?? "concepto";
-    const theme = AUTHOR_THEME[author];
+    const id = identityOf(meta.author);
+    const title = titleOf(shape);
     const style = getComputedStyle(document.documentElement);
-    const color = (value: string) => value.startsWith("var(")
-      ? style.getPropertyValue(value.slice(4, -1)).trim() : value;
+    const resolve = (value: string) => {
+      const match = /^var\((--[^),]+)\)$/.exec(value);
+      return match ? style.getPropertyValue(match[1]).trim() || value : value;
+    };
     const serif = style.getPropertyValue("--font-serif").trim() || "serif";
-    const mono = style.getPropertyValue("--font-mono").trim() || "monospace";
-    const height = NOTE_H + shape.props.growY;
-    return <>
-      <rect width={NOTE_W} height={height} rx={8} fill={color(theme.bg)} stroke={color(theme.border)} />
-      <rect x={72} y={0} width={56} height={5} fill="rgba(120,100,60,0.20)" />
-      <circle cx={25} cy={19} r={11} fill={color(theme.iniBg)} stroke={color(theme.accent)} />
-      <text x={25} y={22} textAnchor="middle" fontFamily={mono} fontSize={9} fill={color(theme.accent)}>{AUTHOR_INITIALS[author]}</text>
-      <text x={44} y={22} fontFamily={mono} fontSize={9} letterSpacing="0.14em" fill={color(theme.accent)}>{KIND_LABEL[kind].toUpperCase()}</text>
-      <g transform={`translate(0 ${HEADER_HEIGHT})`}>
-        <RichTextSVG fontSize={14} fontFamily={serif} lineHeight={1.5}
-          textAlign="start" verticalAlign="start" richText={shape.props.richText}
-          labelColor={color(theme.ink)} bounds={new Box(0, 0, NOTE_W, height - HEADER_HEIGHT)}
-          padding={14} showTextOutline={false} />
+    const sans = style.getPropertyValue("--font-sans").trim() || "sans-serif";
+    const { title: titleHeight, body, height } = measureNote(this.editor, shape);
+    const tilt = shape.rotation === 0 ? tiltOf(shape.id) : 0;
+    const filterId = `note-shadow-${shape.id.replace(/:/g, "_")}`;
+    ctx.addExportDef({
+      key: filterId,
+      getElement: () => (
+        <filter id={filterId} x="-20%" y="-20%" width="140%" height="160%">
+          <feDropShadow dx="0" dy="8" stdDeviation="7" floodColor="#3C2D0A" floodOpacity="0.3" />
+        </filter>
+      ),
+    });
+    const textTop = PAD_TOP + HEADER + GAP;
+    const Icon = id.Icon;
+    return (
+      <g transform={`rotate(${tilt} ${NOTE_WIDTH / 2} ${height / 2})`}>
+        <rect width={NOTE_WIDTH} height={height} rx={3} fill={resolve(id.note)} filter={`url(#${filterId})`} />
+        <g transform={`translate(${PAD_SIDE} ${PAD_TOP})`} color={resolve(id.ink)}><Icon size={16} /></g>
+        <text x={PAD_SIDE + 22} y={PAD_TOP + 12} fontFamily={sans} fontSize={12} fontWeight={600} fill={resolve(id.ink)}>{id.name}</text>
+        {title !== "" ? (
+          <RichTextSVG
+            fontSize={FONT_SIZE} fontFamily={serif} lineHeight={LINE / FONT_SIZE}
+            textAlign="start" verticalAlign="start" wrap richText={boldRichText(title)}
+            labelColor={resolve(id.text)} padding={0} showTextOutline={false}
+            bounds={new Box(PAD_SIDE, textTop, TEXT_WIDTH, titleHeight)}
+          />
+        ) : null}
+        <RichTextSVG
+          fontSize={FONT_SIZE} fontFamily={serif} lineHeight={LINE / FONT_SIZE}
+          textAlign="start" verticalAlign="start" wrap richText={shape.props.richText}
+          labelColor={resolve(id.text)} padding={0} showTextOutline={false}
+          bounds={new Box(PAD_SIDE, textTop + (titleHeight > 0 ? titleHeight + TITLE_GAP : 0), TEXT_WIDTH, body)}
+        />
+        <g transform="translate(68 -11) rotate(-4)">
+          <rect width={76} height={22} fill="#FFFDF5" fillOpacity={0.74} />
+        </g>
       </g>
-    </>;
+    );
   }
 }
 
 function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
   const editor = useEditor();
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   const isSelected = useValue(
     "is selected",
@@ -166,155 +287,218 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
     () => editor.getEditingShapeId() === shape.id,
     [editor, shape.id],
   );
+  // Lifted only while a drag moves this note, so arrow-key nudges never animate.
+  const isLifted = useValue(
+    "is lifted",
+    () => editor.isIn("select.translating") && editor.getSelectedShapeIds().includes(shape.id),
+    [editor, shape.id],
+  );
+  // Plays once, on the mount that follows pointer creation. Later mounts
+  // (reopen, board toggle, culling) find the set empty and replay nothing.
+  const [lands] = useState(() => isLanding(shape.id));
+  useEffect(() => {
+    consumeLanding(shape.id);
+  }, [shape.id]);
+  const height = useValue(
+    "note height",
+    () => measureNote(editor, shape).height,
+    [editor, shape],
+  );
 
-  const meta = (shape.meta ?? {}) as PostItMeta;
-  const author = meta.author ?? "tu";
-  const kind = meta.kind ?? "concepto";
-  const createdAt = meta.createdAt;
-  const theme = AUTHOR_THEME[author];
+  const id = identityOf((shape.meta as PostItMeta).author);
+  const title = titleOf(shape);
+  const tilt = shape.rotation === 0 ? tiltOf(shape.id) : 0;
+  const { richText } = shape.props;
+  const bodyVisible = isSelected || isEditing || !richTextIsEmpty(richText);
 
-  const { scale, growY, richText } = shape.props;
-  const w = NOTE_W;
-  const h = NOTE_H + growY;
-
-  const isEmpty = richTextIsEmpty(richText);
+  const bodyKeyDown = (e: KeyboardEvent) => {
+    if (editor.getEditingShapeId() !== shape.id) return;
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      editor.complete();
+      return;
+    }
+    if (e.key !== "ArrowUp" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    const rich = editor.getRichTextEditor();
+    const field = titleRef.current;
+    if (!rich || !field) return;
+    const { selection } = rich.state;
+    // Only from the first line of the body.
+    if (!selection.empty || selection.$from.index(0) !== 0 || !rich.view.endOfTextblock("up")) return;
+    e.preventDefault();
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  };
 
   return (
     <HTMLContainer style={{ pointerEvents: "all" }}>
       <div
+        data-note-wrapper
+        className={lands ? "note-land" : undefined}
         style={{
           position: "relative",
-          width: w * scale,
-          height: h * scale,
-          background: theme.bg,
-          color: theme.ink,
-          border: `1px solid ${theme.border}`,
-          borderRadius: 8,
-          boxShadow:
-            "0 6px 14px rgba(60,40,10,0.10), 0 1px 0 rgba(255,255,255,0.5) inset",
-          overflow: "hidden",
+          width: NOTE_WIDTH,
+          rotate: tilt === 0 ? undefined : `${tilt}deg`,
+          transformOrigin: "50% 50%",
         }}
       >
-        {/* Vintage tape on top */}
+        <div className="note-lift" data-lifted={isLifted}>
         <div
-          aria-hidden
+          aria-hidden="true"
+          className="note-lift-shadow"
           style={{
             position: "absolute",
-            left: "50%",
-            top: -9,
-            transform: "translateX(-50%) rotate(-2deg)",
-            width: 56,
-            height: 14,
-            background: "rgba(120,100,60,0.20)",
-            boxShadow: "0 1px 0 rgba(255,255,255,0.4) inset",
+            inset: 0,
+            borderRadius: 3,
             pointerEvents: "none",
-            zIndex: 2,
+            boxShadow: "#3C2D0A59 0 18px 24px -10px",
           }}
         />
-
-        {/* Header overlay */}
-        <div
-          style={{
-            position: "absolute",
-            top: 8,
-            left: 14,
-            right: 14,
-            height: HEADER_HEIGHT - 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            color: theme.accent,
-            zIndex: 1,
-            pointerEvents: "none",
-          }}
-        >
-          <span
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: "50%",
-              display: "grid",
-              placeItems: "center",
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              fontWeight: 500,
-              border: "1px solid currentColor",
-              color: theme.accent,
-              background: theme.iniBg,
-              flex: "0 0 auto",
-            }}
-          >
-            {AUTHOR_INITIALS[author]}
-          </span>
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              fontWeight: 600,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-            }}
-          >
-            {KIND_LABEL[kind]}
-          </span>
-          {createdAt !== undefined ? (
-            <span
-              style={{
-                marginLeft: "auto",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                color: "var(--color-ink-3)",
-              }}
-            >
-              {relativeTime(createdAt)}
-            </span>
-          ) : null}
+        <StickyNote author={id.id} authorTestId="note-author">
+          <div style={{ display: "flex", flexDirection: "column", gap: TITLE_GAP, minHeight: height - PAD_TOP - HEADER - GAP - PAD_BOTTOM }}>
+            {isEditing ? (
+              <NoteTitleField editor={editor} shape={shape} title={title} fieldRef={titleRef} />
+            ) : title !== "" ? (
+              <div data-testid="note-title" style={{ fontWeight: 600, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                {title}
+              </div>
+            ) : null}
+            {bodyVisible ? (
+              <RichTextLabel
+                shapeId={shape.id}
+                type="note"
+                fontFamily={SERIF}
+                fontSize={FONT_SIZE}
+                lineHeight={LINE / FONT_SIZE}
+                textAlign="start"
+                verticalAlign="start"
+                richText={richText}
+                isSelected={isSelected}
+                labelColor={id.text}
+                wrap
+                padding={0}
+                showTextOutline={false}
+                hasCustomTabBehavior={false}
+                onKeyDown={bodyKeyDown}
+                style={{ position: "relative", inset: "auto", width: "100%", height: "auto" }}
+              />
+            ) : null}
+          </div>
+        </StickyNote>
         </div>
-
-        {/* Rich text body — reuses tldraw's built-in inline editor.
-            The container is absolutely positioned so RichTextLabel
-            gets correct bounds; the header sits above it visually. */}
-        {(isSelected || isEditing || !isEmpty) && (
+        {isSelected ? (
           <div
+            aria-hidden="true"
             style={{
               position: "absolute",
-              top: HEADER_HEIGHT,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 0,
+              inset: 0,
+              borderRadius: 3,
+              pointerEvents: "none",
+              boxShadow: `0 0 0 4px ${RING_GAP}, 0 0 0 6px ${RING}`,
             }}
-          >
-            <RichTextLabel
-              shapeId={shape.id}
-              type="note"
-              fontFamily="var(--font-serif)"
-              fontSize={14}
-              lineHeight={1.5}
-              textAlign="start"
-              verticalAlign="start"
-              richText={richText}
-              isSelected={isSelected}
-              labelColor={theme.ink}
-              wrap={true}
-              padding={14}
-              showTextOutline={false}
-              hasCustomTabBehavior={false}
-              style={
-                scale !== 1
-                  ? {
-                      transform: `scale(${scale})`,
-                      transformOrigin: "top left",
-                      width: w,
-                      height: h - HEADER_HEIGHT,
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        )}
+          />
+        ) : null}
       </div>
     </HTMLContainer>
+  );
+}
+
+/**
+ * The title while editing: a plain textarea controlled by `meta.title`.
+ * Focus makes one history stopping point, so the whole title is one undo
+ * step while every keystroke is saved. The draft keeps the caret steady if
+ * the store updates a frame later; undo and MCP edits flow back in.
+ */
+function NoteTitleField({
+  editor,
+  shape,
+  title,
+  fieldRef,
+}: {
+  editor: Editor;
+  shape: TLNoteShape;
+  title: string;
+  fieldRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  const [draft, setDraft] = useState(title);
+  const [seen, setSeen] = useState(title);
+  if (seen !== title) {
+    setSeen(title);
+    setDraft(title);
+  }
+
+  const push = (value: string) => {
+    setDraft(value);
+    editor.updateShape<TLNoteShape>({ id: shape.id, type: "note", meta: { ...shape.meta, title: value } });
+  };
+  const toBody = () => editor.getRichTextEditor()?.commands.focus("start");
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    e.stopPropagation();
+    const el = e.currentTarget;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) editor.redo();
+      else editor.undo();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      el.blur();
+      editor.complete();
+      return;
+    }
+    const plain = !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey;
+    if (plain && (e.key === "Enter" || e.key === "Tab")) {
+      e.preventDefault();
+      toBody();
+    } else if (plain && e.key === "ArrowDown" && el.selectionStart === el.value.length) {
+      e.preventDefault();
+      toBody();
+    }
+  };
+
+  const text = { fontWeight: 600, whiteSpace: "pre-wrap", overflowWrap: "anywhere" } as const;
+  return (
+    <div style={{ display: "grid" }}>
+      {/* Mirror keeps the field exactly as tall as its text, and shows the placeholder. */}
+      <div
+        aria-hidden="true"
+        style={{ ...text, gridArea: "1 / 1", visibility: draft === "" ? "visible" : "hidden", color: PLACEHOLDER, pointerEvents: "none" }}
+      >
+        {draft === "" ? "Título" : `${draft}\n`}
+      </div>
+      <textarea
+        ref={fieldRef}
+        data-testid="note-title"
+        aria-label="Título"
+        rows={1}
+        value={draft}
+        onChange={(e) => push(e.target.value)}
+        onFocus={() => editor.markHistoryStoppingPoint("note title")}
+        onPointerDown={(e) => {
+          editor.markEventAsHandled(e);
+          e.stopPropagation();
+        }}
+        onKeyDown={onKeyDown}
+        style={{
+          gridArea: "1 / 1",
+          font: "inherit",
+          ...text,
+          color: "inherit",
+          background: "none",
+          border: 0,
+          padding: 0,
+          margin: 0,
+          outline: "none",
+          resize: "none",
+          overflow: "hidden",
+          width: "100%",
+          position: "relative",
+          zIndex: 2,
+          pointerEvents: "all",
+        }}
+      />
+    </div>
   );
 }
 
@@ -328,18 +512,4 @@ function richTextIsEmpty(rt: TLRichText): boolean {
     return true;
   };
   return walk(rt as Node);
-}
-
-function relativeTime(epochMs: number): string {
-  const ms = Date.now() - epochMs;
-  if (Number.isNaN(ms) || ms < 0) return "now";
-  const s = Math.floor(ms / 1000);
-  if (s < 5) return "just now";
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
 }

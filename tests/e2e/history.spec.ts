@@ -48,7 +48,7 @@ test("nuevo ensayo sin historial muestra estado vacío en el overlay", async ({
   await openHistoryViaMenu(page);
   const overlay = page.getByTestId("history-overlay");
   await expect(overlay).toBeVisible();
-  await expect(overlay).toContainText("Aún no hay versiones guardadas");
+  await expect(overlay).toContainText("Todavía no hay versiones");
 });
 
 test("guardar versión manual la añade al panel con kind 'manual'", async ({
@@ -67,9 +67,13 @@ test("guardar versión manual la añade al panel con kind 'manual'", async ({
   await page.getByTestId("history-snapshot-now").click();
   // El panel re-renderea con la nueva fila.
   await expect(page.locator("[data-testid^='history-row-']")).toHaveCount(1);
-  await expect(page.getByTestId("history-overlay")).toContainText("manual");
+  await expect(page.getByTestId("history-overlay")).toContainText("La guardaste tú");
+  await expect(page.locator("[data-testid^='history-row-']").first()).toHaveAttribute(
+    "data-kind",
+    "manual",
+  );
   // Cerramos y volvemos a abrir vía menú — sigue habiendo 1 entrada.
-  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.getByTestId("history-close").click();
   await openHistoryViaMenu(page);
   await expect(page.locator("[data-testid^='history-row-']")).toHaveCount(1);
 });
@@ -89,8 +93,8 @@ test("restaurar una versión vieja reemplaza el editor y agrega before-restore",
   await openHistoryViaMenu(page);
   await page.getByTestId("history-snapshot-now").click();
   await expect(page.locator("[data-testid^='history-row-']")).toHaveCount(1);
-  // Cerrar overlay.
-  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  // Cerrar el panel.
+  await page.getByTestId("history-close").click();
 
   // Cambiar el contenido del editor.
   await page.locator(".tiptap-content").click();
@@ -115,8 +119,7 @@ test("restaurar una versión vieja reemplaza el editor y agrega before-restore",
     "Cambios posteriores",
   );
 
-  // Restaurar — primero pide confirm.
-  await page.getByTestId("history-restore-ask").click();
+  // Restaurar es un solo clic en la barra de la vista previa.
   await page.getByTestId("history-restore-confirm").click();
 
   // El overlay se cierra, el editor vuelve al texto original.
@@ -131,12 +134,12 @@ test("restaurar una versión vieja reemplaza el editor y agrega before-restore",
   // Reabriendo el historial: ahora hay 3 entradas (v1, v2, before-restore).
   await openHistoryViaMenu(page);
   await expect(page.locator("[data-testid^='history-row-']")).toHaveCount(3);
-  await expect(page.getByTestId("history-overlay")).toContainText(
-    "antes de restaurar",
-  );
+  await expect(
+    page.locator("[data-testid^='history-row-'][data-kind='before-restore']"),
+  ).toHaveCount(1);
 });
 
-test("abrir el panel con history pre-existente auto-carga la versión más reciente (no flash de error)", async ({
+test("elegir una versión muestra su texto en la hoja sin flash de error, y Volver a la actual la quita", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
@@ -152,16 +155,23 @@ test("abrir el panel con history pre-existente auto-carga la versión más recie
   // Cerrar el overlay y reabrirlo desde cero — el bug que Noé encontró
   // era que se mostraba 'No se pudo leer esta versión' al reabrir,
   // porque seleccionábamos la primera fila pero no cargábamos preview.
-  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.getByTestId("history-close").click();
   await openHistoryViaMenu(page);
 
-  // El estado de error NUNCA debe aparecer cuando hay history válido.
-  await expect(
-    page.getByTestId("history-overlay"),
-  ).not.toContainText("No se pudo leer");
-  // Y el preview de la versión más reciente debe haberse cargado con
-  // su texto (auto-load on mount).
+  // Al abrir se ve el texto actual: no hay vista previa hasta elegir.
+  await expect(page.getByTestId("history-preview")).toHaveCount(0);
+  await page.locator("[data-testid^='history-row-']").first().click();
+  await expect(page.getByTestId("history-overlay")).not.toContainText(
+    "No se pudo",
+  );
   await expect(page.getByTestId("history-preview-text")).toContainText(
+    "Contenido inicial del ensayo.",
+  );
+  // La hoja de abajo sigue viva y sin tocar mientras se ve la vista previa.
+  await expect(page.getByTestId("history-preview")).toBeVisible();
+  await page.getByTestId("history-preview-back").click();
+  await expect(page.getByTestId("history-preview")).toHaveCount(0);
+  await expect(page.locator(".tiptap-content")).toContainText(
     "Contenido inicial del ensayo.",
   );
 });
@@ -173,7 +183,7 @@ test("cerrar el ensayo añade un snapshot kind='close'", async ({ page }) => {
   await page.waitForTimeout(900);
 
   // Cerrar el ensayo via el botón breadcrumb "ensayos".
-  await page.getByText(/^ensayos$/).click();
+  await page.getByTestId("topbar-back").click();
 
   // Volver a abrir el mismo ensayo desde la lista. La lista usa
   // `getByRole("heading")` con el título del ensayo — no hay testids
@@ -185,5 +195,8 @@ test("cerrar el ensayo añade un snapshot kind='close'", async ({ page }) => {
 
   await openHistoryViaMenu(page);
   await expect(page.locator("[data-testid^='history-row-']")).toHaveCount(1);
-  await expect(page.getByTestId("history-overlay")).toContainText("al cerrar");
+  await expect(page.locator("[data-testid^='history-row-']").first()).toHaveAttribute(
+    "data-kind",
+    "close",
+  );
 });

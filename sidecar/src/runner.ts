@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { query, type AccountInfo, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { buildCritiquePrompt, buildInterrogationPrompt, loadSagePrompt } from "./prompts.js";
+import { buildExtractPrompt, extractSystemPrompt } from "./extract-prompts.js";
+import { buildAskPrompt, buildCritiquePrompt, buildInterrogationPrompt, loadSagePrompt } from "./prompts.js";
 import { getReviewerProfile } from "./model-profiles.js";
 import { assertReviewRequest, type ReviewRequest, type ReviewProvenance } from "./review-contract.js";
 
@@ -25,16 +26,34 @@ async function sdkVersion(): Promise<string> {
   return value.version;
 }
 
+function sourceHashesOf(req: ReviewRequest): ReviewProvenance["sourceHashes"] {
+  switch (req.type) {
+    case "critique": return (req.fuentes ?? []).map((source) => ({ sourceId: source.id, sha256: sha256(source.contenido) }));
+    case "interrogate":
+    case "ask":
+    case "extract": return [];
+    default: { const unreachable: never = req; throw new Error(`Unknown request type: ${String(unreachable)}`); }
+  }
+}
+
 /** Safe dry preparation: reads only local prompt/package files, never initializes the SDK. */
 export async function prepareReview(req: ReviewRequest) {
   assertReviewRequest(req);
   const profile = getReviewerProfile(req.reviewerProfile);
-  const userPrompt = req.type === "critique" ? buildCritiquePrompt(req) : buildInterrogationPrompt(req);
-  const systemPrompt = await loadSagePrompt(req.sage);
+  let userPrompt: string;
+  switch (req.type) {
+    case "critique": userPrompt = buildCritiquePrompt(req); break;
+    case "interrogate": userPrompt = buildInterrogationPrompt(req); break;
+    case "ask": userPrompt = buildAskPrompt(req); break;
+    case "extract": userPrompt = buildExtractPrompt(req); break;
+    default: { const unreachable: never = req; throw new Error(`Unknown request type: ${String(unreachable)}`); }
+  }
+  // Extraction has no persona: a fixed prompt per task, never a sage file.
+  const systemPrompt = req.type === "extract" ? extractSystemPrompt(req.task) : await loadSagePrompt(req.sage);
   const provenance: ReviewProvenance = {
     profileId: profile.id, ...(profile.model ? { requestedModel: profile.model } : {}),
     sdkVersion: await sdkVersion(), promptHash: sha256(JSON.stringify({ systemPrompt, userPrompt })),
-    sourceHashes: req.type === "critique" ? (req.fuentes ?? []).map((source) => ({ sourceId: source.id, sha256: sha256(source.contenido) })) : [],
+    sourceHashes: sourceHashesOf(req),
     startedAt: new Date().toISOString(), tools: [], settingSources: [],
   };
   return { userPrompt, systemPrompt, provenance, optionsSummary: {
@@ -157,7 +176,11 @@ export async function runReview(req: ReviewRequest, config: RunReviewOptions = {
         completed = true;
       }
     }
-    if (!completed) throw new ReviewRunError("INCOMPLETE_REVIEW", "Reviewer ended without a successful completion event.");
+    if (!completed) {
+      if (config.signal?.aborted) throw new ReviewRunError("CANCELLED", "Review was cancelled.", { costUsd, usage, modelUsage, provenance });
+      if (timedOut) throw new ReviewRunError("TIMEOUT", "Review timed out; no complete evaluation was recorded.", { costUsd, usage, modelUsage, provenance });
+      throw new ReviewRunError("INCOMPLETE_REVIEW", "Reviewer ended without a successful completion event.");
+    }
     return { result: result.trim(), costUsd, usage, modelUsage, provenance };
   } catch (error) {
     controller.abort();

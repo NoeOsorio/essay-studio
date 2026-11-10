@@ -1,345 +1,266 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { IconButton } from "@/components/ui/IconButton";
-import { ChevronLeft, MoreHorizontal, PanelRightIcon } from "@/components/ui/icons";
-import { CouncilAvatars } from "@/components/council/CouncilAvatars";
+// Window toolbar (Paper R2.1). Six controls in one row: back to Ensayos,
+// saved icon, view switch, Hazme preguntas, Revisar ensayo and Más, with the
+// score stamp (spec 005) between Hazme preguntas and Revisar ensayo.
+// Traffic lights sit inside the bar (overlay title bar), so the left inset
+// clears them and the empty space drags the window.
+
+import { useState, type MouseEvent } from "react";
+import { Tooltip } from "@/components/ui/Tooltip";
+import { useRegisterAnchor } from "@/components/ui/useAnchor";
+import { ScoreStamp } from "@/components/review/ScoreStamp";
+import { MorePanel } from "@/components/toolbar/MorePanel";
+import {
+  BackChevron,
+  CheckMark,
+  CloudDirty,
+  CloudError,
+  CloudSaved,
+  MoreDots,
+  NotesStack,
+  Spinner,
+  ViewBoard,
+  ViewEssay,
+} from "@/components/toolbar/toolbar-icons";
 import { useStore } from "@/lib/store";
-import { FEATURES } from "@/lib/features";
-import type { EssayLanguage, EssayMode } from "@/lib/storage/types";
+import { boardHasNotes } from "@/lib/board-empty";
+
+/** Width the native traffic lights need, plus the gap Paper leaves after them. */
+const LIGHTS_INSET = "pl-[90px]";
+
+/**
+ * Spec 004 T044: Hazme preguntas hides only while the board is open and empty,
+ * because the empty board carries its own call to action (`board-empty-cta`).
+ * With the board closed, or once it has notes, it stays here.
+ */
+const HIDE_HAZME_ON_EMPTY_BOARD = true;
+
+function groupThousands(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
 
 export function Topbar() {
   const view = useStore((s) => s.view);
-  const current = useStore((s) => s.current);
-  const closeEssay = useStore((s) => s.closeEssay);
-  const updateMode = useStore((s) => s.updateMode);
-  const updateLanguage = useStore((s) => s.updateLanguage);
+  // The list view draws its own bar (library/LibraryBar).
+  if (view === "list") return null;
+  return <EditorBar />;
+}
 
-  if (view === "list") {
+function EditorBar() {
+  const closeEssay = useStore((s) => s.closeEssay);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreInstant, setMoreInstant] = useState(false);
+  const moreRef = useRegisterAnchor("mas");
+
+  return (
+    <div
+      data-tauri-drag-region
+      className={`flex items-center justify-between flex-none h-[56px] bg-paper pr-[16px] ${LIGHTS_INSET}`}
+    >
+      <div data-tauri-drag-region className="flex items-center gap-[8px] min-w-0">
+        <Tooltip label="Volver a Ensayos" shortcut="⌘W">
+          <button
+            type="button"
+            data-testid="topbar-back"
+            onClick={() => void closeEssay()}
+            className="flex items-center gap-[6px] h-[32px] pl-[8px] pr-[12px] rounded-[10px] bg-shade press cursor-pointer whitespace-nowrap"
+          >
+            <BackChevron />
+            <span className="font-sans text-[13px] font-medium leading-[16px] text-ink-1">Ensayos</span>
+          </button>
+        </Tooltip>
+      </div>
+
+      <div data-tauri-drag-region className="flex items-center gap-[8px] flex-none">
+        <SaveIcon />
+        <ViewSwitch />
+        <HazmeButton />
+        <ScoreStamp />
+        <ReviewButton />
+        <Tooltip label="Ajustes, fuentes, rúbrica, historial">
+          <button
+            ref={moreRef}
+            type="button"
+            aria-label="Más"
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            data-testid="topbar-more"
+            onClick={(e: MouseEvent) => {
+              setMoreInstant(e.detail === 0);
+              setMoreOpen((v) => !v);
+            }}
+            className={`grid place-items-center h-[34px] w-[34px] rounded-[10px] press cursor-pointer flex-none ${
+              moreOpen ? "bg-shade" : "bg-transparent hover:bg-shade"
+            }`}
+          >
+            <MoreDots />
+          </button>
+        </Tooltip>
+      </div>
+      <MorePanel open={moreOpen} onClose={() => setMoreOpen(false)} instant={moreInstant} />
+    </div>
+  );
+}
+
+function SaveIcon() {
+  const saveStatus = useStore((s) => s.saveStatus);
+  const flush = useStore((s) => s.flush);
+  const words = useStore((s) => s.current?.wordCount ?? 0);
+  const count = `${groupThousands(words)} ${words === 1 ? "palabra" : "palabras"}`;
+
+  if (saveStatus.kind === "error") {
     return (
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-7 py-3.5 bg-paper-2 border-b border-rule-1">
-        <div className="flex items-center gap-2.5">
-          <span className="font-serif italic text-[18px] text-seal">C</span>
-          <span className="font-serif italic text-[15px] text-ink-1">
-            Companion · Essay Studio
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
-          <CouncilAvatars />
-        </div>
-        <div className="flex items-center justify-end gap-2.5">
-          <span className="font-mono text-[11px] text-ink-3 tracking-[0.04em]">
-            v0.2 · Sesión 2
-          </span>
-        </div>
+      <div data-testid="topbar-save" data-state="error" className="flex items-center gap-[8px] flex-none">
+        <CloudError />
+        <span className="font-sans text-[13px] leading-[16px] text-ink-1 whitespace-nowrap">No se guardó</span>
+        <button
+          type="button"
+          onClick={() => void flush()}
+          className="flex items-center h-[30px] px-[12px] rounded-[8px] bg-sheet shadow-[0_0_0_1px_#1D1B181A] font-sans text-[13px] font-medium leading-[16px] text-ink-1 press cursor-pointer whitespace-nowrap"
+        >
+          Reintentar
+        </button>
       </div>
     );
   }
 
+  const state = saveStatus.kind === "idle" ? "saved" : saveStatus.kind;
+  const label =
+    state === "saving" ? "Guardando" : state === "dirty" ? "Cambios por guardar" : "Guardado";
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-5 py-3.5 bg-paper-2 border-b border-rule-1">
-      {/* Left — back, title breadcrumb, save status */}
-      <div className="flex items-center gap-2 min-w-0">
-        <IconButton title="Volver a la lista" onClick={() => void closeEssay()}>
-          <ChevronLeft />
-        </IconButton>
-        <div className="flex items-center font-mono text-[11px] text-ink-3 min-w-0 flex-1">
-          <span
-            className="hover:text-ink-1 cursor-pointer whitespace-nowrap"
-            onClick={() => void closeEssay()}
-          >
-            ensayos
-          </span>
-          <span className="mx-1.5 text-ink-4 flex-none">/</span>
-          <span className="text-ink-1 font-serif italic text-[13px] truncate min-w-0">
-            {current?.title.trim() || "Sin título"}
-          </span>
-        </div>
-        <SaveBadge />
+    <Tooltip label={`${label}, ${count}`}>
+      <div
+        data-testid="topbar-save"
+        data-state={state}
+        role="status"
+        aria-label={`${label}, ${count}`}
+        tabIndex={0}
+        className="grid place-items-center h-[32px] w-[32px] flex-none rounded-[8px] outline-none focus-visible:bg-shade"
+      >
+        {state === "saving" ? <Spinner size={16} /> : state === "dirty" ? <CloudDirty /> : <CloudSaved />}
       </div>
-
-      {/* Center — mode toggle + language toggle + council avatars */}
-      <div className="flex items-center gap-3 flex-none">
-        <div
-          role="tablist"
-          aria-label="Tipo de ensayo"
-          className="inline-flex p-[3px] bg-paper-3 border border-rule-1 rounded-full whitespace-nowrap"
-        >
-          <ModeButton
-            label="Académico"
-            glyph="A"
-            active={current?.mode === "academico"}
-            onClick={() => updateMode("academico")}
-          />
-          <ModeButton
-            label="Blog"
-            glyph="B"
-            active={current?.mode === "blog"}
-            onClick={() => updateMode("blog")}
-          />
-        </div>
-        <LanguageToggle
-          value={current?.language ?? "es"}
-          onChange={updateLanguage}
-        />
-        <CouncilAvatars />
-      </div>
-
-      {/* Right — actions. Future-session features stay in source but
-          gated by `FEATURES.*`. `whitespace-nowrap` on the row prevents
-          any child's text from wrapping under pressure. */}
-      <div className="flex items-center justify-end gap-1.5 min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">
-        <BoardToggle />
-        <FuentesButton />
-        <RubricaButton />
-        <InterrogateButton />
-        {FEATURES.mesaRedonda ? (
-          <Button>
-            <span className="w-[7px] h-[7px] rounded-full bg-sis" />
-            Mesa redonda
-            <span className="kbd ml-1">⌘ R</span>
-          </Button>
-        ) : null}
-        {FEATURES.plumaRoja ? <PlumaRojaButton /> : null}
-        {/* Benchmark vive como Scorebar siempre visible al fondo; no
-            necesita un botón propio en el topbar. */}
-        {FEATURES.topbarMore ? (
-          <IconButton title="Más">
-            <MoreHorizontal />
-          </IconButton>
-        ) : null}
-      </div>
-    </div>
+    </Tooltip>
   );
 }
 
-function InterrogateButton() {
-  const openLectura = useStore((s) => s.openLectura);
-  return (
-    <Button
-      onClick={() => openLectura()}
-      title="Interrogar un texto · el Empirista por defecto"
-    >
-      <span className="w-[7px] h-[7px] rounded-full bg-em" />
-      Interrogar
-    </Button>
-  );
-}
-
-function FuentesButton() {
-  const openFuentes = useStore((s) => s.openFuentes);
-  const count = useStore((s) => s.current?.fuentes?.length ?? 0);
-  return (
-    <button
-      type="button"
-      onClick={openFuentes}
-      title="Biblioteca de fuentes del ensayo"
-      data-testid="topbar-fuentes"
-      className="inline-flex items-center gap-1 h-[28px] px-2.5 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
-    >
-      <span className="font-serif italic text-[14px]">F</span>
-      Fuentes
-      {count > 0 ? (
-        <span className="font-mono text-[10px] tracking-[0.04em] text-ink-3">
-          · {count}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-
-function RubricaButton() {
-  const openRubrica = useStore((s) => s.openRubrica);
-  const count = useStore((s) => s.current?.rubrica?.criterios.length ?? 0);
-  return (
-    <button
-      type="button"
-      onClick={openRubrica}
-      title="Editar la rúbrica de evaluación del ensayo"
-      data-testid="topbar-rubrica"
-      className="inline-flex items-center gap-1 h-[28px] px-2.5 rounded-full border border-rule-1 bg-paper-3 text-ink-2 hover:text-ink-1 hover:bg-paper-2 font-sans text-[12px] cursor-pointer whitespace-nowrap flex-none"
-    >
-      <span className="font-serif italic text-[14px]">R</span>
-      Rúbrica
-      {count > 0 ? (
-        <span className="font-mono text-[10px] tracking-[0.04em] text-ink-3">
-          · {count}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function PlumaRojaButton() {
-  const openPlumaRoja = useStore((s) => s.openPlumaRoja);
-  return (
-    <Button
-      variant="seal"
-      onClick={openPlumaRoja}
-      title="Evaluar — revisión multi-pasada del ensayo completo"
-      data-testid="topbar-pluma-roja"
-    >
-      Evaluar
-    </Button>
-  );
-}
-
-function BoardToggle() {
+function ViewSwitch() {
   const boardOpen = useStore((s) => s.boardOpen);
   const toggleBoard = useStore((s) => s.toggleBoard);
+  const setView = (wantBoard: boolean) => {
+    if (boardOpen !== wantBoard) toggleBoard();
+  };
   return (
-    <IconButton
-      onClick={toggleBoard}
-      title={boardOpen ? "Ocultar tablero" : "Mostrar tablero"}
-      aria-pressed={boardOpen}
-      className={boardOpen ? "bg-paper-3 text-ink-1 border-rule-1" : ""}
-    >
-      <PanelRightIcon active={boardOpen} />
-    </IconButton>
-  );
-}
-
-function LanguageToggle({
-  value,
-  onChange,
-}: {
-  value: EssayLanguage;
-  onChange: (lang: EssayLanguage) => void;
-}) {
-  return (
-    <div
-      role="tablist"
-      aria-label="Idioma del ensayo"
-      className="inline-flex p-[3px] bg-paper-3 border border-rule-1 rounded-full"
-      data-testid="topbar-language"
-    >
-      <LanguagePill
-        label="ES"
-        title="Español — los sabios escriben en español"
-        active={value === "es"}
-        onClick={() => onChange("es")}
-      />
-      <LanguagePill
-        label="EN"
-        title="English — the council writes in English"
-        active={value === "en"}
-        onClick={() => onChange("en")}
-      />
+    <div role="group" aria-label="Vista" className="flex items-center p-[3px] rounded-[10px] bg-shade flex-none">
+      <ViewSegment
+        testId="topbar-view-editor"
+        label="Solo el ensayo"
+        active={!boardOpen}
+        onClick={() => setView(false)}
+      >
+        <ViewEssay color={!boardOpen ? "var(--color-ink-1)" : undefined} />
+      </ViewSegment>
+      <ViewSegment
+        testId="topbar-view-board"
+        label="Ensayo y tablero"
+        active={boardOpen}
+        onClick={() => setView(true)}
+      >
+        <ViewBoard color={boardOpen ? "var(--color-ink-1)" : undefined} />
+      </ViewSegment>
     </div>
   );
 }
 
-function LanguagePill({
+function ViewSegment({
+  children,
   label,
-  title,
   active,
   onClick,
+  testId,
 }: {
+  children: React.ReactNode;
   label: string;
-  title: string;
   active: boolean;
   onClick: () => void;
+  testId: string;
 }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      title={title}
-      onClick={onClick}
-      data-testid={`topbar-language-${label.toLowerCase()}`}
-      data-active={active}
-      className={`h-[26px] px-3 inline-flex items-center rounded-full text-[11px] font-mono uppercase tracking-[0.12em] cursor-pointer transition-all ${
-        active
-          ? "bg-paper text-ink-1 shadow-(--shadow-soft)"
-          : "bg-transparent text-ink-3 hover:text-ink-1"
-      }`}
-    >
-      {label}
-    </button>
+    <Tooltip label={label} shortcut="⌘\">
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={active}
+        data-testid={testId}
+        data-active={active}
+        onClick={onClick}
+        className={`grid place-items-center h-[26px] w-[30px] rounded-[7px] cursor-pointer flex-none ${
+          active ? "bg-sheet shadow-[0_1px_2px_#1D1B181F]" : ""
+        }`}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
-function ModeButton({
-  label,
-  glyph,
-  active,
-  onClick,
-}: {
-  label: string;
-  glyph: string;
-  active: boolean | undefined;
-  onClick: () => void;
-}) {
+function HazmeButton() {
+  const openLectura = useStore((s) => s.openLectura);
+  const boardOpen = useStore((s) => s.boardOpen);
+  const hasNotes = useStore((s) => boardHasNotes(s.current?.board));
+  const ref = useRegisterAnchor("hazme");
+  if (HIDE_HAZME_ON_EMPTY_BOARD && boardOpen && !hasNotes) return null;
   return (
-    <button
-      type="button"
-      role="tab"
-      onClick={onClick}
-      className={`h-[26px] px-3.5 inline-flex items-center gap-1.5 rounded-full text-[12px] font-medium font-sans cursor-pointer transition-all ${
-        active
-          ? "bg-paper text-ink-1 shadow-(--shadow-soft)"
-          : "bg-transparent text-ink-3 hover:text-ink-1"
-      }`}
-    >
-      <span className="font-serif italic font-medium text-[14px]">{glyph}</span>
-      {label}
-    </button>
+    <Tooltip label="Los agentes leen una fuente y te preguntan" shortcut="⌘⇧P">
+      <button
+        ref={ref}
+        type="button"
+        data-testid="topbar-hazme"
+        onClick={(e) => openLectura(undefined, undefined, { instant: e.detail === 0 })}
+        className="flex items-center gap-[8px] h-[34px] pl-[10px] pr-[14px] rounded-[10px] bg-sheet shadow-[0_0_0_1px_#1D1B181A,0_1px_2px_#1D1B180F] press cursor-pointer whitespace-nowrap flex-none"
+      >
+        <NotesStack />
+        <span className="font-sans text-[13px] font-medium leading-[16px] text-ink-1">Hazme preguntas</span>
+      </button>
+    </Tooltip>
   );
 }
 
-/** Badge that reflects real save state from the store. */
-function SaveBadge() {
-  const saveStatus = useStore((s) => s.saveStatus);
-  const flush = useStore((s) => s.flush);
-  // `now` is stored in state and bumped by an interval so the
-  // "guardado · Xs" label stays fresh without calling Date.now()
-  // during render.
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (saveStatus.kind !== "saved") return;
-    const id = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(id);
-  }, [saveStatus.kind]);
-
-  switch (saveStatus.kind) {
-    case "idle":
-      return null;
-    case "dirty":
-      return <Badge tone="neutral">cambios sin guardar</Badge>;
-    case "saving":
-      return <Badge tone="neutral">guardando…</Badge>;
-    case "saved": {
-      const ago = Math.max(0, Math.floor((now - saveStatus.at) / 1000));
-      const label = ago < 5 ? "guardado" : `guardado · ${formatAgo(ago)}`;
-      return <Badge tone="ok">{label}</Badge>;
-    }
-    case "error":
-      return (
-        <button
-          type="button"
-          onClick={() => void flush()}
-          title={saveStatus.message}
-          className="inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-full font-mono text-[11px] font-medium tracking-[0.04em] border bg-[#F5DAD3] text-err border-[rgba(156,44,31,0.30)] cursor-pointer hover:brightness-105"
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-err" />
-          error · reintentar
-        </button>
-      );
-  }
+function ReviewButton() {
+  const openReview = useStore((s) => s.openReview);
+  const ref = useRegisterAnchor("revisar");
+  // Paper: the filled button is the resting call to action (R2.1, R2.4, R2.5).
+  // It yields to a white outlined one while something else holds the writer's
+  // attention: nothing written yet (R2.3), a questions or review panel (R3.1,
+  // R4.1), a run (R3.2), the report card, corrections or a finding (R5.1, R4.2, R2.2).
+  const yielding = useStore(
+    (s) =>
+      (s.current?.wordCount ?? 0) === 0 ||
+      s.overlay === "lectura" ||
+      s.overlay === "review" ||
+      s.reviewSurfaces > 0 ||
+      (s.questionRun !== null && s.questionRun.status !== "ended") ||
+      (s.review !== null && Object.values(s.review.passes).some((p) => p.status === "running")),
+  );
+  return (
+    <Tooltip label="Revisar ensayo" shortcut="⌘⇧E">
+      <button
+        ref={ref}
+        type="button"
+        data-testid="topbar-pluma-roja"
+        data-emphasis={yielding ? "outline" : "filled"}
+        onClick={(e) => openReview({ instant: e.detail === 0 })}
+        className={`flex items-center gap-[8px] h-[34px] pl-[12px] pr-[14px] rounded-[10px] press cursor-pointer whitespace-nowrap flex-none ${
+          yielding
+            ? "bg-sheet shadow-[0_0_0_1px_#1D1B181A,0_1px_2px_#1D1B180F]"
+            : "bg-ink-1 shadow-[inset_0_1px_0_#FFFFFF1F,0_2px_0_#000000,0_3px_8px_#1D1B182E]"
+        }`}
+      >
+        <CheckMark color={yielding ? "#1D1B18" : "#FFFFFF"} />
+        <span className={`font-sans text-[13px] leading-[16px] ${yielding ? "font-medium text-ink-1" : "font-semibold text-white"}`}>
+          Revisar ensayo
+        </span>
+      </button>
+    </Tooltip>
+  );
 }
-
-function formatAgo(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return `${h}h`;
-}
-
-// Re-export types for consumers that may want them
-export type { EssayMode };

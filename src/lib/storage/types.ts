@@ -21,6 +21,12 @@ export type Interrogatorio = {
   generadoEn: string;
   /** Best-effort cost in USD (when reported by the SDK). */
   costoUsd?: number;
+  /** Groups the entries of one run, so the discard window can rebuild them. */
+  runId?: string;
+  /** Saved source the questions came from. Absent for a text selection. */
+  fuenteId?: string;
+  /** The entry holds the writer's own question. */
+  propia?: true;
 };
 
 /**
@@ -51,6 +57,11 @@ export type Criterio = {
 
 export type Rubrica = {
   criterios: Criterio[];
+  /**
+   * The pasted or dropped assignment, kept so the material survives if
+   * the AI is unavailable and a retry needs no new drop. Never sent in a review.
+   */
+  consigna?: { texto: string; archivoNombre?: string; agregadoEn: string };
 };
 
 /**
@@ -76,6 +87,18 @@ export type Fuente = {
   archivoNombre?: string;
   /** ISO 8601 timestamp. */
   agregadoEn: string;
+  /** Authors as printed in the document; each part was checked against the text. */
+  autores?: { apellidos: string; nombres?: string }[];
+  /** Four digits, checked against the text. */
+  anio?: string;
+  publicacion?: {
+    revista?: string; volumen?: string; numero?: string;
+    paginas?: string; editorial?: string; doi?: string;
+  };
+  /** Set when extraction applied: tells "read and something is missing" from "never read". */
+  citaRevisadaEn?: string;
+  /** Only the beginning was sent in the last review. Never stored by the app itself; carried on the wire. */
+  recortada?: boolean;
 };
 
 /**
@@ -98,6 +121,34 @@ export type EvaluacionMeta = {
   pasadasCubiertas: Pase[];
   /** Captured per pass; absent on legacy evaluations. */
   reviewerRuns?: { pase: Pase; provenance?: ReviewProvenance }[];
+  /** What each pass actually read (fingerprint at run start). */
+  fingerprintsByPase?: Partial<Record<Pase, string>>;
+  /** Fingerprints linked by "Usar este texto", so a replacement keeps the review fresh. */
+  appliedFingerprints?: string[];
+  /** The essay as last saved; the library list reads it without the text. */
+  currentFingerprint?: string;
+};
+
+export type FindingStatus = "open" | "resolved" | "not_applicable";
+
+/** Durable record of one review finding. The mark is the authority for
+ *  location; the record is the authority for closure. */
+export type FindingRecord = {
+  id: string;
+  sage: Sage;
+  pase: Pase;
+  severidad: Severidad;
+  cita: string;
+  mensaje: string;
+  reemplazo?: string;
+  criterioId?: string;
+  evidence?: ReviewEvidence[];
+  provenance?: ReviewProvenance;
+  generadoEn: string;
+  status: FindingStatus;
+  closedAt?: string;
+  closedBy?: "check" | "replacement";
+  occurrence?: number;
 };
 
 /**
@@ -165,6 +216,8 @@ export type Essay = {
   /** Snapshot of the last Evaluar run (timestamp + pasadas covered).
    *  Drives the Benchmark's empty / partial / stale states. */
   evaluacionMeta?: EvaluacionMeta;
+  /** Durable review findings; see FindingRecord. */
+  findings?: FindingRecord[];
   /** Language the essay is being written in. Optional for backward
    *  compatibility — when absent, defaults to "es". */
   language?: EssayLanguage;
@@ -184,7 +237,45 @@ export type EssayMeta = Omit<
   | "rubrica"
   | "fuentes"
   | "evaluacionMeta"
+  | "findings"
 >;
+
+/**
+ * What the library index carries so the list can compute the same score
+ * as the editor (specs/007-essay-library/contracts/score-inputs.md).
+ * Marks are annotation marks minus their large attributes.
+ */
+export type ReviewInputs = {
+  marks: { type: string; attrs?: Record<string, unknown> }[];
+  findings?: FindingRecordSlim[];
+  evaluacionMeta?: EvaluacionMeta;
+  rubrica?: Rubrica;
+};
+
+export type FindingRecordSlim = Pick<
+  FindingRecord,
+  "id" | "sage" | "pase" | "severidad" | "criterioId" | "status"
+>;
+
+/** One essay as the library list sees it. Never carries the body. */
+export type LibraryEntry = EssayMeta & {
+  excerpt: string;
+  /** The file's modification time in ms. */
+  fileModifiedMs: number;
+  review?: ReviewInputs;
+};
+
+export type Segment = { text: string; hit: boolean };
+
+export type SearchHit = {
+  id: string;
+  rank: "title" | "body";
+  title: Segment[];
+  /** Only when rank is "body". */
+  snippet?: Segment[];
+};
+
+export type SearchResult = { hits: SearchHit[] };
 
 /**
  * Why we took a snapshot. Decoupling the trigger lets us prune autos

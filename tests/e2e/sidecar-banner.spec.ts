@@ -18,7 +18,7 @@ test("banner is hidden when sidecar status is up (default test stub)", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: /Nuevo académico/i }).click();
+  await page.getByTestId("library-new-academico").click();
   await page
     .getByRole("textbox", { name: "Título del ensayo" })
     .waitFor({ state: "visible" });
@@ -40,7 +40,7 @@ test("banner appears when sage_status returns down at boot", async ({
     ).__E2E_SIDECAR_STATUS__ = {
       state: "down",
       message:
-        "No pudimos arrancar el consejo (¿está `node` en el PATH?). Detalle: ENOENT",
+        "Cierra y vuelve a abrir la app.",
     };
   });
 
@@ -48,16 +48,15 @@ test("banner appears when sage_status returns down at boot", async ({
 
   const banner = page.getByTestId("sidecar-banner");
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText("El consejo no está disponible");
-  await expect(banner).toContainText("node");
-  await expect(banner).toContainText("Detalle: ENOENT");
+  await expect(banner).toContainText("Los agentes no pudieron arrancar.");
+  await expect(banner).toContainText("Cierra y vuelve a abrir la app.");
 });
 
 test("banner reacts live to sage://status events after mount", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: /Nuevo académico/i }).click();
+  await page.getByTestId("library-new-academico").click();
   await page
     .getByRole("textbox", { name: "Título del ensayo" })
     .waitFor({ state: "visible" });
@@ -72,11 +71,11 @@ test("banner reacts live to sage://status events after mount", async ({
     };
     winx.__E2E_DISPATCH("sage://status", {
       state: "down",
-      message: "El consejo cerró inesperadamente (exit 1). Reiniciá la app.",
+      message: "Cierra y vuelve a abrir la app.",
     });
   });
 
   const banner = page.getByTestId("sidecar-banner");
   await expect(banner).toBeVisible({ timeout: 2_000 });
-  await expect(banner).toContainText("cerró inesperadamente");
+  await expect(banner).toContainText("Los agentes no pudieron arrancar.");
 });

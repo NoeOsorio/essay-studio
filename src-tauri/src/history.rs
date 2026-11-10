@@ -280,6 +280,7 @@ mod tests {
             rubrica: None,
             fuentes: None,
             evaluacion_meta: None,
+            findings: None,
             language: None,
             reviewer_profile: None,
             mode: "academico".to_string(),
@@ -306,6 +307,16 @@ mod tests {
         let read = read_in(&dir, "a", "2026-05-30T10:00:00Z").unwrap();
         assert_eq!(read, s);
         assert_eq!(read.essay.title, "v1");
+    }
+
+    #[test]
+    fn snapshot_preserves_findings() {
+        let dir = temp_dir();
+        let mut sn = snap("2026-05-10T10:00:00Z", "manual", "T", 3);
+        sn.essay.findings = Some(json!([{ "id": "f1", "status": "open" }]));
+        append_in(&dir, &sn).unwrap();
+        let read = read_in(&dir, "a", "2026-05-10T10:00:00Z").unwrap();
+        assert_eq!(read.essay.findings, sn.essay.findings);
     }
 
     #[test]

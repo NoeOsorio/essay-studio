@@ -36,6 +36,11 @@ pub struct Essay {
         skip_serializing_if = "Option::is_none"
     )]
     pub evaluacion_meta: Option<serde_json::Value>,
+    /// Durable review findings (open, resolved, not applicable). Opaque
+    /// to Rust; omitted when empty. Must be a field here or a save
+    /// silently drops it (history.rs reuses this struct).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub findings: Option<serde_json::Value>,
     /// Language the user is writing the essay in. Optional for legacy
     /// essays (treated as "es" by the renderer when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,33 +88,22 @@ fn essay_file(dir: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(dir.join(format!("{id}.json")))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn list_in(dir: &Path) -> Result<Vec<EssayMeta>, String> {
     fs::create_dir_all(dir).map_err(|e| format!("create essays dir: {e}"))?;
-    let mut metas: Vec<EssayMeta> = Vec::new();
-
-    let entries = fs::read_dir(dir).map_err(|e| format!("read essays dir: {e}"))?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let raw = match fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if let Ok(essay) = serde_json::from_str::<Essay>(&raw) {
-            metas.push(EssayMeta {
-                id: essay.id,
-                title: essay.title,
-                mode: essay.mode,
-                word_count: essay.word_count,
-                created_at: essay.created_at,
-                updated_at: essay.updated_at,
-            });
-        }
-    }
-    metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(metas)
+    // A scan through the library module with a throwaway index, so these
+    // tests keep exercising the same derivation the app uses.
+    Ok(crate::library::scan_in(dir)?
+        .into_iter()
+        .map(|e| EssayMeta {
+            id: e.id,
+            title: e.title,
+            mode: e.mode,
+            word_count: e.word_count,
+            created_at: e.created_at,
+            updated_at: e.updated_at,
+        })
+        .collect())
 }
 
 pub fn read_in(dir: &Path, id: &str) -> Result<Essay, String> {
@@ -161,9 +155,13 @@ pub(crate) fn essays_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Answers from the library index (same six fields as always), off the
+/// main thread so an agent's `list_essays` never freezes the window.
 #[tauri::command]
-pub fn essay_list(app: AppHandle) -> Result<Vec<EssayMeta>, String> {
-    list_in(&essays_dir(&app)?)
+pub async fn essay_list(app: AppHandle) -> Result<Vec<EssayMeta>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::library::meta_list(&app))
+        .await
+        .map_err(|e| format!("essay_list task: {e}"))?
 }
 
 #[tauri::command]
@@ -182,7 +180,10 @@ pub fn essay_delete(app: AppHandle, id: String) -> Result<(), String> {
     // Wipe the history file alongside the essay so a deleted essay
     // doesn't leak its version history to disk.
     let _ = crate::history::delete_in(&dir, &id);
-    delete_in(&dir, &id)
+    delete_in(&dir, &id)?;
+    // Drop the deleted essay's text from the index right away.
+    crate::library::reconcile_in_background(&app);
+    Ok(())
 }
 
 // --------- Tests ---------
@@ -208,6 +209,7 @@ mod tests {
             rubrica: None,
             fuentes: None,
             evaluacion_meta: None,
+            findings: None,
             language: None,
             reviewer_profile: None,
             mode: "academico".to_string(),
@@ -349,6 +351,27 @@ mod tests {
         write_in(&dir, &essay).unwrap();
         let read = read_in(&dir, "with-eval").unwrap();
         assert_eq!(read.evaluacion_meta, essay.evaluacion_meta);
+    }
+
+    #[test]
+    fn round_trip_preserves_optional_findings() {
+        let dir = make_dir();
+        let mut essay = sample_essay("with-findings", "2026-05-19T20:30:00Z");
+        essay.findings = Some(json!([{
+            "id": "f1", "sage": "sis", "pase": "coherencia", "severidad": "alta",
+            "cita": "x", "mensaje": "m", "generadoEn": "2026-05-19T20:30:00Z",
+            "status": "resolved", "closedAt": "2026-05-19T20:31:00Z", "closedBy": "check"
+        }]));
+        write_in(&dir, &essay).unwrap();
+        let raw = fs::read_to_string(dir.join("with-findings.json")).unwrap();
+        assert!(raw.contains("\"findings\""));
+        let read = read_in(&dir, "with-findings").unwrap();
+        assert_eq!(read.findings, essay.findings);
+        // Omitted when absent.
+        let plain = sample_essay("plain", "2026-05-19T20:30:00Z");
+        write_in(&dir, &plain).unwrap();
+        let raw = fs::read_to_string(dir.join("plain.json")).unwrap();
+        assert!(!raw.contains("findings"));
     }
 
     #[test]

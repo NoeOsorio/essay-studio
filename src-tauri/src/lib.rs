@@ -1,6 +1,8 @@
 mod history;
+mod library;
 mod menu;
 mod mcp;
+mod pdf_text;
 mod sidecar;
 mod storage;
 
@@ -9,6 +11,7 @@ use tauri::Emitter;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .manage(library::LibraryState::default())
     .manage(sidecar::SidecarState::default())
     .manage(mcp::McpState::default())
     .setup(|app| {
@@ -52,12 +55,18 @@ pub fn run() {
       storage::essay_read,
       storage::essay_write,
       storage::essay_delete,
+      library::library_list,
+      library::library_search,
       history::history_list,
       history::history_read,
       history::history_append,
+      pdf_text::pdf_extract_text,
       sidecar::sage_interrogate,
+      sidecar::sage_ask,
       sidecar::sage_critique,
+      sidecar::sage_extract,
       sidecar::sage_ping,
+      sidecar::sage_cancel,
       sidecar::sage_status,
       mcp::mcp_renderer_ready,
       mcp::mcp_status,

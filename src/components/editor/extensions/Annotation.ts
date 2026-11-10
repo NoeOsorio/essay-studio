@@ -1,9 +1,8 @@
 // TipTap mark for Pluma Roja inline annotations.
 //
-// Renders as `<span class="anno anno-XX" data-by="XX" data-anno-id="..."
-// data-pase="..." data-severidad="...">`. The .anno / .anno-em / .anno-sis
-// etc. classes live in globals.css and supply the tinted underline +
-// the circular sage chip.
+// Renders as `<span class="anno" data-by="<agent id>" data-anno-id="..."
+// data-pase="..." data-severidad="...">`. The .anno rules in globals.css,
+// keyed on data-by, draw the per-agent underline.
 //
 // All annotation metadata (sage, pase, severidad, mensaje, reemplazo)
 // is stored as mark attributes so it travels with the TipTap content
@@ -15,9 +14,17 @@
 // El parseHTML acepta ambos para que anotaciones viejas guardadas en
 // docs existentes sigan rindiéndose con el campo poblado; renderHTML
 // sólo escribe el nuevo.
+//
+// Spec 005: `applyAnnotationReemplazo` is one isolated history step
+// (closeHistory before and after). The review's own application, which
+// must not be undoable, is `applyReview`, kept out of history.
 
 import { Mark, mergeAttributes } from "@tiptap/core";
+import { closeHistory } from "@tiptap/pm/history";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { ReviewEvidence, ReviewProvenance } from "@/lib/storage/types";
+import { identityOf } from "@/lib/agent-identity";
 
 export type AnnotationAttrs = {
   evidence?: ReviewEvidence[] | null;
@@ -32,9 +39,20 @@ export type AnnotationAttrs = {
   criterioId: string | null;
 };
 
+// Transient visual effects on underlines (R4.3 draw and erase, R5.4
+// narrowing). They live in a plugin as decorations, never in the document
+// and never saved, and they survive ProseMirror redrawing the spans.
+type Fx = { draw: Set<string>; erase: Set<string>; narrow: string | null };
+type FxPatch = { draw?: string[]; erase?: string[]; narrow?: string | null; clear?: true };
+const fxKey = new PluginKey<Fx>("annotationFx");
+const FX_DRAW_MS = 400;
+const FX_ERASE_MS = 700;
+
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     annotation: {
+      /** Transient underline effects; see the annotationFx plugin. */
+      annotationFx: (patch: FxPatch) => ReturnType;
       /**
        * Add an `annotation` mark over the given doc range. Used by the
        * Pluma Roja apply flow.
@@ -58,23 +76,20 @@ declare module "@tiptap/core" {
       applyAnnotationReemplazo: (id: string, reemplazo: string) => ReturnType;
       /** Strip every annotation mark from the document. */
       clearAllAnnotations: () => ReturnType;
+      /**
+       * A review landing: removes the marks with the given ids and adds
+       * the new ones in one transaction kept out of the undo history, so
+       * ⌘Z still undoes the last keystroke and never strips underlines.
+       * Marks change no positions, so ranges located before the call stay
+       * valid inside it.
+       */
+      applyReview: (args: {
+        remove: string[];
+        add: { from: number; to: number; attrs: AnnotationAttrs }[];
+      }) => ReturnType;
     };
   }
 }
-
-const SAGE_INITIALS: Record<NonNullable<AnnotationAttrs["sage"]>, string> = {
-  em: "EM",
-  sis: "SI",
-  pra: "PR",
-  cri: "CR",
-};
-
-const SAGE_CLASS: Record<NonNullable<AnnotationAttrs["sage"]>, string> = {
-  em: "anno-emp",
-  sis: "anno-sis",
-  pra: "anno-pra",
-  cri: "anno-cri",
-};
 
 function readJsonAttribute(element: HTMLElement, name: string): unknown {
   const raw = element.getAttribute(name);
@@ -167,20 +182,99 @@ export const Annotation = Mark.create({
     const sage = HTMLAttributes["data-sage"] as
       | NonNullable<AnnotationAttrs["sage"]>
       | undefined;
-    const sageClass = sage ? SAGE_CLASS[sage] : "";
-    const initials = sage ? SAGE_INITIALS[sage] : "··";
+    // `data-by` carries the agent id; the underline color is keyed on it
+    // in globals.css. The id comes from the identity module.
+    const by = sage ? identityOf(sage).id : "";
     return [
       "span",
       mergeAttributes(HTMLAttributes, {
-        class: `anno ${sageClass}`.trim(),
-        "data-by": initials,
+        class: "anno",
+        "data-by": by,
       }),
       0,
     ];
   },
 
+  addProseMirrorPlugins() {
+    const markName = this.name;
+    return [
+      new Plugin<Fx>({
+        key: fxKey,
+        state: {
+          init: () => ({ draw: new Set(), erase: new Set(), narrow: null }),
+          apply(tr, value) {
+            const m = tr.getMeta(fxKey) as FxPatch | undefined;
+            if (!m) return value;
+            const next: Fx = { draw: new Set(value.draw), erase: new Set(value.erase), narrow: value.narrow };
+            if (m.clear) {
+              next.draw.clear();
+              next.erase.clear();
+            }
+            m.draw?.forEach((id) => next.draw.add(id));
+            m.erase?.forEach((id) => next.erase.add(id));
+            if (m.narrow !== undefined) next.narrow = m.narrow;
+            return next;
+          },
+        },
+        props: {
+          decorations(state) {
+            const fx = fxKey.getState(state);
+            if (!fx || (fx.draw.size === 0 && fx.erase.size === 0 && fx.narrow === null)) return null;
+            const out: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (!node.isText) return;
+              for (const m of node.marks) {
+                if (m.type.name !== markName) continue;
+                const id = String(m.attrs.id);
+                const to = pos + node.nodeSize;
+                if (fx.draw.has(id)) out.push(Decoration.inline(pos, to, { class: "anno-draw" }));
+                if (fx.erase.has(id)) out.push(Decoration.inline(pos, to, { class: "anno-erase" }));
+                if (fx.narrow !== null && m.attrs.criterioId === fx.narrow) {
+                  out.push(Decoration.inline(pos, to, { "data-narrowed-in": "" }));
+                }
+              }
+            });
+            return DecorationSet.create(state.doc, out);
+          },
+          attributes(state): Record<string, string> {
+            return fxKey.getState(state)?.narrow != null ? { "data-annos-narrowed": "" } : {};
+          },
+        },
+        view() {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          return {
+            update(view) {
+              const fx = fxKey.getState(view.state);
+              if (!fx || timer || (fx.draw.size === 0 && fx.erase.size === 0)) return;
+              timer = setTimeout(
+                () => {
+                  timer = undefined;
+                  view.dispatch(view.state.tr.setMeta(fxKey, { clear: true } satisfies FxPatch).setMeta("addToHistory", false));
+                },
+                fx.erase.size > 0 ? FX_ERASE_MS : FX_DRAW_MS,
+              );
+            },
+            destroy() {
+              if (timer) clearTimeout(timer);
+            },
+          };
+        },
+      }),
+    ];
+  },
+
   addCommands() {
     return {
+      annotationFx:
+        (patch) =>
+        ({ tr, dispatch }) => {
+          if (dispatch) {
+            tr.setMeta(fxKey, patch);
+            tr.setMeta("addToHistory", false);
+            dispatch(tr);
+          }
+          return true;
+        },
       setAnnotation:
         (from, to, attrs) =>
         ({ tr, dispatch, state }) => {
@@ -257,12 +351,43 @@ export const Annotation = Mark.create({
             // Replace the marked range with the new prose. The new
             // text inherits the annotation mark on its left edge, so
             // we explicitly strip the mark afterwards.
+            // One isolated history step: ⌘Z undoes exactly this and
+            // nothing typed before or after merges into it.
+            closeHistory(tr);
             tr.insertText(reemplazo, firstFrom, lastTo);
             tr.removeMark(
               firstFrom,
               firstFrom + reemplazo.length,
               this.type,
             );
+            dispatch(closeHistory(tr));
+          }
+          return true;
+        },
+      applyReview:
+        ({ remove, add }) =>
+        ({ tr, dispatch, state }) => {
+          const ids = new Set(remove);
+          const max = state.doc.content.size;
+          if (dispatch) {
+            if (ids.size > 0) {
+              state.doc.descendants((node, pos) => {
+                for (const m of node.marks) {
+                  if (m.type.name === "annotation" && ids.has(String(m.attrs.id))) {
+                    tr.removeMark(pos, pos + node.nodeSize, m);
+                  }
+                }
+                return true;
+              });
+            }
+            for (const a of add) {
+              if (a.from >= a.to || a.from < 0 || a.to > max) continue;
+              tr.addMark(a.from, a.to, this.type.create(a.attrs));
+            }
+            tr.setMeta("addToHistory", false);
+            // The draw plays once, only for the underlines added here.
+            const drawn = add.map((a) => a.attrs.id).filter((v): v is string => !!v);
+            if (drawn.length > 0) tr.setMeta(fxKey, { draw: drawn } satisfies FxPatch);
             dispatch(tr);
           }
           return true;

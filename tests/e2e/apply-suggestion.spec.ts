@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installTauriStub, openNewEssay } from "./setup";
+import {
+  installTauriStub,
+  openNewEssay,
+  openMore,
+  runReview,
+  openAllCorrections,
+} from "./setup";
 import { parseAnotaciones } from "../../src/lib/agents";
 
 /**
@@ -8,8 +14,8 @@ import { parseAnotaciones } from "../../src/lib/agents";
  * pedagógica del reemplazo literal).
  *
  * Both the inline popover (click an `.anno` in the editor) and the
- * Benchmark drilldown card expose a "Reemplazar" button when the
- * anotación carries a `sugerencia`. Click → the text under the mark
+ * Correcciones card expose "Usar este texto" when the finding carries
+ * a proposed text. Click → the text under the mark
  * is replaced by the sugerencia, the mark is removed, the score
  * recomputes, and the editor remains in a sane state.
  */
@@ -23,7 +29,7 @@ const SAMPLE_BODY = [
 ].join(" ");
 
 async function closeRubrica(page: Page) {
-  await page.getByTestId("rubrica-overlay").getByTitle("Cerrar").click();
+  await page.getByTestId("rubrica-overlay").getByRole("button", { name: "Cerrar" }).click();
   await expect(page.getByTestId("rubrica-overlay")).toHaveCount(0);
 }
 
@@ -31,10 +37,7 @@ async function runEvaluarApply(page: Page) {
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -71,12 +74,12 @@ test("popover: 'Aplicar sugerencia' replaces the text and removes the mark", asy
 
   // Open the popover by clicking the mark.
   await target.click();
-  const popover = page.locator("[data-anno-popover]");
+  const popover = page.getByTestId("annotation-popover");
   await expect(popover).toBeVisible();
-  await expect(page.getByTestId("popover-apply")).toBeVisible();
+  await expect(page.getByTestId("finding-use")).toBeVisible();
 
   // Click "Aplicar sugerencia".
-  await page.getByTestId("popover-apply").click();
+  await page.getByTestId("finding-use").click();
 
   // Popover closes.
   await expect(popover).toHaveCount(0);
@@ -112,20 +115,19 @@ test("popover: 'Aplicar' is hidden when the anotación has no sugerencia", async
   expect(nopeIndex).toBeGreaterThanOrEqual(0);
 
   await annos.nth(nopeIndex).click();
-  await expect(page.locator("[data-anno-popover]")).toBeVisible();
+  await expect(page.getByTestId("annotation-popover")).toBeVisible();
   // No Aplicar button — only Descartar.
-  await expect(page.getByTestId("popover-apply")).toHaveCount(0);
-  await expect(page.getByTestId("popover-dismiss")).toBeVisible();
+  await expect(page.getByTestId("finding-use")).toHaveCount(0);
+  await expect(page.getByTestId("finding-not-applicable")).toBeVisible();
 });
 
-test("drilldown: 'Aplicar' button on a card applies the sugerencia", async ({
+test("Correcciones: 'Usar este texto' on a card replaces the text", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
-  // Need a rúbrica so the criterio rings render and we can click into
-  // one. The stub links the first anotación per pase to the first
-  // criterio.
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
+  await page.getByRole("button", { name: "Prefiero escribir los criterios" }).click();
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").first().fill("Coherencia");
   await closeRubrica(page);
@@ -136,19 +138,12 @@ test("drilldown: 'Aplicar' button on a card applies the sugerencia", async ({
   const initialMarks = await editor.locator(".anno").count();
   expect(initialMarks).toBeGreaterThan(0);
 
-  // Open the criterio ring (or fall back to general).
-  const general = page.getByTestId("scorebar-general");
-  const ring =
-    (await general.count()) > 0
-      ? general.first()
-      : page.locator('[data-testid^="scorebar-criterio-"]').first();
-  await ring.click();
-  await expect(page.getByTestId("benchmark-drilldown")).toBeVisible();
+  await openAllCorrections(page);
 
-  // First card with an Aplicar button (some cards have no sugerencia).
-  const applyButtons = page.getByTestId("drilldown-apply");
-  await expect(applyButtons.first()).toBeVisible();
-  await applyButtons.first().click();
+  // First card with a proposed text (some cards have none).
+  const useButtons = page.getByTestId("finding-use");
+  await expect(useButtons.first()).toBeVisible();
+  await useButtons.first().click();
 
   // One mark removed.
   await expect(editor.locator(".anno")).toHaveCount(initialMarks - 1);
@@ -156,7 +151,9 @@ test("drilldown: 'Aplicar' button on a card applies the sugerencia", async ({
 
 test("after applying, the Scorebar overall recomputes", async ({ page }) => {
   await openNewEssay(page, "academico");
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
+  await page.getByRole("button", { name: "Prefiero escribir los criterios" }).click();
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").first().fill("Coherencia");
   await closeRubrica(page);
@@ -182,7 +179,7 @@ test("after applying, the Scorebar overall recomputes", async ({ page }) => {
     .innerText();
 
   await annos.nth(target).click();
-  await page.getByTestId("popover-apply").click();
+  await page.getByTestId("finding-use").click();
 
   await expect(async () => {
     const after = await page.getByTestId("scorebar-overall").innerText();
@@ -209,20 +206,20 @@ test("popover muestra 'Reemplazar por' como bloque literal separado del mensaje 
   expect(target).toBeGreaterThanOrEqual(0);
 
   await annos.nth(target).click();
-  const popover = page.locator("[data-anno-popover]");
+  const popover = page.getByTestId("annotation-popover");
   await expect(popover).toBeVisible();
 
-  // La etiqueta separa explicación (mensaje) del reemplazo literal.
-  await expect(popover).toContainText(/Reemplazar por/);
+  // El mensaje y el reemplazo literal viven en bloques distintos.
+  await expect(page.getByTestId("finding-mensaje")).toBeVisible();
   // El bloque del reemplazo tiene su propio testid y muestra el texto
   // entre comillas — comunica visualmente que es texto literal y no
   // advice del sabio.
-  const reemplazo = page.getByTestId("popover-reemplazo");
+  const reemplazo = page.getByTestId("finding-replacement");
   await expect(reemplazo).toBeVisible();
-  await expect(reemplazo).toContainText(/"|“/);
+  await expect(reemplazo).toContainText(/\(referencia\)/);
 
   // El botón actualizado lee "Reemplazar", no "Aplicar sugerencia".
-  await expect(page.getByTestId("popover-apply")).toHaveText(/Reemplazar/);
+  await expect(page.getByTestId("finding-use")).toHaveText(/Usar este texto/);
 });
 
 test("parseAnotaciones strippea prefijos conversacionales como 'Reescribí:' (sesión 16)", async () => {

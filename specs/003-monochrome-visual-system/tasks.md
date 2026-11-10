@@ -33,6 +33,26 @@ chrome, US4 copy). Slice 1 blocks everything; slices 2 to 5 run in parallel; sli
 
 ---
 
+## Phase 0: Design in Paper (blocks all code; Noe, 2026-11-07: «primero en paper y luego en código»)
+
+Paper file 01M6VXNCR0ZBA410S026XSG7JT is the visual source of truth. Code tasks below implement
+the approved Paper screens; where a task's wording and the approved screen differ, the screen wins
+and the task is updated.
+
+- [ ] D001 Keep the Pergamino screens as reference: clone the file as «Essay Studio, Pergamino
+  (antes)». Done-check: the clone opens with the original screens.
+- [ ] D002 In the main Paper file, set the design tokens to palette B (data-model.md) and the
+  fonts to Geist, Geist Mono and Newsreader. Done-check: token list matches data-model.md.
+- [ ] D003 Restyle every screen (pages 01 to 07) to spec 003 without changing layouts: sans UI,
+  12 px minimum, severity as text, «Desactualizado», straight notes, no em-dash, tú, no vendor
+  names; layouts faithful to the current code (remove the PROPUESTA items that the code lacks).
+  Done-check: screenshot of each artboard.
+- [ ] D004 Independent design review of the Paper screens on the C.0 rubric (minimum 4 on
+  Legibilidad, Color, Sin slop) and against contracts/ui-rules.md. Done-check: score table.
+- [ ] D005 Noe approves the Paper screens. Code tasks start only after this.
+
+---
+
 ## Phase 1: Setup
 
 - [x] T001 Create branch `003-monochrome-visual-system` from `main` after the spec 001 work in the

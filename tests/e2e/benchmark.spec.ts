@@ -1,12 +1,21 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installTauriStub, openNewEssay } from "./setup";
+import {
+  installTauriStub,
+  openNewEssay,
+  openMore,
+  runReview,
+  openReport,
+  openAllCorrections,
+  dismissAllCorrections,
+} from "./setup";
 
 /**
- * End-to-end coverage for the Benchmark Scorebar.
+ * End-to-end coverage for the score stamp.
  *
- * Goal: prove the loop closes — Evaluar populates the doc with
- * anotaciones → Scorebar recomputes → click a ring drilldown lists the
- * anotaciones → Descartar removes the mark → Scorebar recovers.
+ * Goal: prove the loop closes. A review puts findings in the text, the stamp
+ * shows the score, the report card lists a row per criterion, Correcciones
+ * lists the findings, and closing one with No aplica removes its underline
+ * and moves the score.
  */
 
 const SAMPLE_BODY = [
@@ -18,11 +27,13 @@ const SAMPLE_BODY = [
 ].join(" ");
 
 async function closeRubrica(page: Page) {
-  await page.getByTestId("rubrica-overlay").getByTitle("Cerrar").click();
+  await page.getByTestId("rubrica-overlay").getByRole("button", { name: "Cerrar" }).click();
   await expect(page.getByTestId("rubrica-overlay")).toHaveCount(0);
 }
 
 async function addCriterio(page: Page, index: number, nombre: string) {
+  // The empty panel offers the assignment first; writing by hand comes before the list.
+  if (index === 0) await page.getByRole("button", { name: "Prefiero escribir los criterios" }).click();
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").nth(index).fill(nombre);
 }
@@ -31,19 +42,14 @@ test.beforeEach(async ({ page }) => {
   await installTauriStub(page);
 });
 
-test("empty essay: Scorebar is hidden (no fake 10/10, no '—' placeholder)", async ({
+test("empty essay: no stamp (no fake 10/10, no placeholder)", async ({
   page,
 }) => {
-  // Sesión 13b decision: instead of showing a "—" placeholder Scorebar
-  // for unevaluated essays, hide the bar entirely. Empty placeholder
-  // wasted vertical space and the dashed "DE 10" ring looked like a
-  // broken state. Once Evaluar runs, the bar appears — covered by the
-  // sibling tests below. Lo único que sigue invariante: NUNCA fake 10/10.
   await openNewEssay(page);
   await expect(page.getByTestId("scorebar")).toHaveCount(0);
 });
 
-test("essay with anotaciones but no rúbrica → overall ring + nudge to define rúbrica", async ({
+test("essay with findings but no rúbrica: score and corrections, no criterion rows", async ({
   page,
 }) => {
   await openNewEssay(page);
@@ -51,51 +57,45 @@ test("essay with anotaciones but no rúbrica → overall ring + nudge to define 
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  // Run Evaluar without a rúbrica → anotaciones come through but the
-  // sage can't tag them to any criterio.
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
   await expect(page.getByTestId("scorebar-overall")).not.toContainText("—");
-  await expect(page.getByText(/Define una/)).toBeVisible();
-  await expect(page.getByText(/rúbrica/)).toBeVisible();
+  await openReport(page);
+  await expect(page.locator('[data-testid^="scorebar-criterio-"]')).toHaveCount(0);
+  await expect(page.getByTestId("stamp-all-corrections")).toBeVisible();
+
+  await page.getByTestId("stamp-all-corrections").click();
+  await expect(page.getByTestId("finding").first()).toBeVisible();
 });
 
-test("with rúbrica + Evaluar, Scorebar shows per-criterio rings and a real overall", async ({
+test("with rúbrica and a review, the report card has a row per criterio and a real score", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
 
-  // Seed a rúbrica.
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
   await addCriterio(page, 0, "Coherencia");
   await addCriterio(page, 1, "Evidencia");
   await closeRubrica(page);
 
-  // Body + run Evaluar.
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
-  // Overall must be a number, not "—".
   await expect(page.getByTestId("scorebar-overall")).not.toContainText("—");
 
-  // Two rings present (one per criterio in the rubrica).
-  const criterioRings = page.locator('[data-testid^="scorebar-criterio-"]');
-  await expect(criterioRings).toHaveCount(2);
+  await openReport(page);
+  await expect(page.locator('[data-testid^="scorebar-criterio-"]')).toHaveCount(2);
 });
 
-test("clicking a criterio ring opens drilldown; Descartar removes the mark and updates the score", async ({
+test("a criterio row lists its findings; No aplica removes the mark and moves the score", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
 
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
   await addCriterio(page, 0, "Coherencia");
   await closeRubrica(page);
@@ -103,105 +103,55 @@ test("clicking a criterio ring opens drilldown; Descartar removes the mark and u
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
-  // Anotaciones in the doc (one criterioId per pase, linked to first criterio).
   const initialMarks = await editor.locator(".anno").count();
   expect(initialMarks).toBeGreaterThan(0);
 
-  // Drilldown: click the General ring (the one that aggregates orphans —
-  // in academico with one criterio "Coherencia", most anotaciones land
-  // in "general" because the stub only links one anotación per pase).
-  const generalRing = page.getByTestId("scorebar-general");
-  if (await generalRing.count() > 0) {
-    await generalRing.click();
-  } else {
-    // Fallback: click the criterio ring instead.
-    await page.locator('[data-testid^="scorebar-criterio-"]').first().click();
-  }
-  await expect(page.getByTestId("benchmark-drilldown")).toBeVisible();
+  await openReport(page);
+  await page.locator('[data-testid^="scorebar-criterio-"]').first().click();
+  await expect(page.getByTestId("corrections-panel")).toBeVisible();
 
-  // At least one anotación card visible.
-  const cards = page.getByTestId("drilldown-anotacion");
+  const cards = page.getByTestId("finding");
   await expect(cards.first()).toBeVisible();
-  const cardCount = await cards.count();
-  expect(cardCount).toBeGreaterThan(0);
+  expect(await cards.count()).toBeGreaterThan(0);
 
-  // Capture the score number before Descartar.
-  const overallBefore = await page
-    .getByTestId("scorebar-overall")
-    .innerText();
+  const overallBefore = await page.getByTestId("scorebar-overall").innerText();
 
-  // Descartar one anotación.
-  await cards
-    .first()
-    .getByTestId("drilldown-dismiss")
-    .click();
+  await cards.first().getByTestId("finding-not-applicable").click();
 
-  // The mark gets removed from the doc.
   await expect(editor.locator(".anno")).toHaveCount(initialMarks - 1);
 
-  // The score updates. We don't assert a specific number (depends on
-  // which one was dismissed), only that the displayed score changed.
   await expect(async () => {
-    const overallAfter = await page
-      .getByTestId("scorebar-overall")
-      .innerText();
+    const overallAfter = await page.getByTestId("scorebar-overall").innerText();
     expect(overallAfter).not.toBe(overallBefore);
   }).toPass({ timeout: 2000 });
 });
 
-test("clicking an anotación in the drilldown adds the flash class to its mark", async ({
-  page,
-}) => {
+test("selecting a correction flashes its mark in the text", async ({ page }) => {
   await openNewEssay(page, "academico");
-
-  await page.getByTestId("topbar-rubrica").click();
-  await addCriterio(page, 0, "Coherencia");
-  await closeRubrica(page);
 
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
-  // Open whichever ring is present.
-  const generalRing = page.getByTestId("scorebar-general");
-  const ringToClick =
-    (await generalRing.count()) > 0
-      ? generalRing
-      : page.locator('[data-testid^="scorebar-criterio-"]').first();
-  await ringToClick.click();
+  await openAllCorrections(page);
+  await page.getByTestId("finding-mensaje").first().click();
 
-  await page
-    .getByTestId("drilldown-anotacion")
-    .first()
-    .click();
-
-  // The matching mark should have the flash class while the animation
-  // is running (animation is 1.6s; assertion runs much sooner).
   await expect(editor.locator(".anno.anno-flash").first()).toBeVisible({
     timeout: 1500,
   });
 });
 
-test("perfect-essay flow: Descartar everything → real 10.0 (NOT '—')", async ({
+test("perfect-essay flow: closing every correction gives a real 10 (not an empty stamp)", async ({
   page,
 }) => {
-  // The semantic the user asked for: "10/10 = nothing left to fix".
-  // After running Evaluar (full coverage in academico = 4 pasadas)
-  // and then dismissing every anotación, the score should be 10.0 —
-  // not the empty state. The empty state is reserved for "never ran
-  // Evaluar"; here the council DID run, and the user resolved
-  // everything.
+  // 10 means nothing is left to fix. After a full-coverage review (four
+  // passes in academico) and closing every correction, the stamp reads 10.
   await openNewEssay(page, "academico");
 
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
   await addCriterio(page, 0, "Coherencia");
   await closeRubrica(page);
@@ -209,57 +159,34 @@ test("perfect-essay flow: Descartar everything → real 10.0 (NOT '—')", async
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
-  const initialMarks = await editor.locator(".anno").count();
-  expect(initialMarks).toBeGreaterThan(0);
+  expect(await editor.locator(".anno").count()).toBeGreaterThan(0);
 
-  // Dismiss every anotación via the drilldown(s).
-  while ((await editor.locator(".anno").count()) > 0) {
-    const open = page.getByTestId("benchmark-drilldown");
-    if (await open.count() > 0) {
-      await open.getByTitle("Cerrar").click();
-      await expect(open).toHaveCount(0);
-    }
-    const general = page.getByTestId("scorebar-general");
-    const criterio = page.locator('[data-testid^="scorebar-criterio-"]');
-    const ring =
-      (await general.count()) > 0 ? general.first() : criterio.first();
-    await ring.click();
-    const cards = page.getByTestId("drilldown-anotacion");
-    while ((await cards.count()) > 0) {
-      await cards.first().getByTestId("drilldown-dismiss").click();
-    }
-  }
+  await openAllCorrections(page);
+  await dismissAllCorrections(page);
 
-  // The "Sin pendientes" perfect state.
-  await expect(page.getByTestId("scorebar-overall")).toContainText("10.0");
-  await expect(page.getByText(/Sin pendientes/)).toBeVisible();
+  await expect(editor.locator(".anno")).toHaveCount(0);
+  await expect(page.getByTestId("scorebar-overall")).toHaveText(/^\s*10\s*$/);
 });
 
-test("never-evaluated essay with content: Scorebar still hidden (NOT a fake 10.0)", async ({
+test("never-evaluated essay with content: no stamp (NOT a fake 10)", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
-  // Type some content but never run Evaluar.
   await page.locator(".tiptap-content").click();
   await page.keyboard.type("Texto cualquiera para que el ensayo no esté vacío.");
 
-  // Sesión 13b: bar stays hidden until the user actually evaluates.
-  // The honest signal (no fake 10/10) is preserved by absence, not
-  // by a placeholder.
+  // The honest signal (no fake 10/10) is kept by absence, not by a placeholder.
   await expect(page.getByTestId("scorebar")).toHaveCount(0);
 });
 
-test("partial coverage Evaluar (3 of 4 pasadas) + clean → caps at 9.0, NOT 10.0", async ({
+test("partial coverage (3 of 4 checks) and clean: capped at 9, with an invitation to the missing check", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
 
-  // Add a rubric so per-criterio rings show too.
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
   await addCriterio(page, 0, "Coherencia");
   await closeRubrica(page);
@@ -268,41 +195,27 @@ test("partial coverage Evaluar (3 of 4 pasadas) + clean → caps at 9.0, NOT 10.
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  await page.getByTestId("topbar-pluma-roja").click();
-  // Turn APA off → only 3 pasadas will run.
-  await page.getByTestId("pluma-pase-toggle-apa").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  // APA off: only 3 passes run.
+  await runReview(page, { skip: ["apa"] });
 
-  // Dismiss every anotación.
-  while ((await editor.locator(".anno").count()) > 0) {
-    const open = page.getByTestId("benchmark-drilldown");
-    if (await open.count() > 0) {
-      await open.getByTitle("Cerrar").click();
-    }
-    const general = page.getByTestId("scorebar-general");
-    const criterio = page.locator('[data-testid^="scorebar-criterio-"]');
-    const ring =
-      (await general.count()) > 0 ? general.first() : criterio.first();
-    await ring.click();
-    const cards = page.getByTestId("drilldown-anotacion");
-    while ((await cards.count()) > 0) {
-      await cards.first().getByTestId("drilldown-dismiss").click();
-    }
-  }
+  await openAllCorrections(page);
+  await dismissAllCorrections(page);
 
-  // Clean, but only 3/4 pasadas ran → capped at 9.0 (coverage penalty).
-  await expect(page.getByTestId("scorebar-overall")).toContainText("9.0");
-  await expect(page.getByTestId("scorebar-coverage")).toBeVisible();
-  await expect(page.getByTestId("scorebar-coverage")).toContainText("3/4");
+  await expect(page.getByTestId("scorebar-overall")).toHaveText(/^\s*9\.0\s*$/);
+
+  // The missing check is an invitation stating what the score could reach.
+  await page.getByTestId("corrections-panel").getByLabel("Cerrar").first().click();
+  await openReport(page);
+  await expect(page.getByTestId("report-invite")).toBeVisible();
+  await expect(page.getByTestId("report-invite")).toContainText("10");
 });
 
-test("editing the essay after Evaluar surfaces the 'stale' indicator", async ({
+test("editing the essay after a review surfaces the out-of-date stamp", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
 
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
   await addCriterio(page, 0, "Coherencia");
   await closeRubrica(page);
@@ -310,20 +223,14 @@ test("editing the essay after Evaluar surfaces the 'stale' indicator", async ({
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
-  // No stale indicator right after apply (evaluadoEn == updatedAt).
+  // Right after the review the text is what the reviewers read.
   await expect(page.getByTestId("scorebar-stale")).toHaveCount(0);
 
-  // Edit the essay — type more content. The store updates
-  // updatedAt → stale indicator surfaces.
   await editor.click();
   await page.keyboard.press("End");
-  await page.keyboard.type(" — añadiendo más texto.");
-  // Small delay for the autosave debounce to settle.
+  await page.keyboard.type(" añadiendo más texto.");
   await page.waitForTimeout(900);
 
   await expect(page.getByTestId("scorebar-stale")).toBeVisible();

@@ -4,6 +4,9 @@ import {
   dumpEssays,
   installTauriStub,
   openNewEssay,
+  openMore,
+  runReview,
+  openAllCorrections,
 } from "./setup";
 
 /**
@@ -22,10 +25,38 @@ const SAMPLE_BODY = [
   "de ágape sostienen seguridad sin que nadie mida nada en particular.",
 ].join(" ");
 
-/** Close the rubric overlay via its × button — also triggers flush. */
+/** Close the rubric panel via its × button — also triggers flush. */
 async function closeRubrica(page: Page) {
-  await page.getByTestId("rubrica-overlay").getByTitle("Cerrar").click();
+  await page.getByTestId("rubrica-overlay").getByRole("button", { name: "Cerrar" }).click();
   await expect(page.getByTestId("rubrica-overlay")).toHaveCount(0);
+}
+
+/** From the empty panel to the editable list: «Prefiero escribir» comes before `rubrica-add`. */
+async function preferWriting(page: Page) {
+  await page.getByRole("button", { name: "Prefiero escribir los criterios" }).click();
+  await expect(page.getByTestId("rubrica-add")).toBeVisible();
+}
+
+/** Pastes text into the open panel, the way ⌘V does. */
+async function pasteAssignment(page: Page, text: string) {
+  await page.getByTestId("rubrica-overlay").evaluate((el, value) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", value);
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, text);
+}
+
+const ASSIGNMENT = [
+  "Ensayo final del curso. Se evaluará:",
+  "- Argumentación: una tesis clara defendida con razones 40%",
+  "- Claridad: frases directas, sin jerga 20%",
+  "- Uso de fuentes: cita con APA 40%",
+].join("\n");
+
+async function openRubricPanel(page: Page) {
+  await openMore(page);
+  await page.getByTestId("topbar-rubrica").click();
+  await expect(page.getByTestId("rubrica-overlay")).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -37,11 +68,19 @@ test("Rúbrica button opens the editor and persists criterios", async ({
 }) => {
   await openNewEssay(page);
 
+  await openMore(page);
+
   await page.getByTestId("topbar-rubrica").click();
   await expect(page.getByTestId("rubrica-overlay")).toBeVisible();
 
-  // Empty state visible first.
-  await expect(page.getByText(/Sin criterios aún/i)).toBeVisible();
+  // Empty state first: paste or drop, with writing by hand as the second way.
+  await expect(
+    page.getByText("Pega la consigna de tu profesor o suelta el PDF"),
+  ).toBeVisible();
+  await expect(page.getByTestId("rubrica-zone")).toHaveAttribute(
+    "data-drop-zone",
+  );
+  await preferWriting(page);
 
   // Add two criterios.
   await page.getByTestId("rubrica-add").click();
@@ -59,7 +98,18 @@ test("Rúbrica button opens the editor and persists criterios", async ({
     .getByTestId("criterio-nombre")
     .nth(1)
     .fill("Calidad de la evidencia");
-  await page.getByTestId("criterio-peso").nth(1).selectOption("5");
+  // Weight is five dots: the fifth one is one click.
+  await page.getByTestId("criterio-peso-5").nth(1).click();
+  await expect(page.getByTestId("criterio-peso-5").nth(1)).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  await expect(page.getByTestId("criterio-row")).toHaveCount(2);
+  // No counter anywhere in the panel.
+  await expect(page.getByTestId("rubrica-overlay")).not.toContainText(
+    /\d+ criterios?/i,
+  );
 
   // Closing the modal forces a flush — no debounce wait needed.
   await closeRubrica(page);
@@ -73,21 +123,22 @@ test("Rúbrica button opens the editor and persists criterios", async ({
   expect(rubrica.criterios[0].nombre).toBe("Claridad del argumento");
   expect(rubrica.criterios[1].nombre).toBe("Calidad de la evidencia");
   expect(rubrica.criterios[1].peso).toBe(5);
-
-  // Topbar button shows the count badge.
-  await expect(page.getByTestId("topbar-rubrica")).toContainText("· 2");
 });
 
-test("removing a criterio updates the count and persists", async ({ page }) => {
+test("removing a criterio through its row menu persists", async ({ page }) => {
   await openNewEssay(page);
 
-  await page.getByTestId("topbar-rubrica").click();
+  await openRubricPanel(page);
+  await preferWriting(page);
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").first().fill("Estructura");
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").nth(1).fill("Evidencia");
 
-  await page.getByTestId("criterio-remove").first().click();
+  // The menu is one dots button per row; Quitar lives inside it.
+  await page.getByTestId("criterio-row").first().hover();
+  await page.getByTestId("criterio-menu").first().click();
+  await page.getByTestId("criterio-remove").click();
   await expect(page.getByTestId("criterio-row")).toHaveCount(1);
   // The nombre is in an <input value=...>, not in textContent — assert on the value.
   await expect(page.getByTestId("criterio-nombre")).toHaveValue("Evidencia");
@@ -99,7 +150,7 @@ test("removing a criterio updates the count and persists", async ({ page }) => {
   expect(rubrica.criterios).toHaveLength(1);
 });
 
-test("APA pasada appears in academico mode and runs as a 4th pane", async ({
+test("APA check appears in academico mode and runs as a 4th check", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
@@ -109,26 +160,23 @@ test("APA pasada appears in academico mode and runs as a 4th pane", async ({
   await page.keyboard.type(SAMPLE_BODY);
 
   await page.getByTestId("topbar-pluma-roja").click();
-  // APA toggle visible + ON by default in academico — now lives in
-  // the pasada selector strip below the header.
+  // APA is visible and on by default in academico.
   await expect(page.getByTestId("pluma-pase-toggle-apa")).toBeVisible();
   await expect(page.getByTestId("pluma-pase-toggle-apa")).toHaveAttribute(
     "data-active",
     "true",
   );
 
-  // 4 panes present (incl. APA).
-  await expect(page.getByTestId("pluma-pase-coherencia")).toBeVisible();
-  await expect(page.getByTestId("pluma-pase-estilo")).toBeVisible();
-  await expect(page.getByTestId("pluma-pase-argumento")).toBeVisible();
-  await expect(page.getByTestId("pluma-pase-apa")).toBeVisible();
-
   await page.getByTestId("pluma-start").click();
-  // 4 panes × 3 = 12 anotaciones.
-  await expect(page.getByTestId("pluma-anotacion")).toHaveCount(12);
+  // 4 checks x 3 = 12 findings, underlined with no apply step. Underlines
+  // may overlap and split into more spans, so count the listed findings.
+  await expect(editor.locator(".anno").first()).toBeVisible();
+  await expect(page.getByTestId("pluma-overlay")).toHaveCount(0);
+  await openAllCorrections(page);
+  await expect(page.getByTestId("finding")).toHaveCount(12);
 });
 
-test("APA pasada is hidden in blog mode", async ({ page }) => {
+test("APA check is hidden in blog mode", async ({ page }) => {
   await openNewEssay(page, "blog");
 
   const editor = page.locator(".tiptap-content");
@@ -137,10 +185,9 @@ test("APA pasada is hidden in blog mode", async ({ page }) => {
 
   await page.getByTestId("topbar-pluma-roja").click();
   await expect(page.getByTestId("pluma-pase-toggle-apa")).toHaveCount(0);
-  await expect(page.getByTestId("pluma-pase-apa")).toHaveCount(0);
 });
 
-test("toggling APA off in academico hides the pase", async ({ page }) => {
+test("toggling APA off in academico turns it off", async ({ page }) => {
   await openNewEssay(page, "academico");
 
   const editor = page.locator(".tiptap-content");
@@ -148,18 +195,19 @@ test("toggling APA off in academico hides the pase", async ({ page }) => {
   await page.keyboard.type(SAMPLE_BODY);
 
   await page.getByTestId("topbar-pluma-roja").click();
-  await expect(page.getByTestId("pluma-pase-apa")).toBeVisible();
+  const apa = page.getByTestId("pluma-pase-toggle-apa");
+  await expect(apa).toHaveAttribute("data-active", "true");
 
-  // Click the pasada chip to toggle APA off.
-  await page.getByTestId("pluma-pase-toggle-apa").click();
-  await expect(page.getByTestId("pluma-pase-apa")).toHaveCount(0);
+  await apa.click();
+  await expect(apa).toHaveAttribute("data-active", "false");
 });
 
 test("rubrica is forwarded to each critique invocation", async ({ page }) => {
   await openNewEssay(page, "academico");
 
   // Set up a rubric first.
-  await page.getByTestId("topbar-rubrica").click();
+  await openRubricPanel(page);
+  await preferWriting(page);
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").first().fill("Estructura clara");
   await page
@@ -173,31 +221,31 @@ test("rubrica is forwarded to each critique invocation", async ({ page }) => {
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
+  await runReview(page);
 
   const critiques = await dumpCritiques(page);
   // Every pase that ran should have received the rubrica payload.
   for (const pase of ["coherencia", "estilo", "argumento", "apa"]) {
     expect(critiques[pase]).toBeDefined();
-    expect(critiques[pase].rubrica?.criterios).toHaveLength(1);
+    expect(critiques[pase].rubrica).toHaveLength(1);
   }
 
-  // The criterio chip appears at least once in the panel (the stub
-  // links the first anotación to the first criterio).
-  await expect(page.getByTestId("anotacion-criterio").first()).toBeVisible();
-  await expect(page.getByTestId("anotacion-criterio").first()).toContainText(
+  // The criterio shows on a card (the stub links the first finding of
+  // each check to the first criterio).
+  await openAllCorrections(page);
+  await expect(page.getByTestId("finding-where").first()).toBeVisible();
+  await expect(page.getByTestId("finding-where").first()).toContainText(
     "Estructura clara",
   );
 });
 
-test("applying an anotación with criterioId renders the chip in the popover", async ({
+test("a finding with criterioId shows its criterio in the popover", async ({
   page,
 }) => {
   await openNewEssay(page, "academico");
 
-  await page.getByTestId("topbar-rubrica").click();
+  await openRubricPanel(page);
+  await preferWriting(page);
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").first().fill("Coherencia interna");
   await closeRubrica(page);
@@ -206,17 +254,115 @@ test("applying an anotación with criterioId renders the chip in the popover", a
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page);
 
   // The first cita per pase had criterioId set in the stub. Click one
   // .anno and look for the chip in the popover.
   await editor.locator(".anno").first().click();
-  await expect(page.locator("[data-anno-popover]")).toBeVisible();
-  await expect(page.getByTestId("popover-criterio-chip")).toBeVisible();
-  await expect(page.getByTestId("popover-criterio-chip")).toContainText(
+  await expect(page.getByTestId("annotation-popover")).toBeVisible();
+  await expect(page.getByTestId("finding-where")).toBeVisible();
+  await expect(page.getByTestId("finding-where")).toContainText(
     "Coherencia interna",
   );
+});
+
+test("a pasted assignment fills the rubric in one action and edits stay", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  await openRubricPanel(page);
+
+  await pasteAssignment(page, ASSIGNMENT);
+  await expect(page.getByTestId("criterio-row")).toHaveCount(3);
+  await expect(page.getByTestId("criterio-nombre").nth(0)).toHaveValue(
+    "Argumentación",
+  );
+  // Stated percentages map to the five dots: 40, 20 and 40 become 5, 3 and 5.
+  await expect(page.getByTestId("criterio-peso-5").nth(0)).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(page.getByTestId("criterio-peso-3").nth(1)).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  // A change stays.
+  await page.getByTestId("criterio-nombre").nth(0).fill("Mi argumentación");
+  await page.getByTestId("criterio-peso-1").nth(2).click();
+  await closeRubrica(page);
+
+  const essays = await dumpEssays(page);
+  const rubrica = essays[0].rubrica as {
+    criterios: { nombre: string; peso: number }[];
+    consigna?: { texto: string };
+  };
+  expect(rubrica.criterios.map((c) => c.nombre)).toEqual([
+    "Mi argumentación",
+    "Claridad",
+    "Uso de fuentes",
+  ]);
+  expect(rubrica.criterios[2].peso).toBe(1);
+  expect(rubrica.consigna?.texto).toBe(ASSIGNMENT);
+});
+
+test("a new assignment over an existing rubric asks before replacing", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  await openRubricPanel(page);
+  await pasteAssignment(page, ASSIGNMENT);
+  await expect(page.getByTestId("criterio-row")).toHaveCount(3);
+  await page.getByTestId("criterio-nombre").nth(0).fill("Mía");
+
+  await pasteAssignment(page, "Otra consigna:\n- Tesis y argumento: defiende una postura");
+  await expect(page.getByTestId("rubrica-proposal")).toBeVisible();
+  await expect(
+    page.getByText("Tu rúbrica actual queda guardada en Historial."),
+  ).toBeVisible();
+
+  // Dejar la mía: nothing changed.
+  await page.getByRole("button", { name: "Dejar la mía" }).click();
+  await expect(page.getByTestId("criterio-nombre").nth(0)).toHaveValue("Mía");
+  await expect(page.getByTestId("criterio-row")).toHaveCount(3);
+
+  // Usar esta: replaced, and the previous rubric is kept in Historial.
+  await pasteAssignment(page, "Otra consigna:\n- Tesis y argumento: defiende una postura");
+  await page.getByRole("button", { name: "Usar esta" }).click();
+  await expect(page.getByTestId("criterio-row")).toHaveCount(1);
+  await expect(page.getByTestId("criterio-nombre").first()).toHaveValue(
+    "Tesis y argumento",
+  );
+});
+
+test("an assignment with no criteria offers writing by hand", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  await openRubricPanel(page);
+  await pasteAssignment(page, "Un texto sin lista de criterios.");
+  await expect(
+    page.getByText("No encontré criterios en este texto"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Escribir a mano" }).click();
+  await expect(page.getByTestId("rubrica-add")).toBeVisible();
+});
+
+test("when the AI does not answer the assignment is kept and Reintentar is offered", async ({
+  page,
+}) => {
+  await openNewEssay(page);
+  await openRubricPanel(page);
+  await pasteAssignment(page, "EXTRACT_FAIL\n- Argumentación: tesis clara");
+  await expect(page.getByText("La IA no responde.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
+  // No vendor or model name reaches the screen.
+  await expect(page.getByTestId("rubrica-overlay")).not.toContainText(
+    /claude|anthropic|openai|stub/i,
+  );
+
+  await closeRubrica(page);
+  const essays = await dumpEssays(page);
+  const rubrica = essays[0].rubrica as { consigna?: { texto: string } };
+  expect(rubrica.consigna?.texto).toContain("EXTRACT_FAIL");
 });

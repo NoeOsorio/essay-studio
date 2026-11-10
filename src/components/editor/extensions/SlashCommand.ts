@@ -4,20 +4,34 @@ import Suggestion, {
   type SuggestionProps,
 } from "@tiptap/suggestion";
 
+export type SlashIcon =
+  | "t1"
+  | "t2"
+  | "t3"
+  | "paragraph"
+  | "quote"
+  | "bullet"
+  | "ordered"
+  | "code"
+  | "divider";
+
 export type SlashItem = {
   key: string;
   title: string;
-  hint?: string;
+  /** Which glyph the menu draws in the tile (the menu owns the artwork). */
+  icon: SlashIcon;
+  /** Extra search terms; the old titles stay here so `/h1` and `/quote` still match. */
   aliases?: string[];
   command: (args: { editor: Editor; range: Range }) => void;
 };
 
+// Rows and order follow Paper R2.3, with Párrafo after the headings (E6).
 export const SLASH_ITEMS: SlashItem[] = [
   {
     key: "h1",
-    title: "Título 1",
-    hint: "encabezado grande",
-    aliases: ["h1", "heading 1", "titulo"],
+    title: "Sección",
+    icon: "t1",
+    aliases: ["h1", "heading 1", "titulo", "título 1", "titulo 1"],
     command: ({ editor, range }) =>
       editor
         .chain()
@@ -28,9 +42,9 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     key: "h2",
-    title: "Título 2",
-    hint: "sección",
-    aliases: ["h2", "heading 2", "seccion"],
+    title: "Subsección",
+    icon: "t2",
+    aliases: ["h2", "heading 2", "seccion", "título 2", "titulo 2"],
     command: ({ editor, range }) =>
       editor
         .chain()
@@ -41,9 +55,9 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     key: "h3",
-    title: "Título 3",
-    hint: "subsección",
-    aliases: ["h3", "heading 3", "subseccion"],
+    title: "Apartado",
+    icon: "t3",
+    aliases: ["h3", "heading 3", "subseccion", "título 3", "titulo 3"],
     command: ({ editor, range }) =>
       editor
         .chain()
@@ -55,7 +69,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   {
     key: "paragraph",
     title: "Párrafo",
-    hint: "texto base",
+    icon: "paragraph",
     aliases: ["p", "parrafo", "text", "texto"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).setNode("paragraph").run(),
@@ -63,7 +77,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   {
     key: "quote",
     title: "Cita",
-    hint: "blockquote",
+    icon: "quote",
     aliases: ["quote", "cita", "blockquote"],
     command: ({ editor, range }) =>
       editor
@@ -77,7 +91,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   {
     key: "bullet-list",
     title: "Lista",
-    hint: "viñetas",
+    icon: "bullet",
     aliases: ["list", "lista", "bullet"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).toggleBulletList().run(),
@@ -85,23 +99,23 @@ export const SLASH_ITEMS: SlashItem[] = [
   {
     key: "ordered-list",
     title: "Lista numerada",
-    hint: "1. 2. 3.",
+    icon: "ordered",
     aliases: ["numbered", "ordered", "numerada"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
   },
   {
     key: "code",
-    title: "Bloque de código",
-    hint: "monospace",
-    aliases: ["code", "codigo"],
+    title: "Código",
+    icon: "code",
+    aliases: ["code", "codigo", "bloque de código", "bloque de codigo"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
   },
   {
     key: "divider",
     title: "Separador",
-    hint: "línea horizontal",
+    icon: "divider",
     aliases: ["hr", "divider", "rule", "separador"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).setHorizontalRule().run(),

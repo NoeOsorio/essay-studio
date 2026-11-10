@@ -22,7 +22,7 @@ export function TitleInput({
   essayId,
   initialValue,
   onChange,
-  placeholder = "Sin título",
+  placeholder = "Título",
 }: TitleInputProps) {
   const ref = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
@@ -84,8 +84,8 @@ export function TitleInput({
         const text = e.clipboardData.getData("text/plain").replace(/\n/g, " ");
         document.execCommand("insertText", false, text);
       }}
-      className="title-input font-serif font-medium text-[46px] tracking-[-0.015em] text-ink-1 leading-[1.08] mb-2.5 outline-none caret-ink-1"
-      style={{ minHeight: "1.08em" }}
+      className="title-input font-serif font-medium text-[40px] tracking-[-0.015em] text-ink-1 leading-[46px] outline-none caret-ink-1"
+      style={{ minHeight: "46px" }}
     />
   );
 }

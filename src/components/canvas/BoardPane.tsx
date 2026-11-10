@@ -1,10 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
-  createShapeId,
   loadSnapshot,
+  ShapeIndicatorOverlayUtil,
   toRichText,
   type Editor,
   type TLComponents,
@@ -12,15 +12,18 @@ import {
 } from "tldraw";
 import "tldraw/tldraw.css";
 
-import { Badge } from "@/components/ui/Badge";
-import { IconButton } from "@/components/ui/IconButton";
-import { GroupIcon } from "@/components/ui/icons";
 import { useStore } from "@/lib/store";
-import { PergaminoNoteShapeUtil, type PostItMeta } from "./note-shape";
-import { NoteContextPanel } from "./NoteContextPanel";
-import { BoardToolbar, BoardZoom, type BoardTool } from "./BoardToolbar";
-import type { Sage } from "@/lib/storage/types";
+import { boardHasNotes } from "@/lib/board-empty";
+import { registerPointerLanding } from "@/lib/canvas/note-motion";
+import { PergaminoNoteShapeUtil } from "./note-shape";
+import { NoteBar } from "./NoteBar";
+import { BoardEmpty } from "./BoardEmpty";
+import { BoardToolbar, type BoardTool } from "./BoardToolbar";
 import { persistBoardSnapshot, registerBoard } from "@/lib/mcp/board";
+import { attachRunToEditor } from "@/lib/questions/run";
+import { markWriterMovedCamera } from "@/lib/questions/landing";
+import { AgentRunChips } from "@/components/questions/AgentRunChips";
+import { LandedNoteActions } from "@/components/questions/LandedNoteActions";
 
 // Tldraw uses DOM APIs, so mount it client-only.
 const Tldraw = dynamic(
@@ -31,7 +34,20 @@ const Tldraw = dynamic(
 // Replaces the default note util by type ("note").
 const SHAPE_UTILS = [PergaminoNoteShapeUtil];
 
-// Hide tldraw's default chrome — we paint our own toolbar/zoom/header.
+// Paper draws no outline on a note that is only hovered; only the selection
+// gets one. Same type as the default, so this replaces it.
+class SelectionOnlyIndicatorUtil extends ShapeIndicatorOverlayUtil {
+  override getOverlays() {
+    const selected = new Set(this.editor.getSelectedShapeIds());
+    return super.getOverlays().map((o) => ({
+      ...o,
+      props: { ...o.props, idsToDisplay: o.props.idsToDisplay.filter((id) => selected.has(id)) },
+    }));
+  }
+}
+const OVERLAY_UTILS = [SelectionOnlyIndicatorUtil];
+
+// Hide tldraw's default chrome — we paint our own toolbar and note bar.
 const COMPONENTS: TLComponents = {
   Toolbar: null,
   MainMenu: null,
@@ -63,62 +79,20 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
   );
 
   const [tool, setTool] = useState<BoardTool>("select");
-  const [zoom, setZoom] = useState(1);
-  const [counts, setCounts] = useState({ postits: 0, arrows: 0 });
-  // Held in state (not a ref) so the NoteContextPanel can subscribe
-  // to the editor's signals via useValue. Set once on mount.
+  // Same selector as the toolbar: the board is empty until the saved
+  // snapshot holds a shape record.
+  const empty = useStore((s) => !boardHasNotes(s.current?.board));
+  // Held in state (not a ref) so the NoteBar can subscribe to the
+  // editor's signals via useValue. Set once on mount.
   const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<Editor | null>(null);
 
-  // Materialize sage interrogation results as post-its on the board
-  // when the Lectura overlay finishes. The overlay dispatches the
-  // event on `window` so we don't need to plumb the editor ref out.
-  //
-  // Two payload shapes are accepted:
-  //   { sage, preguntas }        — legacy single-sage flow
-  //   { batches: [{ sage, preguntas }, ...] } — council flow
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const ce = e as CustomEvent<
-        | { sage: Sage; preguntas: string[] }
-        | { batches: { sage: Sage; preguntas: string[] }[] }
-      >;
-      const ed = editorRef.current;
-      if (!ed) return;
-      const batches =
-        "batches" in ce.detail
-          ? ce.detail.batches
-          : [{ sage: ce.detail.sage, preguntas: ce.detail.preguntas }];
-      materializePreguntas(ed, batches);
-    };
-    window.addEventListener("sage:materialize-preguntas", handler);
-    return () =>
-      window.removeEventListener("sage:materialize-preguntas", handler);
-  }, []);
-
   return (
-    <div className="board-grid relative h-full overflow-hidden">
-      {/* Header */}
-      <div className="absolute left-0 right-0 top-0 z-[2] flex items-center justify-between px-4 py-2.5 bg-paper-2 border-b border-rule-1">
-        <div className="font-serif italic text-[16px] text-ink-1 truncate max-w-[60%]">
-          Tablero
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge dotColor="bg-sis">
-            {counts.postits} {counts.postits === 1 ? "nota" : "notas"}
-          </Badge>
-          <Badge dotColor="bg-ink-3">
-            {counts.arrows} {counts.arrows === 1 ? "conexión" : "conexiones"}
-          </Badge>
-          <IconButton title="Agrupar (futuro)">
-            <GroupIcon />
-          </IconButton>
-        </div>
-      </div>
-
-      <div className="absolute inset-0 pt-[44px]">
+    <div className="board-grid relative h-full overflow-hidden" data-board-surface>
+      <div className="absolute inset-0">
         <Tldraw
           shapeUtils={SHAPE_UTILS}
+          overlayUtils={OVERLAY_UTILS}
           components={COMPONENTS}
           onMount={(editor) => {
             editorRef.current = editor;
@@ -141,21 +115,31 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
             editor.selectNone();
             requestAnimationFrame(() => editor.selectNone());
 
-            recomputeCounts(editor, setCounts);
-            setZoom(editor.getZoomLevel());
-            const unregisterBoard = registerBoard(editor, essayId);
+            // A dropped file must not become an asset inside the essay JSON.
+            editor.registerExternalContentHandler("files", null);
 
+            const unregisterBoard = registerBoard(editor, essayId);
+            const unregisterLanding = registerPointerLanding(editor);
+            // A question run follows its notes through deletes and undos.
+            attachRunToEditor(editor);
+
+            // Persist only what the user changed on the board. tldraw also
+            // keeps a `user:` record for the local person in the document
+            // scope, added the first time an essay opens (the editor syncs
+            // it by itself, not the user). Treating that as a change would
+            // save the essay, bump `updatedAt` and mark reviews out of date
+            // just for opening it.
             const unlistenStore = editor.store.listen(
-              () => {
-                persistBoardSnapshot(editor);
-                recomputeCounts(editor, setCounts);
+              (entry) => {
+                const { added, updated, removed } = entry.changes;
+                const isUser = (record: { typeName: string }) => record.typeName === "user";
+                const changed =
+                  Object.values(added).some((r) => !isUser(r)) ||
+                  Object.values(updated).some(([, to]) => !isUser(to)) ||
+                  Object.values(removed).some((r) => !isUser(r));
+                if (changed) persistBoardSnapshot(editor);
               },
               { source: "user", scope: "document" },
-            );
-
-            const unlistenCamera = editor.store.listen(
-              () => setZoom(editor.getZoomLevel()),
-              { scope: "session" },
             );
 
             // Keep our toolbar's "tool" state in sync with tldraw's
@@ -183,13 +167,18 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
 
             return () => {
               unregisterBoard();
+              unregisterLanding();
               unlistenStore();
-              unlistenCamera();
               unlistenTool();
             };
           }}
         />
       </div>
+
+      {/* Everything below sits OUTSIDE the Tldraw container so its clicks
+          aren't intercepted by tldraw's background overlay. The bar receives
+          the editor as a prop so it can still subscribe to selection. */}
+      <BoardEmpty empty={empty} />
 
       <BoardToolbar
         active={tool}
@@ -201,160 +190,18 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
           else if (t === "arrow") editor.setCurrentTool("arrow");
           else editor.setCurrentTool("select");
         }}
-        onMicTeaser={() => alert("Dictado · próximamente.")}
+        onFit={() => {
+          // Ver todo is the writer's move: a running question run stops following.
+          markWriterMovedCamera();
+          editorRef.current?.zoomToFit();
+        }}
       />
 
-      <BoardZoom
-        zoom={zoom}
-        onZoomIn={() => editorRef.current?.zoomIn()}
-        onZoomOut={() => editorRef.current?.zoomOut()}
-        onZoomFit={() => editorRef.current?.zoomToFit()}
-      />
-
-      {/* Sits OUTSIDE the Tldraw container so its clicks aren't
-          intercepted by tldraw's background overlay. Receives the
-          editor as a prop so it can still subscribe to selection. */}
-      {editor ? <NoteContextPanel editor={editor} /> : null}
+      {editor ? <NoteBar editor={editor} /> : null}
+      {editor ? <AgentRunChips editor={editor} /> : null}
+      {editor ? <LandedNoteActions editor={editor} /> : null}
     </div>
   );
-}
-
-/**
- * Drop one note shape per pregunta. Notes are tagged with
- * `kind: "pregunta"` and the sage as author, so they re-skin with
- * the right colour + header via PergaminoNoteShapeUtil.
- *
- * Layout:
- *   - 1 sage  → cascade grid (≤3 cols × n rows), centred in viewport
- *   - 2+ sages → one column per sage, side by side, anchored to the
- *     left edge of the empty space to the right of the existing
- *     content so multiple interrogations don't pile on top of each
- *     other.
- */
-function materializePreguntas(
-  editor: Editor,
-  batches: { sage: Sage; preguntas: string[] }[],
-) {
-  const nonEmpty = batches.filter((b) => b.preguntas.length > 0);
-  if (nonEmpty.length === 0) return;
-
-  const W = 200;
-  const H = 200;
-  const GAP_X = 28;
-  const GAP_Y = 24;
-  const now = Date.now();
-  const tilt = [-0.025, 0.018, -0.012, 0.022, -0.02, 0.015, -0.018];
-
-  // Pick a starting Y based on the viewport, and a starting X that
-  // lands either at viewport-left (when the board is empty) or
-  // just to the right of everything already there.
-  const viewport = editor.getViewportPageBounds();
-  const existing = editor.getCurrentPageShapes();
-  let startX = viewport.center.x - W * (nonEmpty.length > 1 ? nonEmpty.length : 1) / 2;
-  if (existing.length > 0) {
-    let rightmost = -Infinity;
-    for (const shape of existing) {
-      const b = editor.getShapePageBounds(shape.id);
-      if (b && b.maxX > rightmost) rightmost = b.maxX;
-    }
-    if (Number.isFinite(rightmost)) startX = rightmost + GAP_X * 2;
-  }
-  const startY = viewport.center.y - H * 1.2;
-
-  type ShapeArg = Parameters<Editor["createShapes"]>[0][number];
-  const shapes: ShapeArg[] = [];
-  let tiltIdx = 0;
-
-  if (nonEmpty.length === 1) {
-    // Cascade layout for a single sage.
-    const { sage, preguntas } = nonEmpty[0];
-    const cols = preguntas.length <= 3 ? preguntas.length : 3;
-    const rows = Math.ceil(preguntas.length / cols);
-    const totalW = cols * W + (cols - 1) * GAP_X;
-    const totalH = rows * H + (rows - 1) * GAP_Y;
-    const baseX =
-      existing.length > 0 ? startX : viewport.center.x - totalW / 2;
-    const baseY = viewport.center.y - totalH / 2;
-    preguntas.forEach((text, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      shapes.push(
-        buildNoteShape({
-          x: baseX + col * (W + GAP_X),
-          y: baseY + row * (H + GAP_Y),
-          tilt: tilt[tiltIdx++ % tilt.length] ?? 0,
-          sage,
-          text,
-          createdAt: now + shapes.length,
-        }),
-      );
-    });
-  } else {
-    // Council layout: one vertical column per sage.
-    nonEmpty.forEach((batch, colIdx) => {
-      const x = startX + colIdx * (W + GAP_X);
-      batch.preguntas.forEach((text, rowIdx) => {
-        shapes.push(
-          buildNoteShape({
-            x,
-            y: startY + rowIdx * (H + GAP_Y),
-            tilt: tilt[tiltIdx++ % tilt.length] ?? 0,
-            sage: batch.sage,
-            text,
-            createdAt: now + shapes.length,
-          }),
-        );
-      });
-    });
-  }
-
-  editor.createShapes(shapes);
-}
-
-function buildNoteShape(args: {
-  x: number;
-  y: number;
-  tilt: number;
-  sage: Sage;
-  text: string;
-  createdAt: number;
-}) {
-  const meta: PostItMeta = {
-    author: args.sage,
-    kind: "pregunta",
-    createdAt: args.createdAt,
-  };
-  return {
-    id: createShapeId(),
-    type: "note" as const,
-    x: args.x,
-    y: args.y,
-    rotation: args.tilt,
-    props: {
-      richText: toRichText(args.text),
-      size: "s" as const,
-      align: "start" as const,
-      verticalAlign: "start" as const,
-    },
-    meta: {
-      author: meta.author,
-      kind: meta.kind,
-      createdAt: meta.createdAt,
-    },
-  };
-}
-
-function recomputeCounts(
-  editor: Editor,
-  setCounts: (c: { postits: number; arrows: number }) => void,
-) {
-  let postits = 0;
-  let arrows = 0;
-  for (const shape of editor.getCurrentPageShapes()) {
-    if (shape.type === "note") postits += 1;
-    else if (shape.type === "arrow") arrows += 1;
-  }
-  setCounts({ postits, arrows });
 }
 
 /**
@@ -362,7 +209,7 @@ function recomputeCounts(
  * custom-shape implementation) into the current `type: "note"` form,
  * preserving author / kind / text in `meta` + `richText`. Also
  * clears any persisted `selectedShapeIds` so reopening an essay
- * doesn't auto-pop the NoteContextPanel for whatever shape was
+ * doesn't auto-pop the NoteBar for whatever shape was
  * selected at save time.
  *
  * `getSnapshot()` returns a TLEditorSnapshot shaped as

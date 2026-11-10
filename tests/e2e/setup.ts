@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 /**
  * Inject a fake `window.__TAURI_INTERNALS__` BEFORE the app boots, so
@@ -11,6 +11,8 @@ import type { Page } from "@playwright/test";
  * sidecar (no Anthropic credits burned).
  */
 export async function installTauriStub(page: Page) {
+  // A moving note must never cover a button in a test.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.addInitScript(() => {
     type EssayLike = {
       id: string;
@@ -18,11 +20,15 @@ export async function installTauriStub(page: Page) {
       content: unknown;
       board?: unknown;
       interrogatorios?: unknown[];
+      findings?: unknown[];
       mode: string;
       wordCount: number;
       createdAt: string;
       updatedAt: string;
     };
+
+    // Requests the stub keeps open on purpose (`hold`), by request id.
+    const held = new Set<string>();
 
     const essays = new Map<string, EssayLike>();
     // Sesión 12: in-memory history per essay. Mirrors what `history.rs`
@@ -122,6 +128,121 @@ export async function installTauriStub(page: Page) {
             }));
             out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
             return out;
+          }
+          case "library_list": {
+            // Same shape as the Rust index: the six meta fields, an excerpt,
+            // the file time and the review inputs when there are any.
+            type Node = { type?: string; text?: string; marks?: { type: string; attrs?: Record<string, unknown> }[]; content?: Node[] };
+            const deny = ["mensaje", "reemplazo", "sugerencia", "evidence", "provenance"];
+            const out = Array.from(essays.values()).map((e) => {
+              const texts: string[] = [];
+              const marks: { type: string; attrs?: Record<string, unknown> }[] = [];
+              const walk = (n: Node, top: boolean) => {
+                if (n.type === "text" && typeof n.text === "string") {
+                  texts.push(n.text);
+                  for (const m of n.marks ?? []) {
+                    if (m.type !== "annotation") continue;
+                    const attrs: Record<string, unknown> = {};
+                    for (const [k, v] of Object.entries(m.attrs ?? {})) if (!deny.includes(k)) attrs[k] = v;
+                    marks.push({ type: m.type, attrs });
+                  }
+                }
+                for (const c of n.content ?? []) walk(c, false);
+                if (!top && n.type === "paragraph") texts.push(" ");
+              };
+              walk(e.content as Node, true);
+              const body = texts.join("").replace(/\s+/g, " ").trim();
+              const meta = (e as { evaluacionMeta?: Record<string, unknown> }).evaluacionMeta;
+              const recs = (e.findings ?? []) as Record<string, unknown>[];
+              const entry: Record<string, unknown> = {
+                id: e.id,
+                title: e.title,
+                mode: e.mode,
+                wordCount: e.wordCount,
+                createdAt: e.createdAt,
+                updatedAt: e.updatedAt,
+                excerpt: body.slice(0, 320),
+                fileModifiedMs: Date.parse(e.updatedAt) || 0,
+              };
+              if (meta || recs.length > 0 || marks.length > 0) {
+                const review: Record<string, unknown> = { marks };
+                if (recs.length > 0) {
+                  review.findings = recs.map((r) => ({
+                    id: r.id, sage: r.sage, pase: r.pase, severidad: r.severidad,
+                    criterioId: r.criterioId, status: r.status,
+                  }));
+                }
+                if (meta) {
+                  const { reviewerRuns: _drop, ...rest } = meta;
+                  void _drop;
+                  review.evaluacionMeta = rest;
+                }
+                const rub = (e as { rubrica?: { criterios?: unknown[] } }).rubrica;
+                if (rub?.criterios) review.rubrica = { criterios: rub.criterios };
+                entry.review = review;
+              }
+              return entry as { updatedAt: string; id: string; title: string; excerpt: string };
+            });
+            out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+            return out;
+          }
+          case "library_search": {
+            const clean = (t: string) =>
+              t.toLowerCase().normalize("NFD").replace(/n\u0303/g, "\u00f1").replace(/[\u0300-\u036f]/g, "");
+            const words = clean(String(args.query ?? "")).split(/\s+/).filter(Boolean);
+            if (words.length === 0) return { hits: [] };
+            type Node = { type?: string; text?: string; content?: Node[] };
+            const bodyOf = (e: EssayLike) => {
+              const parts: string[] = [];
+              const walk = (n: Node) => {
+                if (n.type === "text" && typeof n.text === "string") parts.push(n.text);
+                for (const c of n.content ?? []) walk(c);
+                if (n.type === "paragraph") parts.push(" ");
+              };
+              walk(e.content as Node);
+              return parts.join("").replace(/\s+/g, " ").trim();
+            };
+            const segs = (text: string) => {
+              // Fold is one character to one character, so offsets line up.
+              const f = clean(text);
+              const mark = new Array<boolean>(text.length).fill(false);
+              for (const w of words) {
+                let i = f.indexOf(w);
+                while (i >= 0) {
+                  for (let k = i; k < i + w.length; k++) mark[k] = true;
+                  i = f.indexOf(w, i + 1);
+                }
+              }
+              const out: { text: string; hit: boolean }[] = [];
+              for (let i = 0; i < text.length; i++) {
+                const last = out[out.length - 1];
+                if (last && last.hit === mark[i]) last.text += text[i];
+                else out.push({ text: text[i], hit: mark[i] });
+              }
+              return out;
+            };
+            const hits: { id: string; rank: string; title: unknown; snippet?: unknown; updatedAt: string }[] = [];
+            for (const e of essays.values()) {
+              const t = clean(e.title);
+              const b = clean(bodyOf(e));
+              if (!words.every((w) => t.includes(w) || b.includes(w))) continue;
+              const inTitle = words.every((w) => t.includes(w));
+              const hit: { id: string; rank: string; title: unknown; snippet?: unknown; updatedAt: string } = {
+                id: e.id, rank: inTitle ? "title" : "body", title: segs(e.title), updatedAt: e.updatedAt,
+              };
+              if (!inTitle) {
+                const body = bodyOf(e);
+                const at = Math.max(0, clean(body).indexOf(words.find((w) => b.includes(w)) ?? ""));
+                const start = Math.max(0, at - 40);
+                const piece = body.slice(start, start + 120);
+                hit.snippet = segs((start > 0 ? "\u2026" : "") + piece + (start + 120 < body.length ? "\u2026" : ""));
+              }
+              hits.push(hit);
+            }
+            hits.sort((a, b) =>
+              a.rank === b.rank ? b.updatedAt.localeCompare(a.updatedAt) : a.rank === "title" ? -1 : 1,
+            );
+            return { hits: hits.map(({ updatedAt: _u, ...h }) => { void _u; return h; }) };
           }
           case "essay_read": {
             const id = String(args.id);
@@ -225,6 +346,33 @@ export async function installTauriStub(page: Page) {
               ],
             };
             const fakeAnswer = fakeAnswers[sage] ?? fakeAnswers.em;
+            // Per-agent behavior, set by a spec before the run:
+            //   hold       stays open until sage_cancel ends it with CANCELLED
+            //   malformed  ends with NO_QUESTIONS, like prose with no numbers
+            const interrogateBehavior = (
+              window as unknown as {
+                __E2E_INTERROGATE_BEHAVIOR__?: Record<string, string>;
+              }
+            ).__E2E_INTERROGATE_BEHAVIOR__?.[sage];
+            if (interrogateBehavior === "hold") {
+              held.add(id);
+              queueMicrotask(() => {
+                dispatchEvent("sage://event", { id, type: "started" });
+              });
+              return id;
+            }
+            if (interrogateBehavior === "malformed") {
+              queueMicrotask(() => {
+                dispatchEvent("sage://event", { id, type: "started" });
+                dispatchEvent("sage://event", {
+                  id,
+                  type: "error",
+                  message: "no usable questions",
+                  code: "NO_QUESTIONS",
+                });
+              });
+              return id;
+            }
             // Emit after a microtask so the renderer has time to wire
             // its listener before the first event arrives.
             queueMicrotask(() => {
@@ -236,11 +384,46 @@ export async function installTauriStub(page: Page) {
                   delta: line + "\n",
                 });
               }
+              fakeAnswer.forEach((line, index) => {
+                dispatchEvent("sage://event", {
+                  id,
+                  type: "question",
+                  index,
+                  text: line.replace(/^\d+\.\s+/, ""),
+                });
+              });
               dispatchEvent("sage://event", {
                 id,
                 type: "complete",
                 result: fakeAnswer.join("\n"),
                 costUsd: 0.0023,
+              });
+            });
+            return id;
+          }
+          case "sage_ask": {
+            const id = String(args.id);
+            const winAsk = window as unknown as {
+              __E2E_LAST_ASK__?: {
+                sage: string;
+                text: string;
+                question: string;
+                language?: string;
+              };
+            };
+            winAsk.__E2E_LAST_ASK__ = {
+              sage: String(args.sage),
+              text: String(args.text),
+              question: String(args.question),
+              language: args.language as string | undefined,
+            };
+            queueMicrotask(() => {
+              dispatchEvent("sage://event", { id, type: "started" });
+              dispatchEvent("sage://event", {
+                id,
+                type: "complete",
+                result: "Según la fuente, el efecto se midió en una muestra pequeña.",
+                costUsd: 0.001,
               });
             });
             return id;
@@ -253,7 +436,7 @@ export async function installTauriStub(page: Page) {
             // Surface the rubrica/fuentes/language payload to tests
             // so we can assert that the renderer forwarded them. Map
             // keeps the last call per pase for ergonomic lookup.
-            type RubricaPayload = { criterios: unknown[] } | undefined;
+            type RubricaPayload = unknown[] | undefined;
             type FuentesPayload = unknown[] | undefined;
             const winx = window as unknown as {
               __E2E_LAST_CRITIQUE__?: Map<
@@ -305,6 +488,35 @@ export async function installTauriStub(page: Page) {
                 [Math.floor(words.length * 0.98), 2],
               ],
             };
+            // Per-pass behavior, set by a spec before the run:
+            //   fail      the request ends with an error
+            //   hold      the request stays open until it is canceled
+            //   unlocated one item whose quote is not in the text
+            const behaviors = (
+              window as unknown as {
+                __E2E_CRITIQUE_BEHAVIOR__?: Record<string, string>;
+              }
+            ).__E2E_CRITIQUE_BEHAVIOR__;
+            const behavior = behaviors?.[pase];
+            if (behavior === "fail") {
+              queueMicrotask(() => {
+                dispatchEvent("sage://event", { id, type: "started" });
+                dispatchEvent("sage://event", {
+                  id,
+                  type: "error",
+                  message: "stub failure",
+                  code: "INCOMPLETE_REVIEW",
+                });
+              });
+              return id;
+            }
+            if (behavior === "hold") {
+              held.add(id);
+              queueMicrotask(() => {
+                dispatchEvent("sage://event", { id, type: "started" });
+              });
+              return id;
+            }
             const picks = slots[pase] ?? slots.coherencia;
             const A = span(picks[0][0], picks[0][1]) || "fragmento uno";
             const B = span(picks[1][0], picks[1][1]) || "fragmento dos";
@@ -312,9 +524,9 @@ export async function installTauriStub(page: Page) {
             // If a rubrica was sent, attach criterioId to one of the
             // items so tests can verify the chip renders.
             const rubricaArg = args.rubrica as
-              | { criterios?: { id?: unknown }[] }
+              | { id?: unknown }[]
               | undefined;
-            const firstCriterio = rubricaArg?.criterios?.[0];
+            const firstCriterio = rubricaArg?.[0];
             const linkedCriterioId =
               firstCriterio && typeof firstCriterio.id === "string"
                 ? firstCriterio.id
@@ -350,6 +562,14 @@ export async function installTauriStub(page: Page) {
                 reemplazo: `${C} con cita`,
               },
             ];
+            if (behavior === "unlocated") {
+              items.length = 0;
+              items.push({
+                cita: "una frase que este ensayo nunca dijo",
+                severidad: "media",
+                mensaje: `[${sage}/${pase}] la frase ya no está en el texto.`,
+              });
+            }
             queueMicrotask(() => {
               dispatchEvent("sage://event", { id, type: "started" });
               for (const it of items) {
@@ -367,6 +587,118 @@ export async function installTauriStub(page: Page) {
                 costUsd: 0.0017,
               });
             });
+            return id;
+          }
+          case "pdf_extract_text": {
+            // The body arrives raw (the real command takes bytes, no path).
+            // The "PDF" is text: `%PDF-scan` has no usable text, `%PDF-locked`
+            // asks for a password, anything else is one page after the header.
+            const raw = args as unknown;
+            const bytes =
+              raw instanceof Uint8Array
+                ? raw
+                : raw instanceof ArrayBuffer
+                  ? new Uint8Array(raw)
+                  : null;
+            if (!bytes) throw new Error("expected raw bytes");
+            const body = new TextDecoder().decode(bytes);
+            if (!body.startsWith("%PDF-")) return { status: "unreadable" };
+            if (body.startsWith("%PDF-scan"))
+              return { status: "no_text", pages: 1 };
+            if (body.startsWith("%PDF-locked")) return { status: "locked" };
+            const newline = body.indexOf("\n");
+            const page = newline >= 0 ? body.slice(newline + 1) : "";
+            return { status: "ok", pages: 1, text: [page] };
+          }
+          case "sage_extract": {
+            // Deterministic, driven by markers in the text, so existing tests
+            // keep their meaning. Citation: `Title:`, `Author: Surname, Names`
+            // (one per line), `Year:`, `Journal:`; the token FABRICATE_YEAR
+            // adds a year that is NOT in the text (the validator must drop it).
+            // Rubric: each bullet line becomes a criterion quoted from the text,
+            // with a declared weight when the line has `NN%`. EXTRACT_FAIL ends
+            // in an error and EXTRACT_MALFORMED returns text that is not JSON.
+            const id = String(args.id);
+            const task = String(args.task);
+            const text = String(args.text);
+            const winEx = window as unknown as {
+              __E2E_LAST_EXTRACT__?: { task: string; text: string }[];
+            };
+            (winEx.__E2E_LAST_EXTRACT__ ??= []).push({ task, text });
+            const lines = text.split("\n").map((l) => l.trim());
+            const after = (re: RegExp) =>
+              lines.map((l) => re.exec(l)).filter((m): m is RegExpExecArray => !!m);
+            let result: string;
+            if (task === "citation") {
+              const out: Record<string, unknown> = {};
+              const title = after(/^(?:Title|Título)\s*:\s*(.+)$/i)[0];
+              if (title) out.titulo = title[1];
+              const authors = after(/^(?:Author|Autor)\s*:\s*([^,]+?)\s*(?:,\s*(.+))?$/i);
+              if (authors.length)
+                out.autores = authors.map((m) => ({
+                  apellidos: m[1],
+                  ...(m[2] ? { nombres: m[2] } : {}),
+                }));
+              const year = after(/^(?:Year|Año|Anio)\s*:\s*(\d{4})$/i)[0];
+              if (year) out.anio = year[1];
+              if (text.includes("FABRICATE_YEAR")) out.anio = "2007";
+              const journal = after(/^(?:Journal|Revista)\s*:\s*(.+)$/i)[0];
+              if (journal) out.revista = journal[1];
+              result = JSON.stringify(out);
+            } else {
+              const items = after(/^[-*]\s+(.+)$/).map((m) => {
+                const line = m[1];
+                const weight = /(\d+)\s*%/.exec(line);
+                const colon = line.indexOf(":");
+                return {
+                  nombre: (colon > 0 ? line.slice(0, colon) : line)
+                    .replace(/\s*\(?\d+\s*%\)?/, "")
+                    .trim(),
+                  descripcion: colon > 0 ? line.slice(colon + 1).trim() : line,
+                  cita: line,
+                  ...(weight
+                    ? {
+                        peso_declarado: weight[0],
+                        peso_valor: Number(weight[1]),
+                        peso_unidad: "porcentaje",
+                      }
+                    : {}),
+                };
+              });
+              result = JSON.stringify(
+                items.length ? { criterios: items } : { sin_criterios: true },
+              );
+            }
+            if (text.includes("EXTRACT_MALFORMED")) result = "esto no es json";
+            queueMicrotask(() => {
+              dispatchEvent("sage://event", { id, type: "started" });
+              if (text.includes("EXTRACT_FAIL")) {
+                dispatchEvent("sage://event", {
+                  id,
+                  type: "error",
+                  message: "stub extract failure",
+                  code: "REVIEW_FAILED",
+                });
+                return;
+              }
+              dispatchEvent("sage://event", { id, type: "complete", result, costUsd: 0.0005 });
+            });
+            return id;
+          }
+          case "sage_cancel": {
+            const id = String(args.id);
+            const winc = window as unknown as { __E2E_CANCELED__?: string[] };
+            (winc.__E2E_CANCELED__ ??= []).push(id);
+            if (held.delete(id)) {
+              queueMicrotask(() => {
+                dispatchEvent("sage://event", {
+                  id,
+                  type: "error",
+                  message: "cancelled",
+                  code: "CANCELLED",
+                });
+              });
+            }
             return id;
           }
           case "sage_ping":
@@ -400,14 +732,77 @@ export async function openNewEssay(
   await page.goto("/");
   const button =
     mode === "academico"
-      ? page.getByRole("button", { name: /Nuevo académico/i })
-      : page.getByRole("button", { name: /Nuevo blog/i });
+      ? page.getByTestId("library-new-academico")
+      : page.getByTestId("library-new-blog");
   await button.click();
   await page.getByRole("textbox", { name: "Título del ensayo" }).waitFor({
     state: "visible",
   });
   await page.locator(".tl-container").first().waitFor({ state: "visible" });
   await page.waitForTimeout(250);
+}
+
+/**
+ * Open the Más panel from its trigger (idempotent). Language, type, Fuentes,
+ * Rúbrica, Historial and the MCP row live inside it.
+ */
+export async function openMore(page: Page) {
+  const panel = page.getByTestId("more-panel");
+  if (await panel.isVisible().catch(() => false)) return;
+  await page.getByTestId("topbar-more").click();
+  await panel.waitFor({ state: "visible" });
+}
+
+/**
+ * Hazme preguntas lives in the toolbar, except while the board is open and
+ * empty, where the empty board carries the same call to action. This points at
+ * whichever one is on screen.
+ */
+export function hazmeButton(page: Page) {
+  return page.locator('[data-testid="topbar-hazme"]:visible, [data-testid="board-empty-cta"]:visible');
+}
+
+/**
+ * Open Hazme preguntas with only one agent on. The toolbar has no avatar per
+ * agent: the panel opens with the essay type's defaults, so this turns every
+ * other tile off and that agent's tile on. Names: Evidencia, Sistemas,
+ * Práctica, Objeciones.
+ */
+export async function openSingleAgent(page: Page, name: string) {
+  await hazmeButton(page).click();
+  const ids: Record<string, string> = {
+    Evidencia: "em",
+    Sistemas: "sis",
+    Práctica: "pra",
+    Objeciones: "cri",
+  };
+  const want = ids[name];
+  for (const id of Object.values(ids)) {
+    const tile = page.getByTestId(`lectura-sage-toggle-${id}`);
+    const active = (await tile.getAttribute("data-active")) === "true";
+    if (active !== (id === want)) await tile.click();
+  }
+}
+
+/**
+ * Give Hazme preguntas a source: uploads a .txt through the drop zone, which
+ * saves it to the essay's sources and selects it. Returns nothing; the panel
+ * must be open.
+ */
+export async function pickSource(
+  page: Page,
+  body = "Edmondson definió la seguridad psicológica como la creencia compartida.",
+  name = "fuente.txt",
+) {
+  await page.getByTestId("lectura-file-input").setInputFiles({
+    name,
+    mimeType: "text/plain",
+    buffer: Buffer.from(body, "utf-8"),
+  });
+  await page
+    .getByTestId("lectura-fuente-chip")
+    .filter({ hasText: name.replace(/\.[^.]+$/, "") })
+    .waitFor({ state: "visible" });
 }
 
 type EssayDump = {
@@ -420,6 +815,7 @@ type EssayDump = {
   content: unknown;
   board?: unknown;
   interrogatorios?: unknown[];
+  findings?: unknown[];
   rubrica?: { criterios: unknown[] };
   fuentes?: unknown[];
   evaluacionMeta?: unknown;
@@ -438,7 +834,7 @@ export async function dumpEssays(page: Page): Promise<EssayDump[]> {
 type CritiqueCapture = {
   sage: string;
   pase: string;
-  rubrica?: { criterios: unknown[] };
+  rubrica?: unknown[];
   fuentes?: unknown[];
   language?: string;
 };
@@ -475,4 +871,46 @@ export async function dumpInterrogates(
     });
     return out;
   }) as Promise<Record<string, InterrogateCapture>>;
+}
+
+/**
+ * Run a review from the Revisar ensayo panel and wait until the findings
+ * have landed in the text. `skip` turns agents off before starting.
+ * The panel closes on its own when the review lands.
+ */
+export async function runReview(
+  page: Page,
+  opts: { skip?: string[] } = {},
+): Promise<void> {
+  await page.getByTestId("topbar-pluma-roja").click();
+  for (const pase of opts.skip ?? []) {
+    await page.getByTestId(`pluma-pase-toggle-${pase}`).click();
+  }
+  await page.getByTestId("pluma-start").click();
+  await expect(page.locator(".tiptap-content .anno").first()).toBeVisible();
+  await expect(page.getByTestId("pluma-overlay")).toHaveCount(0);
+}
+
+/** Open the report card behind the stamp. */
+export async function openReport(page: Page): Promise<void> {
+  await page.getByTestId("scorebar").click();
+  await expect(page.getByTestId("report-card")).toBeVisible();
+}
+
+/** Open Correcciones with every finding, through the report card. */
+export async function openAllCorrections(page: Page): Promise<void> {
+  await openReport(page);
+  await page.getByTestId("stamp-all-corrections").click();
+  await expect(page.getByTestId("corrections-panel")).toBeVisible();
+}
+
+/** Mark every open correction as not applicable, one by one. */
+export async function dismissAllCorrections(page: Page): Promise<void> {
+  const cards = page.getByTestId("finding-not-applicable");
+  for (;;) {
+    const n = await cards.count();
+    if (n === 0) break;
+    await cards.first().click();
+    await expect(cards).toHaveCount(n - 1);
+  }
 }

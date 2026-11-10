@@ -100,3 +100,35 @@ export function findCitaRange(
   // its end. PM positions are exclusive on the right of a text range.
   return { from: startChar.pos, to: endChar.pos + 1 };
 }
+
+/**
+ * The sentence that contains document position `pos`, as a PM range,
+ * limited to its textblock (a sentence never crosses a paragraph).
+ * Used to decide whether a new finding lands on a sentence the author
+ * already closed. `null` when `pos` is not inside a textblock.
+ */
+export function sentenceRange(
+  editor: Editor,
+  pos: number,
+): { from: number; to: number } | null {
+  const doc = editor.state.doc;
+  if (pos < 0 || pos > doc.content.size) return null;
+  const $pos = doc.resolve(pos);
+  const block = $pos.parent;
+  if (!block.isTextblock) return null;
+  const start = $pos.start();
+  // One char per position: text is itself, any inline leaf is a single placeholder.
+  const text = block.textBetween(0, block.content.size, undefined, "￼");
+  if (text.length === 0) return null;
+  const offset = Math.min(Math.max(pos - start, 0), text.length - 1);
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
+  for (const seg of segmenter.segment(text)) {
+    const end = seg.index + seg.segment.length;
+    if (offset >= seg.index && offset < end) {
+      // Trim trailing whitespace so adjacent sentences do not touch.
+      const trimmed = seg.segment.replace(/\s+$/, "");
+      return { from: start + seg.index, to: start + seg.index + trimmed.length };
+    }
+  }
+  return null;
+}

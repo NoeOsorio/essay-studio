@@ -1,76 +1,112 @@
 @import "tailwindcss";
 
 /* =========================================================
-   Essay Studio — Pergamino paper-tone design tokens.
+   Essay Studio: Stationery Desk design tokens.
    Tailwind 4 reads `@theme` to expose tokens as utilities
    (bg-paper, text-ink-1, font-serif, etc.).
-   The sage colors (em/sis/pra/cri) carry voice — never
-   substitute with generic palette colors.
+   Color means only which agent wrote something. Existing token
+   names are repointed so overlays that later specs replace stay
+   legible with no edits (research R1).
    ========================================================= */
 
-@theme {
-  /* ---- paper surfaces ---- */
-  --color-paper:    #F6F1E7;
-  --color-paper-2:  #FBF7EE;
-  --color-paper-3:  #EFE8DA;
-  --color-paper-4:  #E6DDC9;
+/* static: inline styles read var(--color-*-ink) and friends, which no utility uses. */
+@theme static {
+  /* ---- desk, sheet, shade ---- */
+  --color-paper:    #FAF8F3;
+  --color-paper-2:  #FFFFFF;
+  --color-paper-3:  #F1EEE6;
+  --color-paper-4:  #E7E2D6;
+  --color-sheet:    #FFFFFF;
+  --color-shade:    #F1EEE6;
+  --color-board:    #F4F1E8;
+  --color-board-dot:#CFC8B6;
+  --color-placeholder: #C9C2B3;
+  --color-body:     #2A2723;
+  --color-selection:#2F6FEB;
 
   /* ---- ink (text) ---- */
-  --color-ink-1: #1F1B14;
-  --color-ink-2: #4A4338;
-  --color-ink-3: #7B7261;
-  --color-ink-4: #A89E89;
+  --color-ink-1: #1D1B18;
+  --color-ink-2: #4A463F;
+  --color-ink-3: #6B665C;
+  --color-ink-4: #6B665C;
 
-  /* ---- rules / borders ---- */
-  --color-rule-1: #E2D9C5;
-  --color-rule-2: #D2C7AE;
-  --color-rule-3: #B7A98A;
+  /* ---- rules: ink at 8, 12 and 24 percent ---- */
+  --color-rule-1: rgba(29, 27, 24, 0.08);
+  --color-rule-2: rgba(29, 27, 24, 0.12);
+  --color-rule-3: rgba(29, 27, 24, 0.24);
 
-  /* ---- seal red (primary accent) ---- */
-  --color-seal:      #B23A2A;
-  --color-seal-soft: #E8C9C2;
+  /* ---- primary accent is ink; red is reserved for errors ---- */
+  --color-seal:      #1D1B18;
+  --color-seal-soft: #F1EEE6;
 
-  /* ---- sages — Empirista (ámbar) ---- */
-  --color-em:     #B07A1F;
-  --color-em-bg:  #F4E5C2;
-  --color-em-ink: #54401A;
+  /* ---- agents. `-bg` is the note fill, `-ink` header and icon,
+        bare name is the ink as text/solid fill, `-text` the note body,
+        `-dot` the dot and `-line` the underline. ---- */
+  --color-tu-note: #FFFDF8;
 
-  /* ---- sages — Sistémico (teal) ---- */
-  --color-sis:     #2E7E72;
-  --color-sis-bg:  #CFE3DD;
-  --color-sis-ink: #1F4A43;
+  --color-em:      #6E4600;
+  --color-em-bg:   #FFE08A;
+  --color-em-ink:  #6E4600;
+  --color-em-text: #2B2410;
+  --color-em-dot:  #E8B421;
+  --color-em-line: #F5C542;
 
-  /* ---- sages — Práctico (coral) ---- */
-  --color-pra:     #B14B36;
-  --color-pra-bg:  #F2D0C5;
-  --color-pra-ink: #5A2519;
+  --color-sis:      #0D5E46;
+  --color-sis-bg:   #BDEBD6;
+  --color-sis-ink:  #0D5E46;
+  --color-sis-text: #0F2E24;
+  --color-sis-dot:  #2FA57C;
+  --color-sis-line: #7FD3AE;
 
-  /* ---- sages — Crítico (morado) ---- */
-  --color-cri:     #6E4FA8;
-  --color-cri-bg:  #DCD0EC;
-  --color-cri-ink: #3A2660;
+  --color-pra:      #234A9C;
+  --color-pra-bg:   #CADDFF;
+  --color-pra-ink:  #234A9C;
+  --color-pra-text: #14264D;
+  --color-pra-dot:  #4C7EE0;
+  --color-pra-line: #8FB1F0;
+
+  --color-cri:      #563397;
+  --color-cri-bg:   #E3D5FF;
+  --color-cri-ink:  #563397;
+  --color-cri-text: #2A1A4A;
+  --color-cri-dot:  #9670E0;
+  --color-cri-line: #B79AF0;
 
   /* ---- semantic ---- */
-  --color-ok:   #3F7F4A;
-  --color-warn: #9A7220;
-  --color-err:  #9C2C1F;
+  --color-ok:   #4A463F;
+  --color-warn: #4A463F;
+  --color-err:  #B42318;
 
   /* ---- typography ---- */
   --font-serif: var(--font-newsreader), "Iowan Old Style", Georgia, serif;
-  --font-sans:  var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono:  var(--font-jetbrains-mono), ui-monospace, monospace;
+  --font-sans:  var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:  var(--font-geist-mono), ui-monospace, monospace;
 
   /* ---- radii ---- */
   --radius-1: 6px;
   --radius-2: 8px;
   --radius-3: 14px;
 
-  /* ---- shadows ---- */
-  --shadow-soft: 0 1px 0 rgba(255,255,255,.6) inset, 0 1px 2px rgba(60,40,10,.06);
-  --shadow-lift: 0 1px 0 rgba(255,255,255,.6) inset, 0 8px 24px rgba(60,40,10,.10);
-  --shadow-pop:  0 16px 40px rgba(60,40,10,.18), 0 2px 6px rgba(60,40,10,.08);
-  --shadow-postit: 0 6px 14px rgba(60,40,10,.10), 0 1px 0 rgba(255,255,255,.5) inset;
-  --shadow-postit-lifted: 0 16px 36px rgba(60,40,10,.18), 0 1px 0 rgba(255,255,255,.5) inset;
+  /* ---- shadows (warm, low) ---- */
+  --shadow-soft: 0 1px 2px rgba(60, 45, 10, 0.06);
+  --shadow-lift: 0 8px 24px rgba(60, 45, 10, 0.10);
+  --shadow-pop:  0 16px 40px rgba(60, 45, 10, 0.18), 0 2px 6px rgba(60, 45, 10, 0.08);
+  --shadow-sheet: 0 0 0 1px #1D1B1814, 0 18px 40px -12px #3C2D0A29, 0 2px 6px #1D1B180F;
+  --shadow-sheet-compact: 0 0 0 1px #1D1B1814, 0 18px 40px -12px #1D1B1847;
+  --shadow-postit: 0 1px 1px #3C2D0A14, 0 10px 20px -8px #3C2D0A4D;
+  --shadow-postit-lifted: 0 1px 1px #3C2D0A14, 0 16px 28px -8px #3C2D0A66;
+}
+
+/* ---- motion tokens (contracts/primitives.md) ---- */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-standard: ease-out;
+  --dur-press: 120ms;
+  --dur-tooltip: 120ms;
+  --dur-peel: 240ms;
+  --dur-note: 280ms;
+  --dur-settle: 320ms;
+  --stagger: 60ms;
 }
 
 /* ---------------------------------------------------------
@@ -87,37 +123,26 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* paper grain — subtle SVG turbulence overlay */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.4;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.4  0 0 0 0 0.3  0 0 0 0 0.15  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-}
-
-/* dotted grid for the board panel */
+/* dotted texture for the board panel */
 .board-grid {
-  background-color: var(--color-paper-3);
-  background-image: radial-gradient(circle at 1px 1px, rgba(60, 40, 10, 0.10) 1px, transparent 1px);
+  background-color: var(--color-board);
+  background-image: radial-gradient(circle at 1px 1px, var(--color-board-dot) 1px, transparent 1px);
   background-size: 22px 22px;
 }
 
 /* keyboard chip */
 .kbd {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-ink-3);
-  background: var(--color-paper);
+  background: var(--color-shade);
   border: 1px solid var(--color-rule-2);
   border-radius: 3px;
   padding: 1px 5px;
 }
 .kbd-dark {
   background: rgba(255,255,255,0.10);
-  color: #E6DDC9;
+  color: #E7E2D6;
   border-color: rgba(255,255,255,0.20);
 }
 
@@ -126,47 +151,34 @@ body::before {
 .thin-scroll::-webkit-scrollbar-thumb { background: var(--color-rule-2); border-radius: 4px; }
 
 /* ---------------------------------------------------------
-   Inline annotations in the editor — tinted highlight + chip
+   Inline annotations in the editor: a 3 px underline per agent,
+   colored from `-line`. `data-by` carries the agent id.
    --------------------------------------------------------- */
 .anno {
-  --anno-tint: rgba(0,0,0,0.08);
-  --anno-solid: var(--color-ink-3);
-  background: linear-gradient(180deg, transparent 25%, var(--anno-tint) 25%, var(--anno-tint) 92%, transparent 92%);
-  border-bottom: 1.5px solid var(--anno-solid);
+  --anno-line: var(--color-ink-3);
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-color: var(--anno-line);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
   cursor: pointer;
   position: relative;
-  padding: 1px 1px 0;
 }
-.anno::after {
-  content: attr(data-by);
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  margin-left: 5px;
-  border-radius: 50%;
-  font: 600 8.5px/1 var(--font-mono);
-  letter-spacing: 0.06em;
-  color: #fff;
-  background: var(--anno-solid);
-  vertical-align: 2px;
-  box-shadow: 0 1px 2px rgba(60,40,10,0.18);
-}
-.anno-cri { --anno-tint: rgba(110, 79,168,0.28); --anno-solid: var(--color-cri); }
-.anno-emp { --anno-tint: rgba(176,122, 31,0.32); --anno-solid: var(--color-em);  }
-.anno-sis { --anno-tint: rgba( 46,126,114,0.28); --anno-solid: var(--color-sis); }
-.anno-pra { --anno-tint: rgba(177, 75, 54,0.28); --anno-solid: var(--color-pra); }
+.anno[data-by="em"]  { --anno-line: var(--color-em-line); }
+.anno[data-by="sis"] { --anno-line: var(--color-sis-line); }
+.anno[data-by="pra"] { --anno-line: var(--color-pra-line); }
+.anno[data-by="cri"] { --anno-line: var(--color-cri-line); }
 
 /* ---------------------------------------------------------
    Post-it with vintage tape
    --------------------------------------------------------- */
 .postit {
   position: relative;
-  padding: 18px 14px 14px;
-  border-radius: var(--radius-2);
-  background: var(--color-paper-2);
-  border: 1px solid var(--color-rule-2);
-  font: 400 13.5px/1.55 var(--font-serif);
+  padding: 22px 18px 20px;
+  border-radius: 3px;
+  background: var(--color-tu-note);
+  font: 400 17px/23px var(--font-serif);
   color: var(--color-ink-1);
   box-shadow: var(--shadow-postit);
   cursor: grab;
@@ -174,13 +186,14 @@ body::before {
 .postit::before {
   content: "";
   position: absolute;
-  left: 50%;
-  top: -9px;
-  transform: translateX(-50%) rotate(-2deg);
-  width: 48px;
-  height: 14px;
-  background: rgba(120, 100, 60, 0.20);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset;
+  left: 68px;
+  top: -11px;
+  width: 76px;
+  height: 22px;
+  transform: rotate(-4deg);
+  transform-origin: 0 0;
+  background: #FFFDF5BD;
+  box-shadow: 0 1px 3px #3C2D0A29;
 }
 .postit-lifted {
   transform: rotate(-1.5deg) translateY(-2px);
@@ -189,21 +202,19 @@ body::before {
 
 /* quote block in editor */
 .quote-block {
-  border-left: 2px solid var(--color-seal);
-  padding: 14px 22px;
-  margin: 14px 0 14px -22px;
+  padding: 4px 0 4px 28px;
+  margin: 14px 0;
   font-family: var(--font-serif);
   font-style: italic;
   font-size: 19px;
   line-height: 1.55;
-  color: var(--color-ink-1);
-  background: linear-gradient(90deg, rgba(178,58,42,0.05), transparent 70%);
+  color: var(--color-ink-2);
 }
 .quote-block cite {
   display: block;
   font-style: normal;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-ink-3);
   margin-top: 6px;
   letter-spacing: 0.04em;
@@ -212,14 +223,14 @@ body::before {
 /* citation link */
 .cite {
   color: var(--color-seal);
-  border-bottom: 1px solid rgba(178,58,42,0.35);
+  border-bottom: 1px solid var(--color-rule-3);
   cursor: pointer;
   text-decoration: none;
   background: transparent;
   padding: 1px 2px;
   border-radius: 2px;
 }
-.cite:hover { background: rgba(178,58,42,0.06); }
+.cite:hover { background: var(--color-rule-1); }
 
 /* fade on right edge of board (suggests more columns) */
 .board-fade::after {
@@ -243,9 +254,8 @@ body::before {
 
 /* Flash a mark when the Benchmark drilldown scrolls it into view. */
 @keyframes anno-flash {
-  0%   { box-shadow: 0 0 0 0   rgba(178,58,42,0.45); }
-  40%  { box-shadow: 0 0 0 6px rgba(178,58,42,0.18); }
-  100% { box-shadow: 0 0 0 0   rgba(178,58,42,0); }
+  0%   { background-color: rgba(29,27,24,0.18); }
+  100% { background-color: rgba(29,27,24,0); }
 }
 .anno-flash { animation: anno-flash 1.6s ease-out; border-radius: 2px; }
 
@@ -256,21 +266,21 @@ body::before {
    --------------------------------------------------------- */
 .tiptap-content {
   font-family: var(--font-serif);
-  font-size: 18px;
-  line-height: 1.75;
-  color: var(--color-ink-1);
-  max-width: 62ch;
+  font-size: 19px;
+  line-height: 32px;
+  color: var(--color-body);
 }
 .tiptap-content > * + * { margin-top: 14px; }
-.tiptap-content p { margin: 0; color: var(--color-ink-2); }
+.tiptap-content p { margin: 0; color: var(--color-body); }
+.tiptap-content p + p { margin-top: 20px; }
 .tiptap-content em, .tiptap-content i { font-style: italic; color: var(--color-ink-1); }
 .tiptap-content strong, .tiptap-content b { color: var(--color-ink-1); font-weight: 600; }
 .tiptap-content h1 {
   font-family: var(--font-serif);
   font-weight: 500;
-  font-size: 36px;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
+  font-size: 40px;
+  letter-spacing: -0.015em;
+  line-height: 46px;
   margin: 32px 0 8px;
   color: var(--color-ink-1);
 }
@@ -292,16 +302,14 @@ body::before {
   color: var(--color-ink-1);
 }
 .tiptap-content blockquote {
-  border-left: 2px solid var(--color-seal);
-  padding: 14px 22px;
-  margin: 14px 0 14px -22px;
+  padding: 4px 0 4px 28px;
+  margin: 14px 0;
   font-style: italic;
   font-size: 19px;
-  line-height: 1.55;
-  color: var(--color-ink-1);
-  background: linear-gradient(90deg, rgba(178,58,42,0.05), transparent 70%);
+  line-height: 32px;
+  color: var(--color-ink-2);
 }
-.tiptap-content blockquote p { color: var(--color-ink-1); }
+.tiptap-content blockquote p { color: var(--color-ink-2); }
 .tiptap-content ul, .tiptap-content ol {
   padding-left: 24px;
   margin: 6px 0;
@@ -339,15 +347,15 @@ body::before {
   margin: 24px 0;
 }
 .tiptap-content a {
-  color: var(--color-seal);
+  color: var(--color-ink-1);
   text-decoration: none;
-  border-bottom: 1px solid rgba(178, 58, 42, 0.35);
+  border-bottom: 1px solid var(--color-rule-3);
 }
 
 /* TipTap placeholder: shows when the doc has only an empty paragraph. */
 .tiptap-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
-  color: var(--color-ink-4);
+  color: var(--color-placeholder);
   float: left;
   height: 0;
   pointer-events: none;
@@ -357,7 +365,7 @@ body::before {
 /* TitleInput placeholder. */
 .title-input[data-empty="true"]::before {
   content: attr(data-placeholder);
-  color: var(--color-ink-4);
+  color: var(--color-placeholder);
   font-style: italic;
   pointer-events: none;
 }
@@ -386,12 +394,6 @@ body::before {
 .board-grid .tl-watermark {
   display: none !important;
 }
-/* Selection / hover indicators tinted to the seal red so they
-   read on the warm paper background. */
-.board-grid .tl-svg-container .tl-selection__fg__outline,
-.board-grid .tl-overlays__item .tl-selection__fg__outline {
-  stroke: var(--color-seal) !important;
-}
 .board-grid .tl-collaborator__cursor {
   display: none;
 }
@@ -399,4 +401,338 @@ body::before {
    look out of place against paper. */
 .board-grid {
   cursor: default;
+}
+
+/* ---------------------------------------------------------
+   Motion. Tokens live on :root above. Only transform, opacity
+   and clip-path animate; shadows sit on their own layer and
+   never animate box-shadow.
+   --------------------------------------------------------- */
+
+/* Press: pointer only, so keyboard activation does not shrink. */
+.press {
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* A note lands on the board: from slightly above and larger. */
+@keyframes land {
+  0%   { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.note-land {
+  animation: land var(--dur-note) var(--ease-out) both;
+}
+/* The tape arrives 60 ms later and settles in 200 ms, same curve. */
+@keyframes tape-land {
+  0%   { opacity: 0; transform: translateY(-6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.note-land .note-tape {
+  animation: tape-land 200ms var(--ease-out) var(--stagger) both;
+}
+/* Lift while dragging: the note rises, its shadow layer deepens (opacity only). */
+.note-lift {
+  position: relative;
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.note-lift[data-lifted="true"] {
+  transform: translateY(-4px) scale(1.02);
+}
+.note-lift-shadow {
+  opacity: 0;
+  transition: opacity var(--dur-press) var(--ease-out);
+}
+.note-lift[data-lifted="true"] .note-lift-shadow {
+  opacity: 1;
+}
+
+/* Peel: the corner lifts away. clip-path on the body, transform and
+   opacity on the rest. */
+@keyframes peel-body {
+  0%   { opacity: 1; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); transform: translateY(0) rotate(0deg); }
+  100% { opacity: 0; clip-path: polygon(0 0, 100% 0, 100% 62%, 38% 100%, 0 100%); transform: translateY(6px) rotate(1.5deg); }
+}
+@keyframes peel-corner {
+  0%   { opacity: 0; transform: translate(0, 0) rotate(0deg); }
+  40%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-8px, -10px) rotate(-14deg); }
+}
+@keyframes peel-shadow {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+.note-peel-body   { animation: peel-body   var(--dur-peel) var(--ease-out) both; }
+.note-peel-corner { animation: peel-corner var(--dur-peel) var(--ease-out) both; }
+.note-peel-shadow { animation: peel-shadow var(--dur-peel) var(--ease-standard) both; }
+
+/* Empty-board loop: a ghost note breathing slowly. */
+@keyframes board-empty-loop {
+  0%, 100% { opacity: 0.55; transform: translateY(0) rotate(var(--ghost-tilt, -2deg)); }
+  50%      { opacity: 0.8;  transform: translateY(-4px) rotate(var(--ghost-tilt, -2deg)); }
+}
+.board-empty-loop {
+  animation: board-empty-loop 4.8s ease-in-out infinite;
+}
+
+/* Popover and panel entrance (origin set inline at the trigger). */
+@keyframes sheet-in {
+  0%   { opacity: 0; transform: scale(0.96); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.sheet-in {
+  animation: sheet-in var(--dur-settle) var(--ease-out) both;
+}
+
+/* Tooltip entrance. */
+@keyframes tooltip-in {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.tooltip-in {
+  animation: tooltip-in var(--dur-tooltip) var(--ease-out) both;
+}
+@keyframes fade-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .press:active { transform: none; }
+  .note-land { animation: fade-in var(--dur-note) var(--ease-standard) both; }
+  .note-land .note-tape { animation: none; }
+  .note-lift[data-lifted="true"] { transform: none; }
+  .note-peel-body   { animation: peel-shadow var(--dur-peel) var(--ease-standard) both; }
+  .note-peel-corner { animation: none; }
+  .note-peel-shadow { animation: peel-shadow var(--dur-peel) var(--ease-standard) both; }
+  .board-empty-loop { animation: none; opacity: 0.7; }
+  .sheet-in   { animation: fade-in var(--dur-settle) var(--ease-standard) both; }
+  .tooltip-in { animation: fade-in var(--dur-tooltip) var(--ease-standard) both; }
+  .sage-pulse { animation: none; }
+}
+
+/* ---------------------------------------------------------
+   Review motion (Paper R4.3, R5.4). Underline 320 ms, stamp 280 ms,
+   panel 240 ms with 60 ms between cards, fold 240 ms. Only the first
+   screenful of cards staggers. Reduced motion: fades only, no travel.
+   --------------------------------------------------------- */
+
+/* Underline appears. Native text decoration cannot be clipped without
+   clipping the text, so the line fades in; the class is added by the
+   code that applies marks and removed when the animation ends. */
+@keyframes anno-draw {
+  0%   { text-decoration-color: transparent; }
+  100% { text-decoration-color: var(--anno-line); }
+}
+/* The effect classes arrive as editor decorations (a wrapper around the
+   underlined text), so they are matched next to or around .anno. */
+.anno.anno-draw,
+.anno-draw .anno,
+.anno:has(.anno-draw) { animation: anno-draw var(--dur-settle) var(--ease-standard) both; }
+
+/* R4.3: on a mouse resolve the underline fades out while the card folds. */
+.anno.anno-erase,
+.anno-erase .anno,
+.anno:has(.anno-erase) {
+  transition: text-decoration-color 200ms var(--ease-standard);
+  text-decoration-color: transparent;
+}
+
+/* R5.4: with the panel narrowed to a criterion, underlines of the other
+   criteria step back. The editor sets data-annos-narrowed and marks the
+   ones that stay with data-narrowed-in. */
+.anno { transition: text-decoration-color var(--dur-note) var(--ease-standard); }
+[data-annos-narrowed] .anno {
+  text-decoration-color: color-mix(in srgb, var(--anno-line) 25%, transparent);
+}
+/* The marker is a wrapper decoration, inside or around the underline. */
+[data-annos-narrowed] .anno:has([data-narrowed-in]),
+[data-annos-narrowed] [data-narrowed-in] .anno {
+  text-decoration-color: var(--anno-line);
+}
+
+/* Stamp lands: slight overscale to rest. The tilt uses the separate
+   `rotate` property, so this transform does not disturb it. */
+@keyframes stamp-arrive {
+  0%   { opacity: 0; transform: scale(1.3); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.stamp-arrive { animation: stamp-arrive var(--dur-note) var(--ease-standard) both; }
+
+/* Correction cards enter in order (first screenful) and fold when done. */
+@keyframes card-in {
+  0%   { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.card-in {
+  animation: card-in var(--dur-peel) var(--ease-standard) both;
+  animation-delay: calc(var(--card-i, 0) * 60ms);
+}
+@keyframes card-fold {
+  0%   { opacity: 1; clip-path: inset(0 0 0 0 round 12px); }
+  100% { opacity: 0; clip-path: inset(0 0 100% 0 round 12px); }
+}
+.card-fold { animation: card-fold var(--dur-peel) var(--ease-standard) both; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anno.anno-draw, .anno-draw .anno, .anno:has(.anno-draw) { animation: none; }
+  [data-annos-narrowed] .anno { transition: none; }
+  .stamp-arrive { animation: fade-in var(--dur-note) var(--ease-standard) both; }
+  .card-in { animation: fade-in var(--dur-peel) var(--ease-standard) both; animation-delay: 0ms; }
+  .card-fold { animation: fade-out var(--dur-peel) var(--ease-standard) both; }
+}
+@keyframes fade-out {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ---------------------------------------------------------
+   Library paper (Paper R1.1, R1.2, R1.3). Surfaces for the desk cards
+   and the ruled ledger, plus the typing caret of first use. Slice 4
+   reuses .paper-ledger (36 px rows) and asks for further additions.
+   --------------------------------------------------------- */
+.paper-ruled {
+  background: repeating-linear-gradient(#FFFFFF 0 31px, #D6E2F5 31px 32px);
+}
+.paper-ledger {
+  background: repeating-linear-gradient(#FFFFFF 0 35px, #E0E9F7 35px 36px);
+}
+.paper-cream {
+  background-color: #FBF4E2;
+}
+.paper-grid {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.9)),
+    repeating-linear-gradient(to right, #DCE5F2 0 1px, transparent 1px 18px),
+    repeating-linear-gradient(#DCE5F2 0 1px, #FFFFFF 1px 18px);
+}
+@keyframes caret-blink {
+  0%, 49%  { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.caret-blink {
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .caret-blink { animation: none; }
+}
+
+/* ---------------------------------------------------------
+   Questions run (Paper R3.4, R7.3). The agent's line fades in and
+   changes every 2 s (the consumer rotates it); the panel folds toward
+   the pill; the pill leaves with a fade. `land` and `peel` stay as defined above.
+   --------------------------------------------------------- */
+.voice-line {
+  animation: fade-in 200ms var(--ease-out) both;
+}
+@keyframes panel-fold {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.88); }
+}
+.panel-fold {
+  transform-origin: var(--fold-origin, 50% 100%);
+  animation: panel-fold 280ms var(--ease-out) both;
+  pointer-events: none;
+}
+.pill-out {
+  animation: fade-out 200ms var(--ease-out) both;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-fold { animation: fade-out 200ms var(--ease-out) both; }
+}
+
+/* ---------------------------------------------------------
+   Material fills itself in (Paper R6.6, R7.3). Only transform, opacity and
+   background-position animate. Reduced motion: fades only, still band.
+   --------------------------------------------------------- */
+
+/* The drop zone darkens a little while a file is over it. */
+.material-zone {
+  background-color: #FAF8F3;
+  transition: background-color 150ms var(--ease-out);
+}
+.material-zone[data-over="true"] {
+  background-color: #f1eee6;
+}
+
+/* Reading: the sheet settles, a band of light crosses it. */
+@keyframes sheet-settle {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.sheet-settle {
+  animation: sheet-settle var(--dur-peel) var(--ease-out) both;
+}
+@keyframes read-band {
+  0%   { transform: translateY(0); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateY(var(--band-travel, 52px)); opacity: 0; }
+}
+.read-band {
+  background-image: linear-gradient(180deg, transparent 0%, rgb(255 224 138 / 50%) 50%, transparent 100%);
+  animation: read-band 1.4s var(--ease-standard) infinite;
+}
+
+/* Criteria rows enter one after another (set --stagger on each row: 60 ms steps). */
+@keyframes row-in {
+  0%   { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.row-in {
+  animation: row-in var(--dur-peel) var(--ease-out) var(--stagger, 0ms) both;
+}
+
+/* Weight dots fill in (set --stagger on each dot: 40 ms steps). */
+@keyframes dot-fill {
+  0%   { transform: scale(0.6); }
+  100% { transform: scale(1); }
+}
+.dot-fill {
+  animation: dot-fill 160ms var(--ease-out) var(--stagger, 0ms) both;
+}
+
+/* The citation line arrives; the spinner gives way to the document icon. */
+@keyframes cite-in {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.cite-in {
+  animation: cite-in 200ms var(--ease-out) both;
+}
+.reading-shimmer {
+  background-image: linear-gradient(90deg, #f1eee6 0%, #e3ddcd 50%, #f1eee6 100%);
+  background-size: 200% 100%;
+  animation: reading-shimmer 1.2s linear infinite;
+}
+@keyframes reading-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.spinner-out {
+  animation: fade-out 160ms var(--ease-out) both;
+}
+.doc-icon-in {
+  animation: fade-in 160ms var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-settle, .row-in, .cite-in { animation: fade-in var(--dur-peel) var(--ease-standard) both; }
+  .dot-fill { animation: none; }
+  .read-band { animation: none; opacity: 0.6; }
+  .reading-shimmer { animation: none; }
+}
+
+/* ---------------------------------------------------------
+   Keyboard focus: one 2 px ink ring on every control, never the
+   browser's blue one (Paper R7, "Anillo de foco de 2 px en todo control").
+   --------------------------------------------------------- */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-ink-1);
+  outline-offset: 2px;
 }

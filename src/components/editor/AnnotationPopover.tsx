@@ -1,250 +1,83 @@
 "use client";
 
-import { useEffect, useState } from "react";
+// A thin anchor: clicking an underline opens the one finding card in the
+// shared Popover. All content and actions live in `Finding`.
+
+import { useEffect, useMemo, useState } from "react";
 import type { Editor } from "@tiptap/core";
 
-import { Avatar, type SageKey } from "@/components/ui/Avatar";
+import { Finding } from "@/components/review/Finding";
+import { Popover } from "@/components/ui/Popover";
+import { deriveFindings } from "@/lib/review/findings";
 import { useStore } from "@/lib/store";
-import { ReviewEvidenceDetails } from "@/components/ReviewEvidenceDetails";
-import type { ReviewEvidence, ReviewProvenance } from "@/lib/storage/types";
 
-type Open = {
-  evidence?: ReviewEvidence[] | null;
-  provenance?: ReviewProvenance | null;
-  rect: DOMRect;
-  id: string;
-  sage: SageKey;
-  pase: string;
-  severidad: string;
-  mensaje: string;
-  reemplazo: string | null;
-  criterioId: string | null;
-};
+type Open = { id: string; el: HTMLElement };
 
-const SAGE_NAME: Record<SageKey, string> = {
-  em: "el Empirista",
-  sis: "el Sistémico",
-  pra: "el Práctico",
-  cri: "el Crítico",
-};
-
-const SAGE_INITIALS: Record<SageKey, string> = {
-  em: "EM",
-  sis: "SI",
-  pra: "PR",
-  cri: "CR",
-};
-
-const PASE_LABEL: Record<string, string> = {
-  coherencia: "coherencia",
-  estilo: "estilo",
-  argumento: "argumento",
-  apa: "APA",
-};
-
-const SEV_TONE: Record<string, string> = {
-  alta: "bg-seal",
-  media: "bg-em",
-  baja: "bg-sis",
-};
-
-/**
- * Floating panel that opens when the user clicks an `.anno` span in
- * the editor. Reads the mark's data-* attrs out of the DOM (no extra
- * state plumbing), and lets the user dismiss the annotation. Suggestion
- * text is shown read-only — auto-apply ships in phase B.
- */
 export function AnnotationPopover({ editor }: { editor: Editor | null }) {
   const [open, setOpen] = useState<Open | null>(null);
-  const rubrica = useStore((s) => s.current?.rubrica);
-  const fuentes = useStore((s) => s.current?.fuentes);
+  const content = useStore((s) => s.current?.content);
+  const findings = useStore((s) => s.current?.findings);
+  const bump = useStore((s) => s.bumpReviewSurfaces);
+  const isOpen = open !== null;
+  useEffect(() => {
+    if (!isOpen) return;
+    bump(1);
+    return () => bump(-1);
+  }, [isOpen, bump]);
 
   useEffect(() => {
     if (!editor) return;
     const dom = editor.view.dom;
-
     const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      const el = target.closest<HTMLElement>("[data-anno-id]");
-      if (!el) {
-        setOpen(null);
-        return;
-      }
+      const el = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-anno-id]");
+      if (!el) return;
       const id = el.dataset.annoId;
-      const sage = el.dataset.sage as SageKey | undefined;
-      const pase = el.dataset.pase;
-      const severidad = el.dataset.severidad;
-      const mensaje = el.dataset.mensaje;
-      // Backward compat con anotaciones viejas (data-sugerencia).
-      const reemplazo =
-        el.dataset.reemplazo ?? el.dataset.sugerencia ?? null;
-      const criterioId = el.dataset.criterioId ?? null;
-      if (!id || !sage || !pase || !severidad || !mensaje) return;
-      let details: { evidence?: ReviewEvidence[] | null; provenance?: ReviewProvenance | null } = {};
-      // Read the native mark, not serialized HTML attributes supplied by pasted text.
-      editor.state.doc.descendants((node) => {
-        const mark = node.marks.find((candidate) => candidate.type.name === "annotation" && candidate.attrs.id === id);
-        if (mark) details = { evidence: mark.attrs.evidence, provenance: mark.attrs.provenance };
-      });
+      if (!id) return;
       e.preventDefault();
       e.stopPropagation();
-      setOpen({
-        ...details,
-        rect: el.getBoundingClientRect(),
-        id,
-        sage,
-        pase,
-        severidad,
-        mensaje,
-        reemplazo,
-        criterioId,
-      });
+      setOpen({ id, el });
     };
-
     dom.addEventListener("click", onClick);
     return () => dom.removeEventListener("click", onClick);
   }, [editor]);
 
-  // Close when the user clicks anywhere outside the popover or scrolls.
+  // Scrolling moves the underline away from the card.
   useEffect(() => {
     if (!open) return;
-    const onOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("[data-anno-popover]")) return;
-      if (target?.closest("[data-anno-id]")) return;
+    const onScroll = (e: Event) => {
+      if ((e.target as HTMLElement | null)?.closest?.("[data-testid='annotation-popover']")) return;
       setOpen(null);
     };
-    const onScroll = () => setOpen(null);
-    window.addEventListener("mousedown", onOutside, true);
     window.addEventListener("scroll", onScroll, true);
-    return () => {
-      window.removeEventListener("mousedown", onOutside, true);
-      window.removeEventListener("scroll", onScroll, true);
-    };
+    return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
 
-  if (!open || !editor) return null;
+  const anchor = useMemo(
+    () => ({ current: open?.el ?? null }),
+    [open],
+  );
 
-  const dismiss = () => {
-    editor.commands.removeAnnotationById(open.id);
-    setOpen(null);
-  };
+  const view = useMemo(() => {
+    if (!open || !content) return null;
+    return deriveFindings(content, findings).find((v) => v.id === open.id) ?? null;
+  }, [open, content, findings]);
 
-  const applyReemplazo = () => {
-    if (!open.reemplazo) return;
-    const applied = editor.commands.applyAnnotationReemplazo(
-      open.id,
-      open.reemplazo,
-    );
-    if (!applied) {
-      // Multi-block range — refuse and tell the user.
-      window.alert(
-        "El reemplazo cruza varios bloques (párrafo/heading). Aplicalo manualmente seleccionando el texto y sustituyéndolo.",
-      );
-      return;
-    }
-    setOpen(null);
-  };
-
-  // Clamp the popover to the viewport. We anchor below the span; if
-  // there's no room we flip above.
-  const W = 320;
-  const margin = 8;
-  let left = open.rect.left + open.rect.width / 2 - W / 2;
-  left = Math.max(margin, Math.min(window.innerWidth - W - margin, left));
-  const below = open.rect.bottom + 6;
-  const fitsBelow = below + 220 < window.innerHeight;
-  const top = fitsBelow ? below : Math.max(margin, open.rect.top - 220);
+  // Closing the finding removes its underline: the card unmounts with it.
+  if (!open || !view || !view.located) return null;
 
   return (
-    <div
-      data-anno-popover
-      style={{ position: "fixed", left, top, width: W, zIndex: 70 }}
-      className="bg-paper-2 border border-rule-2 rounded-[10px] shadow-(--shadow-pop) overflow-y-auto max-h-[75vh] thin-scroll"
+    <Popover
+      anchor={anchor}
+      open
+      onClose={() => setOpen(null)}
+      side="bottom"
+      align="start"
+      offset={{ x: -6 }}
+      keepFocus
+      width={456}
+      testId="annotation-popover"
     >
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-rule-1 bg-paper">
-        <Avatar
-          sage={open.sage}
-          initials={SAGE_INITIALS[open.sage]}
-          size={20}
-          title={SAGE_NAME[open.sage]}
-        />
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-2 font-semibold">
-          {SAGE_NAME[open.sage]} · {PASE_LABEL[open.pase] ?? open.pase}
-        </span>
-        <span className="ml-auto inline-flex items-center gap-1.5">
-          <span
-            className={`w-[7px] h-[7px] rounded-full ${
-              SEV_TONE[open.severidad] ?? "bg-ink-3"
-            }`}
-          />
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3">
-            {open.severidad}
-          </span>
-        </span>
-      </div>
-
-      <div className="px-3 py-2.5 text-[13px] leading-[1.5] font-serif text-ink-1">
-        {open.criterioId
-          ? (() => {
-              const c = rubrica?.criterios.find((x) => x.id === open.criterioId);
-              return c ? (
-                <div
-                  className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded bg-paper border border-rule-2 mb-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3"
-                  data-testid="popover-criterio-chip"
-                >
-                  <span>criterio</span>
-                  <span className="text-ink-1 normal-case tracking-normal font-sans font-medium">
-                    {c.nombre}
-                  </span>
-                </div>
-              ) : null;
-            })()
-          : null}
-        <div>{open.mensaje}</div>
-        <ReviewEvidenceDetails evidence={open.evidence} sources={fuentes} provenance={open.provenance} />
-      </div>
-
-      {open.reemplazo ? (
-        <div className="px-3 py-2.5 border-t border-rule-1 bg-paper">
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink-3 mb-1.5">
-            Reemplazar por
-          </div>
-          {/* Bloque literal — borde + fondo distinto + tipografía
-              que comunica "esto es lo que se va a pegar en tu texto,
-              no advice". El italic se fue porque el contenido es
-              prosa real, no comentario del sabio. */}
-          <div
-            className="font-serif text-[12.5px] leading-[1.5] text-ink-1 px-2.5 py-1.5 bg-paper-2 border border-rule-1 rounded-[6px]"
-            data-testid="popover-reemplazo"
-          >
-            “{open.reemplazo}”
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex items-center justify-end gap-3 px-3 py-2 border-t border-rule-1 bg-paper-2">
-        <button
-          type="button"
-          onClick={dismiss}
-          data-testid="popover-dismiss"
-          className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3 hover:text-seal cursor-pointer"
-        >
-          Descartar
-        </button>
-        {open.reemplazo ? (
-          <button
-            type="button"
-            onClick={applyReemplazo}
-            data-testid="popover-apply"
-            title="Sustituye el texto subrayado por el reemplazo que propone el sabio"
-            className="font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-paper bg-ink-1 hover:bg-ink-2 px-2.5 py-1 rounded cursor-pointer"
-          >
-            Reemplazar
-          </button>
-        ) : null}
-      </div>
-    </div>
+      <Finding finding={view} surface="popover" />
+    </Popover>
   );
 }

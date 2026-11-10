@@ -1,23 +1,25 @@
 "use client";
 
 import { create } from "zustand";
-import { getReviewerProfile } from "../../sidecar/src/model-profiles";
 import type { JSONContent } from "@tiptap/core";
 import {
   appendSnapshot,
   deleteEssay,
-  listEssays,
+  loadLibrary,
   listHistory,
   readEssay,
   readSnapshot,
   writeEssay,
 } from "@/lib/storage";
+import { reviewFingerprint } from "@/lib/review/fingerprint";
 import type {
   BoardSnapshot,
   Essay,
+  FindingRecord,
   EssayLanguage,
-  EssayMeta,
+  LibraryEntry,
   EssayMode,
+  EvaluacionMeta,
   Fuente,
   Interrogatorio,
   Pase,
@@ -40,20 +42,158 @@ export type SaveStatus =
 
 export type View = "list" | "editor";
 
+export type ListStatus = "loading" | "ready" | "error";
+
+/** What the library screen remembers while the app runs. Not persisted. */
+export type LibraryView = {
+  query: string;
+  tipo: EssayMode | null;
+  revision: "revisados" | "sin-revisar" | "desactualizados" | null;
+  orden: "recientes" | "antiguos" | "nota" | "titulo" | "relevantes";
+  scrollTop: number;
+};
+
+const INITIAL_LIBRARY_VIEW: LibraryView = {
+  query: "",
+  tipo: null,
+  revision: null,
+  orden: "recientes",
+  scrollTop: 0,
+};
+
+export type OverlayOpenOpts = { instant?: boolean };
+/** Openers may be passed straight to onClick, so they accept any object
+ *  (a click event) and only treat `{ instant: true }` as instant. */
+export type OverlayOpenArg = OverlayOpenOpts | object;
+const isInstant = (opts?: OverlayOpenArg): boolean =>
+  (opts as OverlayOpenOpts | undefined)?.instant === true;
+
 export type Overlay =
   | "lectura"
-  | "pluma"
+  | "review"
   | "rubrica"
   | "fuentes"
   | "history"
   | null;
 
-/** How the Lectura overlay runs the interrogation. */
-export type LecturaMode = "single" | "council";
+/** Why one agent of a question run did not deliver. Shown as a short line. */
+export type FailureKind = "unusable" | "timeout" | "generic";
+
+/** Where one agent of a question run stands. Session only. */
+export type AgentRunState = {
+  sage: Sage;
+  phase: "thinking" | "landing" | "done" | "failed" | "stopped";
+  landedCount: number;
+  failure: FailureKind | null;
+};
+
+/**
+ * The question run in flight or just ended. Session only, written only by
+ * `src/lib/questions/run.ts`. `justLanded` is the discard window: the notes
+ * of this run that the writer has neither kept nor discarded.
+ */
+export type QuestionRun = {
+  runId: string;
+  essayId: string;
+  source: { fuenteId?: string; label: string };
+  status: "running" | "stopping" | "ended";
+  agents: AgentRunState[];
+  /** The writer's own question, when he asked one. Answered by `sage`. */
+  own?: OwnQuestionState;
+  justLanded: string[];
+};
+
+/** Where the writer's own question stands. Session only. */
+export type OwnQuestionState = {
+  sage: Sage;
+  question: string;
+  phase: "thinking" | "done" | "failed" | "stopped";
+  failure: FailureKind | null;
+};
+
+/** Where one pass of a running review stands. Session only. */
+export type ReviewPassStatus =
+  | "idle" // not part of this run
+  | "running"
+  | "done" // returned, every line valid
+  | "partial" // returned, some lines invalid
+  | "failed"
+  | "canceled";
+
+export type ReviewPassState = {
+  status: ReviewPassStatus;
+  /** 0 to 100, moved only by real events. */
+  progress: number;
+  requestId: string | null;
+};
+
+/** A review in flight or just settled. Never persisted. */
+export type ReviewRun = {
+  essayId: string;
+  restoreNonce: number;
+  /** What the run read, captured when it started. */
+  fingerprint: string;
+  passes: Record<Pase, ReviewPassState>;
+};
+
+/** What the panel and the notice show after a run ends. Never persisted. */
+export type ReviewOutcome =
+  | { kind: "all_failed"; essayId: string }
+  /** The essay alone does not fit one request; retrying cannot help. */
+  | { kind: "too_long"; essayId: string }
+  | { kind: "some_failed"; essayId: string; failed: Pase[]; fuentesOmitidas?: string[] }
+  | { kind: "discarded"; essayId: string }
+  | { kind: "done"; essayId: string; fuentesOmitidas?: string[] };
+
+/** A source taken out of the library, with where it was, so it can be put back. */
+export type RemovedFuente = { essayId: string; fuente: Fuente; index: number };
+
+/** Reading state of material. Never persisted, so a crash cannot leave a source stuck in "leyendo". */
+export type LecturaState = "leyendo" | "fallo";
+
+type LeaveHook = () => void;
+const leaveHooks = new Set<LeaveHook>();
+
+/**
+ * Register work to run before the open essay is left (close, open another,
+ * new essay, restore a version). Returns the unregister function. Hooks run
+ * synchronously and first, before any flush, so a running review is canceled
+ * while the document it belongs to is still the open one.
+ */
+export function registerEssayLeaveHook(hook: LeaveHook): () => void {
+  leaveHooks.add(hook);
+  return () => {
+    leaveHooks.delete(hook);
+  };
+}
+
+function runEssayLeaveHooks(): void {
+  for (const hook of [...leaveHooks]) {
+    try {
+      hook();
+    } catch (err) {
+      console.warn("essay leave hook failed", err);
+    }
+  }
+}
+
+export type CommitReviewArgs = {
+  /** The fingerprint the run read. */
+  fingerprint: string;
+  /** Passes that returned every line valid. */
+  cleanPases: Pase[];
+  /** Passes that returned lines, some invalid. */
+  partialPases: Pase[];
+  reviewerRuns: { pase: Pase; provenance?: ReviewProvenance }[];
+  /** Replaces the records after the marks have been applied. */
+  findings: (previous: FindingRecord[]) => FindingRecord[];
+};
 
 type State = {
   view: View;
-  list: EssayMeta[];
+  list: LibraryEntry[];
+  listStatus: ListStatus;
+  library: LibraryView;
   current: Essay | null;
   saveStatus: SaveStatus;
   /** Modal overlay shown above the editor (Lectura nueva, etc.). */
@@ -61,16 +201,23 @@ type State = {
   /** Whether the right-hand board pane is visible. Hidden = editor
    *  takes the full main column, centered. */
   boardOpen: boolean;
-  /** Which sage is selected in the Lectura overlay (single mode). */
-  lecturaSage: Sage;
-  /** Whether the Lectura overlay runs one sage or the whole council. */
-  lecturaMode: LecturaMode;
+  /** The one agent the panel opens with (selection bubble), or null when
+   *  the agents default to the essay type. */
+  lecturaSage: Sage | null;
+  /** Session-only state of the question run. Owned by `src/lib/questions/run.ts`. */
+  questionRun: QuestionRun | null;
+  setQuestionRun: (run: QuestionRun | null) => void;
+  /** Replace the entries of one question run and schedule the debounced
+   *  save. The only writer for run entries; touches nothing else. */
+  replaceInterrogatoriosForRun: (runId: string, entries: Interrogatorio[]) => void;
   /** Optional text to pre-fill the Lectura textarea with (e.g. the
    *  current editor selection when launched via the bubble menu). */
   lecturaPrefill: string;
   /** Internal: timer handle for the debounced save. */
   _autosaveTimer: ReturnType<typeof setTimeout> | null;
 
+  /** Remember the library screen's search, filters and place. */
+  setLibrary: (patch: Partial<LibraryView>) => void;
   /** Load the essay list and switch to list view. */
   loadList: () => Promise<void>;
   /** Create a new essay (initial empty doc), open it in the editor. */
@@ -91,55 +238,72 @@ type State = {
   updateBoard: (snapshot: BoardSnapshot | null) => void;
   /** Append an interrogatorio entry from a sage and flush. */
   addInterrogatorio: (entry: Interrogatorio) => void;
-  /** Snapshot the moment of the last Evaluar run. Called by EditorPane
-   *  right after applying anotaciones; `evaluadoEn` is synced to the
-   *  current `essay.updatedAt` so subsequent edits make the score
-   *  stale without false positives from the apply itself. */
-  recordEvaluacion: (pasadasCubiertas: Pase[], reviewerRuns?: { pase: Pase; provenance?: ReviewProvenance }[]) => void;
-  updateReviewerProfile: (profileId: string) => void;
+  /** Session-only state of the review run. Owned by `src/lib/review/run.ts`. */
+  review: ReviewRun | null;
+  reviewOutcome: ReviewOutcome | null;
+  setReview: (review: ReviewRun | null) => void;
+  /** How many review surfaces (report card, corrections, a finding card) are open. The toolbar button yields while any is. */
+  reviewSurfaces: number;
+  bumpReviewSurfaces: (delta: 1 | -1) => void;
+  patchReviewPass: (pase: Pase, patch: Partial<ReviewPassState>) => void;
+  setReviewOutcome: (outcome: ReviewOutcome | null) => void;
+  /** Record a landed review: coverage is the previous union this run's clean
+   *  passes minus any pass that returned invalid lines; fingerprints are
+   *  overwritten only for passes in this run. */
+  commitReview: (args: CommitReviewArgs) => void;
+  /** Replace the durable finding records and flush. Never touches
+   *  `updatedAt`: closing a finding is not a text edit. Returns nothing;
+   *  an empty result removes the field from the saved essay. */
+  commitFindings: (
+    update: (previous: FindingRecord[]) => FindingRecord[],
+    patchMeta?: (meta: EvaluacionMeta | undefined) => EvaluacionMeta | undefined,
+  ) => void;
   /** Limpia la evaluación entera: quita todas las anotaciones del
    *  documento (vía evento que captura EditorPane) y resetea
-   *  evaluacionMeta. El Scorebar vuelve al estado "nunca evaluado"
-   *  (sesión 13b: oculto). Sesión 17. */
+   *  evaluacionMeta. El sello vuelve al estado "nunca revisado"
+   *  (sin sello). Sesión 17. */
   clearEvaluacion: () => void;
-  /** Scorebar dismissible (sesión 17). Estado de sesión — no se
-   *  persiste, vuelve al re-abrir el ensayo o al correr Evaluar. */
-  scorebarDismissed: boolean;
-  /** Esconde el Scorebar. Sólo afecta el render — los datos quedan. */
-  dismissScorebar: () => void;
-  /** Vuelve a mostrar el Scorebar (menú Vista > Mostrar Benchmark). */
-  showScorebar: () => void;
   /** Open / close the lectura overlay. */
   setOverlay: (overlay: Overlay) => void;
-  /** Open the Lectura overlay AND make sure the board pane is
-   *  visible — interrogating implies you want to see the resulting
-   *  post-its land. Optionally pre-selects a sage, pre-fills the
-   *  textarea, and chooses the mode. The default mode when no sage
-   *  is given is "council" (the whole council in parallel);
-   *  passing a `sage` switches to "single". */
-  openLectura: (
-    sage?: Sage,
-    prefill?: string,
-    mode?: LecturaMode,
-  ) => void;
+  /** True while the open overlay was opened with `{ instant: true }`
+   *  (native menu, keyboard activation): panels skip their opening
+   *  animation. Cleared when the overlay closes. */
+  overlayInstant: boolean;
+  /** Open the Hazme preguntas panel AND make sure the board pane is
+   *  visible: the questions land there. `sage` means "only this agent on";
+   *  `prefill` is the text selected in the essay, offered as the source.
+   *  A no-op while a question run is in flight. */
+  openLectura: (sage?: Sage, prefill?: string, opts?: OverlayOpenArg) => void;
   /** Change the sage selected in the Lectura overlay (single mode). */
   setLecturaSage: (sage: Sage) => void;
-  /** Open the Pluma Roja overlay for the current essay. */
-  openPlumaRoja: () => void;
+  /** Open the Revisar ensayo panel for the current essay. */
+  openReview: (opts?: OverlayOpenArg) => void;
   /** Open the rubric editor overlay for the current essay. */
-  openRubrica: () => void;
+  openRubrica: (opts?: OverlayOpenArg) => void;
   /** Replace the current essay's rubric and flush. */
   updateRubrica: (rubrica: Rubrica | undefined) => void;
   /** Open the fuentes (sources library) overlay. */
-  openFuentes: () => void;
+  openFuentes: (opts?: OverlayOpenArg) => void;
   /** Append a fuente to the current essay; flush. */
   addFuente: (fuente: Fuente) => void;
   /** Patch an existing fuente by id; flush. */
   updateFuente: (id: string, patch: Partial<Omit<Fuente, "id">>) => void;
-  /** Remove a fuente from the current essay; flush. */
-  removeFuente: (id: string) => void;
-  /** Switch between single-sage and council modes inside the modal. */
-  setLecturaMode: (mode: LecturaMode) => void;
+  /** Remove a fuente from the current essay; flush. Returns what was removed so the caller can offer undo. */
+  removeFuente: (id: string) => RemovedFuente | null;
+  /** Undo of `removeFuente`: puts the source back where it was. No-op for another essay or an id already present. */
+  restoreFuente: (removed: RemovedFuente) => void;
+  /** Reading state of each source (by id) and of the rubric's assignment. Never persisted. */
+  lecturas: Record<string, LecturaState>;
+  lecturaRubrica: LecturaState | null;
+  setLectura: (sourceId: string, state: LecturaState | null) => void;
+  setLecturaRubrica: (state: LecturaState | null) => void;
+  /** Apply an AI result to a source. `derive` sees the source as it is now, so only empty fields get filled.
+   *  Returns false (and changes nothing) when the essay is no longer open, the source is gone, or `derive` returns null. */
+  patchFuenteIf: (essayId: string, sourceId: string, derive: (current: Fuente) => Partial<Omit<Fuente, "id">> | null) => boolean;
+  /** Same for the rubric: `derive` sees the rubric as it is now; null leaves it alone. */
+  patchRubricaIf: (essayId: string, derive: (current: Rubrica | undefined) => Rubrica | undefined | null) => boolean;
+  /** Replace the rubric after the writer confirmed it. Saves a before-restore version first. */
+  replaceRubrica: (essayId: string, rubrica: Rubrica) => Promise<boolean>;
   /** Show/hide the right-hand board pane. Force-flushes any pending
    *  save before hiding so unmounting tldraw doesn't lose work. */
   toggleBoard: () => void;
@@ -155,7 +319,7 @@ type State = {
    *  prop isn't reactive after mount). */
   restoreNonce: number;
   /** Open the history overlay; auto-loads the list. */
-  openHistory: () => void;
+  openHistory: (opts?: OverlayOpenArg) => void;
   /** Force-fetch the history for `current`. Called by openHistory and
    *  after any snapshot mutation. */
   loadHistory: () => Promise<void>;
@@ -186,22 +350,32 @@ function genId(): string {
   return crypto.randomUUID();
 }
 
-function essayToMeta(essay: Essay): EssayMeta {
-  return {
-    id: essay.id,
-    title: essay.title,
-    mode: essay.mode,
-    wordCount: essay.wordCount,
-    createdAt: essay.createdAt,
-    updatedAt: essay.updatedAt,
-  };
+/**
+ * Older evaluations carry no fingerprints. When the timestamps say the
+ * review is fresh, fill them in memory so the first resolve does not show
+ * "out of date". Written only on the next real save; if the timestamps
+ * already say stale it stays so until the next review.
+ */
+function backfillFingerprints(essay: Essay): Essay {
+  const meta = essay.evaluacionMeta;
+  if (!meta || meta.fingerprintsByPase) return essay;
+  if (essay.updatedAt > meta.evaluadoEn) return essay;
+  const fp = reviewFingerprint(essay);
+  const fingerprintsByPase: Partial<Record<Pase, string>> = {};
+  for (const p of meta.pasadasCubiertas) fingerprintsByPase[p] = fp;
+  return { ...essay, evaluacionMeta: { ...meta, fingerprintsByPase } };
 }
 
-function upsertMeta(list: EssayMeta[], meta: EssayMeta): EssayMeta[] {
-  const filtered = list.filter((m) => m.id !== meta.id);
-  return [meta, ...filtered].sort((a, b) =>
-    b.updatedAt.localeCompare(a.updatedAt),
-  );
+/** The copy handed to `writeEssay`: carries the saved-state fingerprint, never put back on `current`. */
+function withCurrentFingerprint(essay: Essay): Essay {
+  if (!essay.evaluacionMeta) return essay;
+  return {
+    ...essay,
+    evaluacionMeta: {
+      ...essay.evaluacionMeta,
+      currentFingerprint: reviewFingerprint(essay),
+    },
+  };
 }
 
 // One persistence queue serves UI autosave and agent writes. Navigation tokens
@@ -212,33 +386,49 @@ let navigationGeneration = 0;
 export const useStore = create<State>((set, get) => ({
   view: "list",
   list: [],
+  listStatus: "loading",
+  library: INITIAL_LIBRARY_VIEW,
   current: null,
   saveStatus: { kind: "idle" },
   overlay: null,
+  overlayInstant: false,
   boardOpen: true,
-  lecturaSage: "em",
-  lecturaMode: "council",
+  lecturaSage: null,
+  questionRun: null,
   lecturaPrefill: "",
   history: [],
   restoreNonce: 0,
-  scorebarDismissed: false,
+  lecturas: {},
+  lecturaRubrica: null,
+  review: null,
+  reviewSurfaces: 0,
+  bumpReviewSurfaces(delta) {
+    set((st) => ({ reviewSurfaces: Math.max(0, st.reviewSurfaces + delta) }));
+  },
+  reviewOutcome: null,
   _autosaveTimer: null,
+
+  setLibrary(patch) {
+    set((s) => ({ library: { ...s.library, ...patch } }));
+  },
 
   async loadList() {
     const navigation = navigationGeneration;
     const previous = get().current;
     try {
-      const list = await listEssays();
+      const list = await loadLibrary();
       if (navigation !== navigationGeneration || get().current !== previous) return;
-      set({ list, view: "list" });
+      set({ list, listStatus: "ready", view: "list" });
     } catch (err) {
       if (navigation !== navigationGeneration || get().current !== previous) return;
       console.error("loadList failed", err);
-      set({ list: [], view: "list" });
+      // Never report empty because of a failure: keep what we had.
+      set({ listStatus: "error", view: "list" });
     }
   },
 
   async newEssay(mode = "academico") {
+    if (get().current) runEssayLeaveHooks();
     const navigation = ++navigationGeneration;
     if (get().current) {
       await get().flush();
@@ -258,10 +448,9 @@ export const useStore = create<State>((set, get) => ({
     try {
       await writeEssay(essay);
       if (navigation !== navigationGeneration || get().current !== previous) return;
-      set((s) => ({
+      set(() => ({
         current: essay,
         view: "editor",
-        list: upsertMeta(s.list, essayToMeta(essay)),
         saveStatus: { kind: "saved", at: Date.now() },
       }));
     } catch (err) {
@@ -278,6 +467,7 @@ export const useStore = create<State>((set, get) => ({
   async openEssay(id, expectedCurrentId) {
     const previousId = get().current?.id ?? null;
     if (expectedCurrentId !== undefined && previousId !== expectedCurrentId) return;
+    if (previousId && previousId !== id) runEssayLeaveHooks();
     const navigation = ++navigationGeneration;
     let previous = get().current;
     try {
@@ -287,7 +477,7 @@ export const useStore = create<State>((set, get) => ({
       }
       if (previousId === id) return;
       previous = get().current;
-      const essay = await readEssay(id);
+      const essay = backfillFingerprints(await readEssay(id));
       // Typing does not navigate, but it still invalidates this pending open.
       // Preserve that live version even if autosave already completed it.
       if (navigation !== navigationGeneration || get().current !== previous) return;
@@ -298,9 +488,8 @@ export const useStore = create<State>((set, get) => ({
         // Reset; loadHistory below repopulates con metas del essay
         // recién abierto para que el count del topbar sea honesto.
         history: [],
-        // Sesión 17: el dismiss del Scorebar es por-essay, no global.
-        // Abrir otro ensayo lo trae de vuelta.
-        scorebarDismissed: false,
+        lecturas: {},
+        lecturaRubrica: null,
       });
       void get().loadHistory();
     } catch (err) {
@@ -316,6 +505,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async closeEssay() {
+    // First: cancel anything that belongs to this essay, before the flush.
+    runEssayLeaveHooks();
     const navigation = ++navigationGeneration;
     const closingEssay = get().current;
     const essayId = closingEssay?.id;
@@ -332,14 +523,24 @@ export const useStore = create<State>((set, get) => ({
     if (navigation !== navigationGeneration || get().current !== closingEssay || (essayId && get().saveStatus.kind !== "saved")) return;
     const timer = get()._autosaveTimer;
     if (timer) clearTimeout(timer);
+    // Load the list before switching view, so no frame shows old data.
+    let list: LibraryEntry[] | null = null;
+    try {
+      list = await loadLibrary();
+    } catch (err) {
+      console.error("loadList failed", err);
+    }
+    if (navigation !== navigationGeneration || get().current !== closingEssay) return;
     set({
       current: null,
       view: "list",
+      ...(list ? { list, listStatus: "ready" as const } : { listStatus: "error" as const }),
       saveStatus: { kind: "idle" },
       history: [],
+      lecturas: {},
+      lecturaRubrica: null,
       _autosaveTimer: null,
     });
-    await get().loadList();
   },
 
   async removeEssay(id) {
@@ -432,35 +633,106 @@ export const useStore = create<State>((set, get) => ({
     void get().flush();
   },
 
-  updateReviewerProfile(profileId) {
-    const cur = get().current;
-    if (!cur) return;
-    getReviewerProfile(profileId);
-    set({ current: { ...cur, reviewerProfile: profileId }, saveStatus: { kind: "dirty" } });
-    void get().flush();
+  setQuestionRun(run) {
+    set({ questionRun: run });
   },
 
-  recordEvaluacion(pasadasCubiertas, reviewerRuns) {
+  replaceInterrogatoriosForRun(runId, entries) {
     const cur = get().current;
     if (!cur) return;
-    // Sync `evaluadoEn` to the current updatedAt so the apply itself
-    // doesn't immediately register as "stale". Any *subsequent* edit
-    // bumps updatedAt past evaluadoEn and surfaces the stale flag.
+    const next = [
+      ...(cur.interrogatorios ?? []).filter((e) => e.runId !== runId),
+      ...entries,
+    ];
     const updated: Essay = {
       ...cur,
-      evaluacionMeta: {
-        evaluadoEn: cur.updatedAt,
-        pasadasCubiertas: [...pasadasCubiertas],
-        ...(reviewerRuns ? { reviewerRuns: structuredClone(reviewerRuns) } : {}),
-      },
+      interrogatorios: next.length > 0 ? next : undefined,
+      updatedAt: nowIso(),
     };
-    // Re-mostrar el Scorebar — si el usuario lo había cerrado y
-    // ahora corrió Evaluar de nuevo, claramente quiere ver el
-    // resultado. Mantener oculto sería confuso.
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      void get().flush();
+    }, AUTOSAVE_MS);
     set({
       current: updated,
       saveStatus: { kind: "dirty" },
-      scorebarDismissed: false,
+      _autosaveTimer: timer,
+    });
+  },
+
+  commitFindings(update, patchMeta) {
+    const cur = get().current;
+    if (!cur) return;
+    const next = update(cur.findings ?? []);
+    const updated: Essay = {
+      ...cur,
+      findings: next.length > 0 ? next : undefined,
+      ...(patchMeta ? { evaluacionMeta: patchMeta(cur.evaluacionMeta) } : {}),
+    };
+    set({ current: updated, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
+  setReview(review) {
+    set({ review });
+  },
+
+  patchReviewPass(pase, patch) {
+    const run = get().review;
+    if (!run) return;
+    set({
+      review: {
+        ...run,
+        passes: { ...run.passes, [pase]: { ...run.passes[pase], ...patch } },
+      },
+    });
+  },
+
+  setReviewOutcome(outcome) {
+    set({ reviewOutcome: outcome });
+  },
+
+  commitReview({ fingerprint, cleanPases, partialPases, reviewerRuns, findings }) {
+    const cur = get().current;
+    if (!cur) return;
+    const prev = cur.evaluacionMeta;
+    const inRun = new Set<Pase>([...cleanPases, ...partialPases]);
+    // Previous coverage, plus this run's clean passes, minus any pass that
+    // returned invalid lines.
+    const covered = new Set<Pase>(prev?.pasadasCubiertas ?? []);
+    for (const p of cleanPases) covered.add(p);
+    for (const p of partialPases) covered.delete(p);
+    const fingerprintsByPase: Partial<Record<Pase, string>> = {
+      ...(prev?.fingerprintsByPase ?? {}),
+    };
+    for (const p of inRun) fingerprintsByPase[p] = fingerprint;
+    for (const p of Object.keys(fingerprintsByPase) as Pase[]) {
+      if (!covered.has(p)) delete fingerprintsByPase[p];
+    }
+    const prints = [...covered].map((p) => fingerprintsByPase[p]);
+    const sameOne = prints.length > 0 && prints.every((f) => f === prints[0]);
+    const runs = [
+      ...(prev?.reviewerRuns ?? []).filter((r) => !inRun.has(r.pase)),
+      ...structuredClone(reviewerRuns),
+    ];
+    const next = findings(cur.findings ?? []);
+    const evaluacionMeta: EvaluacionMeta = {
+      evaluadoEn: cur.updatedAt,
+      pasadasCubiertas: [...covered],
+      fingerprintsByPase,
+      ...(!sameOne && prev?.appliedFingerprints?.length
+        ? { appliedFingerprints: prev.appliedFingerprints }
+        : {}),
+      ...(runs.length > 0 ? { reviewerRuns: runs } : {}),
+    };
+    set({
+      current: {
+        ...cur,
+        findings: next.length > 0 ? next : undefined,
+        evaluacionMeta,
+      },
+      saveStatus: { kind: "dirty" },
     });
     void get().flush();
   },
@@ -483,38 +755,32 @@ export const useStore = create<State>((set, get) => ({
     const updated: Essay = {
       ...fresh,
       evaluacionMeta: undefined,
+      findings: undefined,
     };
     set({ current: updated, saveStatus: { kind: "dirty" } });
     void get().flush();
-  },
-
-  dismissScorebar() {
-    set({ scorebarDismissed: true });
-  },
-
-  showScorebar() {
-    set({ scorebarDismissed: false });
   },
 
   setOverlay(overlay) {
     // Clear any pending prefill when the overlay closes, so the next
     // manual "Interrogar" starts on an empty textarea.
     if (overlay === null) {
-      set({ overlay, lecturaPrefill: "" });
+      set({ overlay, lecturaPrefill: "", overlayInstant: false });
     } else {
       set({ overlay });
     }
   },
 
-  openLectura(sage, prefill, mode) {
+  openLectura(sage, prefill, opts) {
+    // A run in flight owns the board; a second panel would start a second one.
+    const run = get().questionRun;
+    if (run && run.status !== "ended") return;
     set({
       overlay: "lectura",
+      overlayInstant: isInstant(opts),
       boardOpen: true,
-      ...(sage ? { lecturaSage: sage } : {}),
+      lecturaSage: sage ?? null,
       ...(prefill !== undefined ? { lecturaPrefill: prefill } : {}),
-      // If a sage was named explicitly the caller wants single mode
-      // (they're targeting one voice); otherwise default to council.
-      lecturaMode: mode ?? (sage ? "single" : "council"),
     });
   },
 
@@ -522,16 +788,16 @@ export const useStore = create<State>((set, get) => ({
     set({ lecturaSage: sage });
   },
 
-  openPlumaRoja() {
-    set({ overlay: "pluma" });
+  openReview(opts) {
+    set({ overlay: "review", overlayInstant: isInstant(opts) });
   },
 
-  openRubrica() {
-    set({ overlay: "rubrica" });
+  openRubrica(opts) {
+    set({ overlay: "rubrica", overlayInstant: isInstant(opts) });
   },
 
-  openFuentes() {
-    set({ overlay: "fuentes" });
+  openFuentes(opts) {
+    set({ overlay: "fuentes", overlayInstant: isInstant(opts) });
   },
 
   addFuente(fuente) {
@@ -578,7 +844,10 @@ export const useStore = create<State>((set, get) => ({
 
   removeFuente(id) {
     const cur = get().current;
-    if (!cur?.fuentes) return;
+    if (!cur?.fuentes) return null;
+    const index = cur.fuentes.findIndex((f) => f.id === id);
+    if (index < 0) return null;
+    const removed: RemovedFuente = { essayId: cur.id, fuente: cur.fuentes[index], index };
     const next = cur.fuentes.filter((f) => f.id !== id);
     const updated: Essay = {
       ...cur,
@@ -586,8 +855,72 @@ export const useStore = create<State>((set, get) => ({
       fuentes: next.length > 0 ? next : undefined,
       updatedAt: nowIso(),
     };
-    set({ current: updated, saveStatus: { kind: "dirty" } });
+    const lecturas = Object.fromEntries(Object.entries(get().lecturas).filter(([key]) => key !== id));
+    set({ current: updated, saveStatus: { kind: "dirty" }, lecturas });
     void get().flush();
+    return removed;
+  },
+
+  restoreFuente({ essayId, fuente, index }) {
+    const cur = get().current;
+    if (!cur || cur.id !== essayId) return;
+    const list = cur.fuentes ?? [];
+    if (list.some((f) => f.id === fuente.id)) return;
+    const next = [...list];
+    next.splice(Math.min(index, next.length), 0, fuente);
+    set({ current: { ...cur, fuentes: next, updatedAt: nowIso() }, saveStatus: { kind: "dirty" } });
+    void get().flush();
+  },
+
+  setLectura(sourceId, state) {
+    set((s) => {
+      const rest = Object.fromEntries(Object.entries(s.lecturas).filter(([key]) => key !== sourceId));
+      return { lecturas: state ? { ...rest, [sourceId]: state } : rest };
+    });
+  },
+
+  setLecturaRubrica(state) {
+    set({ lecturaRubrica: state });
+  },
+
+  patchFuenteIf(essayId, sourceId, derive) {
+    const cur = get().current;
+    if (!cur || cur.id !== essayId) return false;
+    const source = cur.fuentes?.find((f) => f.id === sourceId);
+    if (!source) return false;
+    const patch = derive(source);
+    if (!patch) return false;
+    const updated: Essay = {
+      ...cur,
+      fuentes: (cur.fuentes ?? []).map((f) => (f.id === sourceId ? { ...f, ...patch } : f)),
+      updatedAt: nowIso(),
+    };
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      void get().flush();
+    }, AUTOSAVE_MS);
+    set({ current: updated, saveStatus: { kind: "dirty" }, _autosaveTimer: timer });
+    return true;
+  },
+
+  patchRubricaIf(essayId, derive) {
+    const cur = get().current;
+    if (!cur || cur.id !== essayId) return false;
+    const next = derive(cur.rubrica);
+    if (next === null) return false;
+    get().updateRubrica(next);
+    return true;
+  },
+
+  async replaceRubrica(essayId, rubrica) {
+    if (get().current?.id !== essayId) return false;
+    // The current rubric is the only thing a replacement can lose: keep a way back.
+    await get().snapshotNow("before-restore");
+    if (get().current?.id !== essayId) return false;
+    get().updateRubrica(rubrica);
+    await get().flush();
+    return true;
   },
 
   updateRubrica(rubrica) {
@@ -596,13 +929,14 @@ export const useStore = create<State>((set, get) => ({
     const updated: Essay = {
       ...cur,
       // Drop the field entirely if there are no criterios left, so the
-      // JSON file stays clean.
+      // JSON file stays clean. A saved assignment (`consigna`) keeps the
+      // field alive: if the AI fails, the material and a retry survive.
       rubrica:
-        rubrica && rubrica.criterios.length > 0 ? rubrica : undefined,
+        rubrica && (rubrica.criterios.length > 0 || rubrica.consigna) ? rubrica : undefined,
       updatedAt: nowIso(),
     };
     // Debounce like updateContent — the editor is keystroke-driven.
-    // Force-flush happens on modal close (see RubricaOverlay onClose).
+    // Force-flush happens on modal close (see RubricPanel onClose).
     const prev = get()._autosaveTimer;
     if (prev) clearTimeout(prev);
     const timer = setTimeout(() => {
@@ -615,10 +949,6 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 
-  setLecturaMode(mode) {
-    set({ lecturaMode: mode });
-  },
-
   toggleBoard() {
     const next = !get().boardOpen;
     // When hiding, force-flush any pending autosave so nothing
@@ -627,8 +957,8 @@ export const useStore = create<State>((set, get) => ({
     set({ boardOpen: next });
   },
 
-  openHistory() {
-    set({ overlay: "history" });
+  openHistory(opts) {
+    set({ overlay: "history", overlayInstant: isInstant(opts) });
     void get().loadHistory();
   },
 
@@ -649,8 +979,7 @@ export const useStore = create<State>((set, get) => ({
 
   async snapshotNow(kind) {
     // Flush first so the snapshot reflects what's persisted on disk,
-    // not a transient typing state. recordEvaluacion uses the same
-    // pattern (queueMicrotask) for the same reason.
+    // not a transient typing state.
     await get().flush();
     const cur = get().current;
     if (!cur) return;
@@ -681,6 +1010,7 @@ export const useStore = create<State>((set, get) => ({
   async restoreVersion(takenAt) {
     const cur = get().current;
     if (!cur) return;
+    runEssayLeaveHooks();
     // 1) Snapshot the current state as a safety net.
     await get().snapshotNow("before-restore");
     // 2) Read the target snapshot.
@@ -723,11 +1053,10 @@ export const useStore = create<State>((set, get) => ({
         if (timer) clearTimeout(timer);
         set({ _autosaveTimer: null, saveStatus: { kind: "saving" } });
         try {
-          await writeEssay(cur);
+          await writeEssay(withCurrentFingerprint(cur));
           const unchanged = get().current === cur;
           const sameEssay = get().current?.id === cur.id;
-          set((s) => ({
-            list: upsertMeta(s.list, essayToMeta(cur)),
+          set(() => ({
             ...(sameEssay ? { saveStatus: unchanged ? { kind: "saved" as const, at: Date.now() } : { kind: "dirty" as const } } : {}),
           }));
           if (!sameEssay || unchanged) return;

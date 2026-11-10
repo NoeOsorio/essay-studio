@@ -41,7 +41,7 @@ test("Enter inside the title does NOT insert a newline", async ({ page }) => {
   expect(text).toBe("Antes");
 });
 
-test("slash command opens the menu and / Título 1 promotes to h1", async ({
+test("slash command opens the menu and / Sección promotes to h1", async ({
   page,
 }) => {
   await openNewEssay(page);
@@ -50,7 +50,7 @@ test("slash command opens the menu and / Título 1 promotes to h1", async ({
   await page.keyboard.type("/", { delay: 5 });
 
   // The slash menu lives outside the editor (portaled into body).
-  const menu = page.getByRole("button", { name: /^Título 1/ });
+  const menu = page.getByRole("button", { name: /^Sección/ });
   await expect(menu).toBeVisible();
 
   await page.keyboard.press("Enter");
@@ -67,7 +67,7 @@ test("slash command filters items by query", async ({ page }) => {
   // Only the "Cita" item should match.
   await expect(page.getByRole("button", { name: /^Cita/ })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /^Título 1/ }),
+    page.getByRole("button", { name: /^Sección/ }),
   ).toHaveCount(0);
 });
 
@@ -76,9 +76,9 @@ test("Escape closes the slash menu without inserting", async ({ page }) => {
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type("/", { delay: 5 });
-  await expect(page.getByRole("button", { name: /^Título 1/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Sección/ })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("button", { name: /^Título 1/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Sección/ })).toHaveCount(0);
 });
 
 test("Cmd/Ctrl+B toggles bold inside the editor", async ({ page }) => {

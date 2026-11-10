@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { installTauriStub, openNewEssay } from "./setup";
+import { installTauriStub, openNewEssay, runReview, openAllCorrections } from "./setup";
 
 /**
- * Pluma Roja — three sage critiques in parallel over the full essay
- * text, each producing JSON-lines anotaciones with severity + sugerencia.
- * The user picks which ones to apply, and applied anotaciones become
- * inline `.anno` marks in the TipTap content (click → popover).
+ * Revisar ensayo: the agents review the full text in parallel, each
+ * returning findings with severity and a proposed text. Findings land in
+ * the text on their own as `.anno` marks (click opens the card) and are
+ * all listed in Correcciones.
  *
  * The setup stub returns deterministic citas pulled from the actual
  * text the renderer sent, so resolving them against the doc always
@@ -24,29 +24,28 @@ test.beforeEach(async ({ page }) => {
   await installTauriStub(page);
 });
 
-test("'Pluma roja' opens the overlay with three pase panels", async ({
+test("Revisar ensayo opens the panel with the agent options", async ({
   page,
 }) => {
   await openNewEssay(page);
 
-  // Type some essay text first — Pluma Roja runs over the doc.
   const editor = page.locator(".tiptap-content");
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
   await page.getByTestId("topbar-pluma-roja").click();
 
-  await expect(
-    page.getByRole("heading", { name: /Evaluar —/ }),
-  ).toBeVisible();
+  await expect(page.getByText("¿Qué quieres que revisen?")).toBeVisible();
 
-  // Three pase panels, in order.
-  await expect(page.getByTestId("pluma-pase-coherencia")).toBeVisible();
-  await expect(page.getByTestId("pluma-pase-estilo")).toBeVisible();
-  await expect(page.getByTestId("pluma-pase-argumento")).toBeVisible();
+  // Academic essays offer the four checks, all on.
+  for (const pase of ["coherencia", "estilo", "argumento", "apa"]) {
+    const tile = page.getByTestId(`pluma-pase-toggle-${pase}`);
+    await expect(tile).toBeVisible();
+    await expect(tile).toHaveAttribute("data-active", "true");
+  }
 });
 
-test("running the three passes yields 9 anotaciones with checkboxes", async ({
+test("three checks yield 9 findings, underlined and listed", async ({
   page,
 }) => {
   await openNewEssay(page);
@@ -55,43 +54,17 @@ test("running the three passes yields 9 anotaciones with checkboxes", async ({
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  await page.getByTestId("topbar-pluma-roja").click();
-  // These tests cover the original 3-pase semantics; disable APA so
-  // the academico-mode default (4 panes) doesn't change the counts.
-  await page.getByTestId("pluma-pase-toggle-apa").click();
-  await page.getByTestId("pluma-start").click();
+  // These tests cover the original 3-check semantics; APA off.
+  await runReview(page, { skip: ["apa"] });
 
-  // 3 panels × 3 anotaciones = 9 cards total.
-  await expect(page.getByTestId("pluma-anotacion")).toHaveCount(9);
-});
-
-test("applying selected anotaciones adds inline annotation marks", async ({
-  page,
-}) => {
-  await openNewEssay(page);
-
-  const editor = page.locator(".tiptap-content");
-  await editor.click();
-  await page.keyboard.type(SAMPLE_BODY);
-
-  await page.getByTestId("topbar-pluma-roja").click();
-  // These tests cover the original 3-pase semantics; disable APA so
-  // the academico-mode default (4 panes) doesn't change the counts.
-  await page.getByTestId("pluma-pase-toggle-apa").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion")).toHaveCount(9);
-
-  await page.getByTestId("pluma-apply").click();
-
-  // Overlay closes; the editor now has annotation marks (one per
-  // applied anotación whose cita was found — should be all 9).
-  await expect(page.getByRole("heading", { name: /Evaluar —/ })).toHaveCount(
-    0,
-  );
+  // 3 checks x 3 findings, in the text with no apply step.
   await expect(editor.locator(".anno")).toHaveCount(9);
+
+  await openAllCorrections(page);
+  await expect(page.getByTestId("finding")).toHaveCount(9);
 });
 
-test("clicking an annotation opens the popover; descartar removes the mark", async ({
+test("clicking an annotation opens the popover; No aplica removes the mark", async ({
   page,
 }) => {
   await openNewEssay(page);
@@ -100,51 +73,17 @@ test("clicking an annotation opens the popover; descartar removes the mark", asy
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  await page.getByTestId("topbar-pluma-roja").click();
-  // These tests cover the original 3-pase semantics; disable APA so
-  // the academico-mode default (4 panes) doesn't change the counts.
-  await page.getByTestId("pluma-pase-toggle-apa").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion")).toHaveCount(9);
-  await page.getByTestId("pluma-apply").click();
+  await runReview(page, { skip: ["apa"] });
   await expect(editor.locator(".anno")).toHaveCount(9);
 
   // Click the first inline anno; popover should open with its mensaje.
   await editor.locator(".anno").first().click();
-  const popover = page.locator("[data-anno-popover]");
+  const popover = page.getByTestId("annotation-popover");
   await expect(popover).toBeVisible();
-  // Stub messages incluyen "problema A/B/C — explicación pedagógica"
-  // (sesión 15 los amplió para reflejar el contrato pedagógico nuevo).
   await expect(popover).toContainText(/problema [ABC]/);
 
-  // Descartar removes the mark and closes the popover.
-  await popover.getByRole("button", { name: /Descartar/ }).click();
+  // No aplica removes the mark and closes the popover.
+  await popover.getByTestId("finding-not-applicable").click();
   await expect(popover).toHaveCount(0);
   await expect(editor.locator(".anno")).toHaveCount(8);
-});
-
-test("unchecking anotaciones excludes them from apply", async ({ page }) => {
-  await openNewEssay(page);
-
-  const editor = page.locator(".tiptap-content");
-  await editor.click();
-  await page.keyboard.type(SAMPLE_BODY);
-
-  await page.getByTestId("topbar-pluma-roja").click();
-  // These tests cover the original 3-pase semantics; disable APA so
-  // the academico-mode default (4 panes) doesn't change the counts.
-  await page.getByTestId("pluma-pase-toggle-apa").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion")).toHaveCount(9);
-
-  // Uncheck the first three anotaciones across panes.
-  const checkboxes = page.locator(
-    "[data-testid=pluma-anotacion] input[type=checkbox]",
-  );
-  await checkboxes.nth(0).uncheck();
-  await checkboxes.nth(3).uncheck();
-  await checkboxes.nth(6).uncheck();
-
-  await page.getByTestId("pluma-apply").click();
-  await expect(editor.locator(".anno")).toHaveCount(6);
 });

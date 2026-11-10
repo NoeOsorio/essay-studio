@@ -133,6 +133,9 @@ Legibilidad, Color and Sin slop. Anything not seen working is reported as such.
 
 ## Delivery order (slices, each verifiable)
 
+0. **Design in Paper first** (added 2026-11-07 at Noe's request): restyle every screen in the Paper
+   file to palette B, review it independently, and get Noe's approval. Code slices implement the
+   approved screens.
 1. **Foundation**: tokens, fonts, UI primitives. App runs, primary buttons in ink, Práctico blue.
 2. **Editor surface** (Topbar, editor, popover): case 1 partially passes.
 3. **Board** (note-shape and panels): notes straight and legible.

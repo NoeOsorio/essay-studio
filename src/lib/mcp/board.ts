@@ -147,7 +147,10 @@ function describe(editor: Editor, shape: TLShape) {
     rotation: shape.rotation, parentId: shape.parentId,
     locked: editor.isShapeOrAncestorLocked(shape),
     bounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h } : null,
-    ...(shape.type === "note" ? { text: renderPlaintextFromRichText(editor, (shape as TLNoteShape).props.richText) } : {}),
+    ...(shape.type === "note" ? {
+      text: renderPlaintextFromRichText(editor, (shape as TLNoteShape).props.richText),
+      title: typeof shape.meta.title === "string" && shape.meta.title !== "" ? shape.meta.title : null,
+    } : {}),
     ...(shape.type === "arrow" ? { bindings: editor.getBindingsFromShape(shape, "arrow").map((b) => ({ id: b.id, toId: b.toId, ...b.props })) } : {}),
     meta: shape.meta,
   };
@@ -167,26 +170,26 @@ function transaction(editor: Editor, name: string, fn: () => void): void {
   }
 }
 
-type Rect = { x: number; y: number; w: number; h: number };
-type Placement = Rect & { shape: TLNoteShape };
-function boundsOf(editor: Editor, shape: TLShape): Rect {
+export type Rect = { x: number; y: number; w: number; h: number };
+export type Placement = Rect & { shape: TLNoteShape };
+export function boundsOf(editor: Editor, shape: TLShape): Rect {
   const box = editor.getShapePageBounds(shape);
   if (!box || ![box.x, box.y, box.w, box.h].every(Number.isFinite)) throw new ToolError("INVALID_GEOMETRY", "A board node has invalid bounds.");
   return { x: box.x, y: box.y, w: box.w, h: box.h };
 }
-function common(rects: Rect[]): Rect {
+export function common(rects: Rect[]): Rect {
   const x = Math.min(...rects.map((r) => r.x));
   const y = Math.min(...rects.map((r) => r.y));
   return { x, y, w: Math.max(...rects.map((r) => r.x + r.w)) - x, h: Math.max(...rects.map((r) => r.y + r.h)) - y };
 }
-function overlaps(a: Rect, b: Rect, gap: number): boolean {
+export function overlaps(a: Rect, b: Rect, gap: number): boolean {
   return a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
 }
 
 /** Find the first vertical offset outside the union of all collision
  * intervals. Finite sweep over measured obstacle/placement pairs, rather
  * than retries or an arbitrary search horizon. */
-function clearObstacles(plan: Placement[], obstacles: Rect[], gap: number): void {
+export function clearObstacles(plan: Placement[], obstacles: Rect[], gap: number): void {
   const forbidden: { from: number; to: number }[] = [];
   for (const rect of plan) for (const obstacle of obstacles) {
     if (rect.x >= obstacle.x + obstacle.w + gap || rect.x + rect.w + gap <= obstacle.x) continue;
@@ -336,17 +339,20 @@ export function handleBoardTool(name: ToolName, args: JsonObject): unknown | Pro
       transaction(editor, "create-note", () => editor.createShape<TLNoteShape>({
         id, type: "note", x: args.x as number, y: args.y as number,
         props: { richText: toRichText(args.text as string), size: "s", align: "start", verticalAlign: "start" },
-        meta: { author: args.author as string ?? "tu", kind: args.kind as string ?? "concepto", createdAt: Date.now() },
+        meta: {
+          author: args.author as string ?? "tu", kind: args.kind as string ?? "concepto", createdAt: Date.now(),
+          ...(typeof args.title === "string" && args.title !== "" ? { title: args.title } : {}),
+        },
       }));
       return { changedIds: [id], node: describe(editor, noteById(editor, id)) };
     }
     case "update_nodes": {
-      const nodes = args.nodes as { id: string; text?: string; x?: number; y?: number }[];
+      const nodes = args.nodes as { id: string; text?: string; title?: string; x?: number; y?: number }[];
       if (new Set(nodes.map((s) => s.id)).size !== nodes.length) throw new ToolError("INVALID_ARGUMENTS", "Each update must reference a different note.");
       const changes = nodes.map((patch): TLShapePartial<TLNoteShape> => {
         const shape = noteById(editor, patch.id); assertEditable(editor, shape);
-        if (patch.text === undefined && patch.x === undefined && patch.y === undefined) throw new ToolError("INVALID_ARGUMENTS", "Supply text or coordinates for each update.");
-        return { id: shape.id, type: "note", ...(patch.x !== undefined ? { x: patch.x } : {}), ...(patch.y !== undefined ? { y: patch.y } : {}), ...(patch.text !== undefined ? { props: { richText: toRichText(patch.text) } } : {}) };
+        if (patch.text === undefined && patch.title === undefined && patch.x === undefined && patch.y === undefined) throw new ToolError("INVALID_ARGUMENTS", "Supply text, title or coordinates for each update.");
+        return { id: shape.id, type: "note", ...(patch.x !== undefined ? { x: patch.x } : {}), ...(patch.y !== undefined ? { y: patch.y } : {}), ...(patch.text !== undefined ? { props: { richText: toRichText(patch.text) } } : {}), ...(patch.title !== undefined ? { meta: { ...shape.meta, title: patch.title } } : {}) };
       });
       transaction(editor, "update-notes", () => editor.updateShapes(changes));
       return { changedIds: nodes.map((n) => n.id) };

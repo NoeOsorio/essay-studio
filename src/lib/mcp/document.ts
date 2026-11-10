@@ -4,6 +4,7 @@ import { closeHistory } from "@tiptap/pm/history";
 import type { Transaction } from "@tiptap/pm/state";
 import { useStore } from "@/lib/store";
 import { ToolError, type JsonObject } from "../../../shared/mcp";
+import { deriveFindings } from "@/lib/review/findings";
 
 let liveDocument: { editor: Editor; essayId: string } | null = null;
 let titleInput: { essayId: string; replace: (title: string) => boolean } | null = null;
@@ -82,17 +83,31 @@ export function readDocument(args: JsonObject): JsonObject {
     }
     if (args.includeAnnotations && node.isText) {
       for (const mark of node.marks) if (mark.type.name === "annotation") {
-        annotations.push({ from: pos, to: pos + node.nodeSize, ...mark.attrs });
+        annotations.push({ from: pos, to: pos + node.nodeSize, ...mark.attrs, status: "open" });
       }
     }
   });
+  // Findings with no underline: open and not located, resolved, and not
+  // applicable (included so a client does not propose them again).
+  const derived = deriveFindings(essay.content, essay.findings).filter((v) => !v.located);
+  const hidden = (essay.findings ?? []).filter((r) => r.status === "not_applicable" && !derived.some((v) => v.id === r.id));
+  const findings: JsonObject[] = [
+    ...derived.map((v) => ({
+      id: v.id, sage: v.sage, pase: v.pase, severidad: v.severidad, cita: v.cita, mensaje: v.mensaje,
+      status: v.status, located: false,
+    })),
+    ...hidden.map((r) => ({
+      id: r.id, sage: r.sage, pase: r.pase, severidad: r.severidad, cita: r.cita, mensaje: r.mensaje,
+      status: r.status, located: false,
+    })),
+  ];
   return {
     title: essay.title, language: essay.language ?? "es", mode: essay.mode,
     text: editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n"),
     blocks, positionUnit: "ProseMirror positions; text offsets use UTF-16",
     ...(args.includeSources ? { sources: essay.fuentes ?? [] } : {}),
-    ...(args.includeRubric ? { rubric: essay.rubrica ?? null } : {}),
-    ...(args.includeAnnotations ? { annotations } : {}),
+    ...(args.includeRubric ? { rubric: essay.rubrica ? { criterios: essay.rubrica.criterios } : null } : {}),
+    ...(args.includeAnnotations ? { annotations, findings } : {}),
   };
 }
 

@@ -22,6 +22,15 @@ async function clickOnEmptyCanvas(page: import("@playwright/test").Page) {
   await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.5);
 }
 
+/**
+ * The new note is ready for typing once its optional title field is on
+ * screen (it only exists while the note is being edited). Typing sooner can
+ * lose the first keystroke, because tldraw is still entering edit mode.
+ */
+async function expectEditing(page: import("@playwright/test").Page) {
+  await expect(page.getByTestId("note-title")).toBeVisible();
+}
+
 test("N + click creates ONE note (tool is not sticky)", async ({ page }) => {
   await openNewEssay(page);
   await page.keyboard.press("n");
@@ -39,6 +48,7 @@ test("typing right after creating a note writes into THAT note", async ({
   await openNewEssay(page);
   await page.keyboard.press("n");
   await clickOnEmptyCanvas(page);
+  await expectEditing(page);
   // Tldraw enters edit-in-place automatically. Typing should land in
   // the note's body, not be eaten by tool shortcuts.
   await page.keyboard.type("seguridad psicológica", { delay: 10 });
@@ -55,6 +65,7 @@ test("typing the letter 'a' inside an editing note does NOT switch to arrow tool
   await openNewEssay(page);
   await page.keyboard.press("n");
   await clickOnEmptyCanvas(page);
+  await expectEditing(page);
   await page.keyboard.type("aaa", { delay: 10 });
   await page.keyboard.press("Escape");
 
@@ -71,6 +82,7 @@ test("typing 'n' inside an editing note does NOT create a second note", async ({
   await openNewEssay(page);
   await page.keyboard.press("n");
   await clickOnEmptyCanvas(page);
+  await expectEditing(page);
   await page.keyboard.type("nota nueva con n", { delay: 10 });
   await page.keyboard.press("Escape");
 
@@ -81,33 +93,35 @@ test("typing 'n' inside an editing note does NOT create a second note", async ({
   );
 });
 
-test("counter in board header shows live note count", async ({ page }) => {
+test("the board shows each new note", async ({ page }) => {
   await openNewEssay(page);
-  await expect(page.getByText(/0 notas/i)).toBeVisible();
+  const notes = page.locator('.tl-shape[data-shape-type="note"]');
+  await expect(notes).toHaveCount(0);
 
   await page.keyboard.press("n");
   await clickOnEmptyCanvas(page);
   await page.keyboard.press("Escape");
-  await expect(page.getByText(/1 nota\b/i)).toBeVisible();
+  await expect(notes).toHaveCount(1);
 });
 
-test("NoteContextPanel pills assign author and kind via meta", async ({
+test("the note bar assigns author and kind via meta", async ({
   page,
 }) => {
   await openNewEssay(page);
   await page.keyboard.press("n");
   await clickOnEmptyCanvas(page);
+  await expectEditing(page);
   await page.keyboard.type("conexión", { delay: 10 });
   await page.keyboard.press("Escape");
 
-  // The panel appears when a single note is selected. Use exact
-  // matches because "Conexión" otherwise also resolves to the arrow
-  // tool in the board toolbar (whose title is "flecha / conexión").
-  await page.getByRole("button", { name: "Sistémico", exact: true }).click();
-  await page.getByRole("button", { name: "Conexión", exact: true }).click();
+  // The bar appears when a single note is selected. Author chips are
+  // radios named after the agent; the kind lives in a menu on the bar.
+  await page.getByRole("radio", { name: "Sistemas", exact: true }).click();
+  await page.getByTestId("note-bar-kind").click();
+  await page.getByRole("option", { name: "Conexión", exact: true }).click();
 
   const note = page.locator('.tl-shape[data-shape-type="note"]').first();
-  // The header inside our override shows initials + kind label.
-  await expect(note).toContainText(/SI/);
-  await expect(note).toContainText(/CONEXIÓN/);
+  // The note shows the agent's name; kind is not drawn on the note.
+  await expect(note.getByTestId("note-author")).toContainText("Sistemas");
+  await expect(page.getByTestId("note-bar-kind")).toContainText("Conexión");
 });

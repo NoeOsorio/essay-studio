@@ -1,11 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import {
-  dumpCritiques,
-  dumpEssays,
-  dumpInterrogates,
-  installTauriStub,
-  openNewEssay,
-} from "./setup";
+import { dumpCritiques, dumpEssays, dumpInterrogates, installTauriStub, openNewEssay, openMore, hazmeButton, runReview, pickSource } from "./setup";
 
 /**
  * Language toggle (ES / EN) coverage. The toggle lives on the topbar
@@ -17,7 +11,7 @@ import {
 const SAMPLE_BODY = "El liderazgo del CEO determina la cultura.";
 
 async function closeRubrica(page: Page) {
-  await page.getByTestId("rubrica-overlay").getByTitle("Cerrar").click();
+  await page.getByTestId("rubrica-overlay").getByRole("button", { name: "Cerrar" }).click();
   await expect(page.getByTestId("rubrica-overlay")).toHaveCount(0);
 }
 
@@ -30,6 +24,7 @@ test("language defaults to ES and toggling persists on the essay", async ({
 }) => {
   await openNewEssay(page);
   // Default state: ES active.
+  await openMore(page);
   await expect(page.getByTestId("topbar-language-es")).toHaveAttribute(
     "data-active",
     "true",
@@ -40,6 +35,7 @@ test("language defaults to ES and toggling persists on the essay", async ({
   );
 
   // Toggle to EN.
+  await openMore(page);
   await page.getByTestId("topbar-language-en").click();
   await expect(page.getByTestId("topbar-language-en")).toHaveAttribute(
     "data-active",
@@ -57,19 +53,15 @@ test("language defaults to ES and toggling persists on the essay", async ({
 
 test("interrogate calls forward the chosen language", async ({ page }) => {
   await openNewEssay(page);
+  await openMore(page);
   await page.getByTestId("topbar-language-en").click();
 
-  // Open Lectura, run a council interrogation.
-  await page.getByRole("button", { name: "Interrogar", exact: true }).click();
-  await page
-    .getByPlaceholder(/Pega aquí un fragmento, o sube un \.txt/)
-    .fill("Some text in English to interrogate.");
-  const overlay = page.locator("div.bg-paper-2", {
-    has: page.getByRole("heading", { name: /Interrogatorio — el consejo/i }),
-  });
-  await overlay.getByRole("button", { name: /^Interrogar$/ }).click();
-  // Wait for the streamed answers to settle.
-  await expect(page.locator("input[type=checkbox]").first()).toBeVisible();
+  // Open Hazme preguntas, pick a source, ask with the default agents.
+  await hazmeButton(page).click();
+  await pickSource(page, "Some text in English to interrogate.");
+  await page.getByTestId("lectura-interrogar").click();
+  // Wait for the questions to land on the board.
+  await expect(page.locator('.tl-shape[data-shape-type="note"]')).toHaveCount(9);
 
   const interrogates = await dumpInterrogates(page);
   // Academico default sages: EM/SI/CR. Each should have been called
@@ -83,10 +75,14 @@ test("interrogate calls forward the chosen language", async ({ page }) => {
 test("critique calls forward the chosen language", async ({ page }) => {
   await openNewEssay(page, "academico");
   // Add a small rubric (not relevant to language but exercises the path).
+  await openMore(page);
   await page.getByTestId("topbar-rubrica").click();
+  await page.getByRole("button", { name: "Prefiero escribir los criterios" }).click();
   await page.getByTestId("rubrica-add").click();
   await page.getByTestId("criterio-nombre").first().fill("Coherence");
   await closeRubrica(page);
+
+  await openMore(page);
 
   await page.getByTestId("topbar-language-en").click();
 
@@ -94,9 +90,7 @@ test("critique calls forward the chosen language", async ({ page }) => {
   await editor.click();
   await page.keyboard.type(SAMPLE_BODY);
 
-  await page.getByTestId("topbar-pluma-roja").click();
-  await page.getByTestId("pluma-start").click();
-  await expect(page.getByTestId("pluma-anotacion").first()).toBeVisible();
+  await runReview(page);
 
   const critiques = await dumpCritiques(page);
   for (const pase of ["coherencia", "estilo", "argumento", "apa"]) {
@@ -109,17 +103,19 @@ test("switching language persists across closing and reopening the essay", async
   page,
 }) => {
   await openNewEssay(page);
+  await openMore(page);
   await page.getByTestId("topbar-language-en").click();
   await page.waitForTimeout(300);
 
   // Close and reopen — the language toggle should still reflect EN.
   await page
-    .getByRole("button", { name: "Volver a la lista" })
+    .getByRole("button", { name: "Ensayos" })
     .click();
   await page
     .getByText("Sin título", { exact: false })
     .first()
     .click();
+  await openMore(page);
   await expect(page.getByTestId("topbar-language-en")).toHaveAttribute(
     "data-active",
     "true",

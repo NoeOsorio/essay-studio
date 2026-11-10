@@ -41,10 +41,10 @@ Persistencia: JSON files en app data dir para v1; migrar a SQLite cuando haya vo
 - Rules: `rule-1/2/3` warm beiges
 - Sello rojo: `seal #B23A2A` (acento primario)
 - **Sabios** (cada uno carga voz semántica — no sustituir):
-  - **EM · Empirista** ámbar `#B07A1F` (datos, evidencia)
-  - **SI · Sistémico** teal `#2E7E72` (frameworks, conexiones)
-  - **PR · Práctico** coral `#B14B36` (aterrizar, aplicar)
-  - **CR · Crítico** morado `#6E4FA8` (objeciones, contras)
+  - **EM, Empirista** ámbar `#B07A1F` (datos, evidencia)
+  - **SI, Sistémico** teal `#2E7E72` (frameworks, conexiones)
+  - **PR, Práctico** coral `#B14B36` (aterrizar, aplicar)
+  - **CR, Crítico** morado `#6E4FA8` (objeciones, contras)
 
 **Tipografía:**
 - **Newsreader** serif para body y títulos (NO Crimson Pro)
@@ -205,7 +205,7 @@ La primera vez que corre `npm run tauri:dev` el lado Rust descarga y compila ~14
   - Texto plano se extrae de `shape.props.richText` (estructura TipTap-shaped) con un walker recursivo. Sin formato rico por ahora, suficiente para el flujo del modal.
 - **Flow de creación 100% nativo:** `N` activa el note tool de tldraw, click en el canvas crea un note y entra en edit mode automáticamente. El usuario escribe inline (rich text via TipTap interno de tldraw). Sin modales propios; sin handlers paralelos. `BoardToolbar.tsx` solo enruta sus botones a `editor.setCurrentTool("note" | "arrow" | "select")`.
 - **`NoteContextPanel`** flotante (esquina superior derecha del board) que aparece cuando hay un single note seleccionado. Pills de autor (TÚ/EM/SI/PR/CR) y tipo (concepto/pregunta/conexion/cita/critica). Click → `editor.updateShape({ id, meta })`. Stamp `createdAt` la primera vez que el usuario asigna author/kind. **Importante:** el panel vive **fuera** del componente `<Tldraw>`; recibe el editor por prop. Si se pone dentro vía `components.InFrontOfTheCanvas`, el `tl-background` de tldraw intercepta los clicks.
-- **Counter en header** ("X notas · Y conexiones") calculado en vivo desde `editor.getCurrentPageShapes()` y refrescado en cada cambio de store.
+- **Counter en header** ("X notas, Y conexiones") calculado en vivo desde `editor.getCurrentPageShapes()` y refrescado en cada cambio de store.
 - **Persistencia en el JSON del ensayo:** el snapshot completo de tldraw (`getSnapshot(editor.store)`) vive en `essay.board`. Se hidrata via `loadSnapshot(editor.store, snap)` exactamente una vez en `onMount`. Cuando cambias de ensayo, `BoardPane` se remonta vía `key={essayId}`. Listener con `{ source: "user", scope: "document" }` evita auto-save loops.
 - **Rust:** campo `Option<serde_json::Value>` añadido al `Essay` struct con `skip_serializing_if = "Option::is_none"` (ensayos viejos sin tablero siguen leyendo). 8/8 tests verdes incluyendo `round_trip_preserves_optional_board_snapshot`.
 - **CSS overrides:** tldraw default background hidden, su grid hidden (uso mi `.board-grid` con dotted radial), watermark hidden, selection outline tintado a `seal`.
@@ -276,7 +276,7 @@ Decisión de producto (Noé, 2026-05-16): **los sabios no se hablan entre ellos*
 - **Toggle de modo** dentro del overlay: pasas de "consejo" a "un sabio" sin cerrar.
 - **Checkboxes por pregunta** (default ✓): solo las marcadas se persisten en `essay.interrogatorios[]` Y se materializan como post-its. Lo que desmarcas desaparece — sin papelera.
 - **Layout del tablero**: 1 sabio → cascada (≤3 × n), 2+ sabios → **una columna vertical por sabio**, anclada a la derecha del contenido existente para que múltiples interrogaciones no se piesen.
-- **Fuente por archivo**: nuevo botón "Subir .txt / .md" que carga el contenido al textarea. `.pdf`/`.docx` muestran un toast "próximamente · copia-pega por ahora".
+- **Fuente por archivo**: nuevo botón "Subir .txt / .md" que carga el contenido al textarea. `.pdf`/`.docx` muestran un toast "próximamente, copia-pega por ahora".
 
 Implementación:
 
@@ -325,10 +325,10 @@ Decisión de producto (Noé, 2026-05-18): Benchmark se posterga; antes hay que d
 - **Modelo:** `Criterio { id, nombre, peso (1-5), descripcion }`, `Rubrica { criterios[] }`, opcional en `Essay`. `Pase` extendido con `"apa"`. `Anotacion` gana `criterioId?`. Round-trip Rust test añadido (`round_trip_preserves_optional_rubrica`).
 - **`RubricaOverlay`** (`src/components/lectura/RubricaOverlay.tsx`) — modal CRUD: add/edit/delete inline, peso por select 1-5, sin draft local (cada keystroke commitea al store que debounce 800ms). Flush forzado al cerrar el modal para no perder edits.
 - **Store:** `Overlay = "lectura" | "pluma" | "rubrica" | null`. `openRubrica()` + `updateRubrica(rubrica)` con autosave debounceado (mismo patrón que `updateContent`).
-- **Topbar:** botón `Rúbrica` con `data-testid="topbar-rubrica"` + contador `· N` cuando hay criterios.
+- **Topbar:** botón `Rúbrica` con `data-testid="topbar-rubrica"` + contador `(N)` cuando hay criterios.
 - **Inyección en Pluma Roja:** `critique({sage, pase, text, rubrica})` reenvía la rúbrica vía Tauri → sidecar. El sidecar formatea la rúbrica como bloque legible en el user prompt y le pide al sabio que adjunte `"criterioId"` cuando una anotación se alinee con un criterio. `buildAnotacion()` valida que el id devuelto exista en la rúbrica (descarta ids fantasma).
 - **Pasada APA:** cuarta pasada propietaria de la Empirista, sólo en `mode=academico`. Toggle "Revisar APA" en el header del modal (default ON en académico). Prompt instruye a revisar exclusivamente formato APA 7: paréntesis, coma, página en citas textuales, "et al." con 3+ autores, `&` dentro del paréntesis. El grid de paneles es ahora dinámico (`gridTemplateColumns: repeat(N, 1fr)`) — 3 columnas con APA off, 4 con APA on.
-- **Chips de criterio:** cada anotación con `criterioId` muestra un chip "criterio · {nombre}" en el card de Pluma Roja y en el popover inline del editor (con `title={descripcion}` para el tooltip largo).
+- **Chips de criterio:** cada anotación con `criterioId` muestra un chip "criterio, {nombre}" en el card de Pluma Roja y en el popover inline del editor (con `title={descripcion}` para el tooltip largo).
 - **E2E:** stub `sage_critique` captura cada invocación en `window.__E2E_LAST_CRITIQUE__` (sage, pase, rubrica) para que los tests puedan asertar forwarding. Si llega rúbrica, el stub pone `criterioId` al primer item de cada pase. Slots de citas reorganizados para acomodar 4 pasadas sin solaparse. Nuevo `dumpCritiques(page)` helper. Spec `rubrica.spec.ts` (7 tests) cubre: CRUD, persistencia, count badge, APA visible en académico / oculto en blog / toggleable, rúbrica forwarded a cada pase, chip en card y popover. Spec `pluma-roja.spec.ts` ajustado para desactivar APA en los tests que esperaban 3 pasadas. **41/41 verde** + **9/9 Rust** (incluye round-trip rúbrica).
 
 ## Decisiones de la sesión 7
@@ -352,14 +352,14 @@ Decisión de producto (Noé, 2026-05-18): cinco preguntas saturan; tres bien esc
 - **`Fuente { id, nombre, cita?, contenido, origen, archivoNombre?, agregadoEn }`** y `essay.fuentes?: Fuente[]`. Round-trip Rust test añadido (`round_trip_preserves_optional_fuentes`).
 - **`FuentesOverlay`** (`src/components/lectura/FuentesOverlay.tsx`) — modal CRUD: nombre, cita APA opcional, contenido, peso visual del archivo vs manual, contador "X palabras". Botones "+ Subir .txt / .md" y "+ Añadir manual". Sin draft local (commit por keystroke + debounce 800ms + flush-on-close).
 - **Store:** `Overlay += "fuentes"`. Acciones `openFuentes`, `addFuente`, `updateFuente`, `removeFuente`. Las tres primeras usan el autosave debounceado; `removeFuente` flush directo. Cuando no quedan fuentes el campo se borra del JSON (null cleanup).
-- **Topbar:** botón `Fuentes` con `data-testid="topbar-fuentes"` + badge `· N`.
+- **Topbar:** botón `Fuentes` con `data-testid="topbar-fuentes"` + badge `(N)`.
 - **Lectura ↔ biblioteca:**
   - Chip-row arriba del textarea con cada fuente guardada; click → carga su `contenido` al textarea y resalta el chip. Tooltip muestra la cita APA si existe. Editar el textarea desactiva el highlight (la fuente activa "se ensucia").
   - El upload de archivo `.txt`/`.md` ahora también **guarda en la biblioteca** además de cargar al textarea — no más re-subir. La fuente subida queda con `origen: "archivo"` y `archivoNombre` original.
 - **Pluma Roja ↔ biblioteca:**
   - `critique({sage, pase, text, rubrica, fuentes})` agregado fuentes al payload Tauri → Rust → sidecar (todo opcional, omitido si vacío).
   - Sidecar formatea las fuentes como bloque `FUENTES DEL AUTOR:` en el user prompt, con instrucción explícita de leerlas como contexto y, en pasada APA, cruzar las citas formales con las referencias del borrador.
-  - Header del modal muestra un chip `Fuentes · N` cuando hay fuentes (al lado del chip de rúbrica).
+  - Header del modal muestra un chip `Fuentes, N` cuando hay fuentes (al lado del chip de rúbrica).
 - **E2E:** stub `sage_critique` ahora captura también el payload de fuentes en `__E2E_LAST_CRITIQUE__`. `dumpCritiques()` lo retorna. Spec `fuentes.spec.ts` (7 tests) cubre: CRUD + persistencia + count badge, upload en Fuentes y en Lectura (ambos salvan en biblioteca), chip picker en Lectura, forwarding a las 4 pasadas de Pluma Roja, y la reducción 5→3 en interrogatorio. Spec sage ajustado (1 test: cambio de placeholder al subir → usa selector más estable). **48/48 verde** + **10/10 Rust**.
 
 ## Decisiones de la sesión 7.5
@@ -484,9 +484,9 @@ Implementación:
 - **Estados del Scorebar** (5 ahora, no 3):
   - **Nunca evaluado**: ring punteado en `—` + "Sin datos del consejo todavía" + CTA **Evaluar**.
   - **Evaluado + clean + cobertura completa**: ring en **10.0** (ok green) + "Sin pendientes — el consejo no tiene nada que decir" + CTA **Re-evaluar**.
-  - **Evaluado + clean + cobertura parcial**: ring capped por penalty (10 − missing×1) + "Sin pendientes en lo revisado · cobertura 3/4 · faltan {pasadas}" + CTA Re-evaluar.
+  - **Evaluado + clean + cobertura parcial**: ring capped por penalty (10 − missing×1) + "Sin pendientes en lo revisado, cobertura 3/4, faltan {pasadas}" + CTA Re-evaluar.
   - **Evaluado + con issues**: score real + breakdown + chip de cobertura si parcial + CTA Re-evaluar.
-  - **Stale** (sobre cualquiera de los anteriores): pill `· stale` al lado del label "Benchmark" + ring tinta ámbar + tooltip en CTA "el ensayo cambió desde la última revisión".
+  - **Stale** (sobre cualquiera de los anteriores): pill `stale` al lado del label "Benchmark" + ring tinta ámbar + tooltip en CTA "el ensayo cambió desde la última revisión".
 - **`isStale`** se calcula con `essay.updatedAt > evaluacionMeta.evaluadoEn`. Sincronizar evaluadoEn a updatedAt en `recordEvaluacion` evita falso positivo del apply.
 - **Tests:** 13 unit tests en `score.spec.ts` (incluyen los 5 estados nuevos, partial coverage, isStale, false-positive negative) + 4 nuevos E2E en `benchmark.spec.ts` (perfect-state-real-10, never-evaluated, partial-cap-9, stale-indicator). **81/81 verde**.
 
@@ -542,13 +542,13 @@ Antes: la sugerencia del sabio era texto read-only en el popover. El usuario ten
 
 ### C. Polish del topbar (overflow a anchos pequeños)
 
-Captura de Noé mostró que el topbar se rompía a anchos chicos: el badge "guardado · 5m" hacía wrap a dos líneas, había un botón "Benchmark" placeholder sobrante, y los gaps eran amplios.
+Captura de Noé mostró que el topbar se rompía a anchos chicos: el badge "guardado, 5m" hacía wrap a dos líneas, había un botón "Benchmark" placeholder sobrante, y los gaps eran amplios.
 
 - **Quité el botón "Benchmark ⌘B"** del topbar — era placeholder de sesión 1 sin handler. El benchmark real es el Scorebar siempre visible al fondo.
 - **`Badge.tsx`** ahora tiene `whitespace-nowrap` + `flex-none` (el badge ni el dot interno se rompen).
 - **Layout más resistente:** grid `minmax(0,1fr)_auto_minmax(0,1fr)` (antes `1fr_auto_1fr` no comprimía bajo el contenido). Padding `px-7 → px-5`, gap `gap-6 → gap-4`, internos `gap-2.5 → gap-2`. Recupera ~30px horizontales.
 - **Breadcrumb del título** ahora usa `truncate min-w-0 flex-1` (sin el `max-w-[280px]` fijo) — se ajusta al espacio real. Las palabras fijas ("ensayos" / slash) tienen `whitespace-nowrap` + `flex-none` para que solo el título recortable se trunque.
-- **Sección derecha:** `flex-nowrap overflow-hidden` — si en algún futuro un botón nuevo no cabe, se clipea (no wraps feo). Hoy con los 4 botones (Board · Fuentes · Rúbrica · Interrogar · Evaluar) cabe holgado.
+- **Sección derecha:** `flex-nowrap overflow-hidden` — si en algún futuro un botón nuevo no cabe, se clipea (no wraps feo). Hoy con los 4 botones (Board, Fuentes, Rúbrica, Interrogar, Evaluar) cabe holgado.
 
 **89/89 E2E verde** + **12/12 Rust verde**.
 
@@ -1162,3 +1162,49 @@ Reviewer production parsing is shared with the offline harness in sidecar/src/an
 The pinned SDK0.2.141 incorrectly types legacy apiKeySource oauth; actual CLI emits none for subscription sessions. runner.ts gates streaming input on accountInfo subscription checks before prompt release; empty tools/MCP/settings and no alternate-provider/key fallback. Do not claim actual OAuth/model generation tested: Noe explicitly approved implementation WITHOUT model runs. The24-case synthetic pilot has12 sources and separate12/12 source-family splits; all answer keys are provisional until adjudication. Dry-run/report commands make zero model calls and cannot establish model quality.
 
 Packaging must include sidecar/dist/**/* after the runtime was split into modules. Native bundled ping verified startup without inference. Existing110 E2E and33 Rust tests plus lint/typecheck/build passed. Global registration and installed-app update were completed after separate explicit Noe authorization; the installed0.2.0 app and configured SDK client were verified. Never log descriptor credentials or private sources.
+
+
+## 2026-11-08 — Stationery Desk shell (spec 004, branch 004-stationery-redesign)
+
+Pergamino shell replaced by the approved Stationery Desk (specs/004-stationery-shell, Paper file 01M6VXNCR0ZBA410S026XSG7JT). Tokens in globals.css keep the old Tailwind names (em, sis, pra, cri, seal, paper) but are remapped, so overlays not yet replaced stay legible; renaming them waits until specs 005 to 008 remove those overlays. Fonts are Geist and Geist Mono.
+
+One agent identity: src/lib/agent-identity.ts (Tú, Evidencia, Sistemas, Práctica, Objeciones, mapped to the persisted ids tu, em, sis, pra, cri). No other file may keep its own label, color or icon map; the grep for SAGE_*, SAGES, AUTHOR_* and AUTHORS over src must stay empty. Shared pieces: ui/AgentChip, Tooltip, Popover, Panel, useAnchor, StickyNote (tilt derived from the id, never stored). Toolbar has six controls and a real Más panel (src/components/toolbar/MorePanel.tsx) that holds language and settings. Notes get an optional meta.title; geometry, render and SVG export share one measurement in canvas/note-shape.tsx. NoteBar replaces NoteContextPanel. BoardEmpty plays the 12 s ghost loop and fades when the first real note appears. Reduced motion: still ghosts, fades only. Undo routes by the last pointer surface (lib/editor/history.ts).
+
+Verified mechanically in T045 and T046: byte-form middle dot, text under 12 px, uppercase, vendor and old-name greps return nothing on the touched surfaces; lint, tsc, build, 110 E2E (run on a free port, not 3100, which another checkout held) and 33 Rust tests pass. Two leftover sizes in globals.css (.kbd 10px, .quote-block cite 11px) were raised to 12px.
+
+Still owed by overlays that later specs replace (colors and names only, not refactored here): LecturaOverlay, PlumaRojaOverlay, AnnotationPopover, BenchmarkDrilldown, Scorebar, RubricaOverlay, FuentesOverlay, HistoryOverlay, EssayList, ReviewEvidenceDetails. They still use text under 12 px, uppercase labels and a middle dot in ReviewEvidenceDetails. Not seen yet: the real-app quickstart (T047) and independent reviewer scores (T048); say «no lo he visto funcionar» until they exist.
+
+
+## 2026-11-09 — Specs 005 to 008: review, questions, library and material panels (branch 004-stationery-redesign)
+
+The four overlays and the list of the old shell were replaced by the Stationery Desk screens. Revisar ensayo (spec 005) is a panel hanging from the toolbar button, Correcciones is one solid panel, and the score is the stamp in the top bar. Hazme preguntas (006) folds into a pill while the agents put notes on the board. The essay list (007) is a desk plus a windowed ledger. Rúbrica, Fuentes and Historial (008) are panels; the three old overlays in `src/components/lectura/` are deleted, so that folder no longer exists.
+
+What changed, by area:
+
+- **Review (005).** `src/lib/review/run.ts` owns the run and its promises; the store holds only `review` and `reviewOutcome`. A run outlives its panel. Leaving the essay (close, open another, restore) cancels it through `registerEssayLeaveHook` and raises the discard notice. Findings are persisted records (`essay.findings`) keyed by id, with the mark as anchor and the presence of the mark winning, so undo is correct for free. Findings that could not be located stay as records without a mark. The stamp goes out of date through a fingerprint (plain text, rubric criteria, per source `{id, nombre, cita, contenido}`) captured when the run starts, not through `updatedAt`. Open findings count against the score, so a 10 means nothing is left to fix. `score.spec.ts` stays unedited.
+- **Too long.** `critique()` throws `ESSAY_TOO_LONG` before sending when the essay alone does not fit one request. `run.ts` carries it as `reviewOutcome.kind === "too_long"` and ReviewPanel shows one plain line with no Reintentar, since retrying cannot help. Closing the panel clears it.
+- **Questions (006).** The run lives in `src/lib/questions/run.ts` and the store, not in the panel, because the panel folds into the pill. One parser, `parseQuestions`, in `sidecar/src/question-stream.ts`: no match returns nothing and an empty result at the end is a failure (`NO_QUESTIONS`), with no fallback that could turn raw output into a note. A new request type `ask` answers the writer's own question from the source. Notes land with `editor.run(fn, { history: "ignore" })`, and a discard is a normal recorded step, so Cmd Z returns the discarded note and touches nothing else. The writer's own notes never move.
+- **Library (007).** `src-tauri/src/library.rs` keeps a derived, disposable index file. Essay files stay the only truth and the index only reads them; it holds the score's inputs, never the score, and the save path never touches it. Search runs in Rust over text held in memory, folds case and accents (not the letter ñ) and matches every word as a substring. No SQLite, since plain matching over 1000 essays takes under 5 ms. The list is windowed without a library (`ui/WindowedList.tsx`).
+- **Material (008).** PDF text is extracted on the Mac (`pdf_text.rs` runs a fixed script through the system, `pdf_extract.js`). The renderer sends bytes; Rust never receives a path from the renderer. Code, not the model, checks every extracted field against the source text, composes the APA string and maps weights (`sidecar/src/extract-parser.ts`, `extract-prompts.ts`, `src/lib/materials/`). For a source only the first 12,000 characters go to the agents when completing it; for an assignment up to 80,000; reviews send full source text as before. Fetching pages was left out. The three panels open with `{ instant: true }` from the keyboard bridge and animate when opened from Más.
+
+Decisions worth keeping:
+
+| Decision | Why |
+|---|---|
+| State of a finding in a record, not in mark attributes | Resolved, not applicable and not located findings have no mark. The presence rule gives undo for free. |
+| Fingerprint of inputs instead of excluding setters from `updatedAt` | A list of excluded setters drifts with every new setter. Hashing plain text is what stops marks from counting as edits. |
+| Cancel and discard on leaving the essay | Keeping results would write marks into an essay with no live editor, and cancel stops spending plan credit. |
+| An explicit outcome for each failure that cannot be retried | A generic failed pass told the writer nothing and offered a retry that could never work. |
+| Index file in Rust instead of SQLite | Measured first: a full scan was 150 ms on the main thread. A cache that is rebuilt on every read keeps it from drifting. |
+| `em`, `sis`, `pra`, `cri`, `tu` and the pass values stay as persisted ids | Saved essays keep working; only the names shown changed (one map in `src/lib/agent-identity.ts`). |
+
+Learned:
+
+- Check a visual unit before converting it. The app root font size is 14 px, so every Tailwind spacing and line-height utility on the rem scale (`leading-4`, `p-5`, `gap-3`) comes out 12.5% smaller than the 16 px the Paper values assume. Line heights were converted to arbitrary pixels after confirming each pair (12/16, 13/16, 13/20, 15/20, 17/24, 18/24) exists in Paper. Write spacing as `[Npx]` from the start.
+- A failure that cannot be fixed by trying again needs its own state; a generic one lies by offering Reintentar.
+- A build can fail once on the font download with no network and pass on the next run; it is not a code failure.
+- Port 3100 may belong to another checkout and Playwright reuses it silently. Run the suite from a config on a free port with `reuseExistingServer: false`.
+
+Reviewer prompt changes (sidecar/src/prompts.ts, sage.ts, run.ts): the reviewers address the writer in tú with plain words; they report only real problems; no invented numbers, with a guard in run.ts that drops a replacement carrying a figure, year or citation that is not in the essay or the sources; no corrections from memory, only what the text or the sources support; a shorter mensaje; and a reemplazo keeps the grammatical role of the quoted text and adds no new ideas. The sheet also got paragraph spacing. Last design round: the keep and discard bar flips sides and never covers another note, a hovered note draws no selection rectangle, ghost notes fade out before the next text fades in (HALF in BoardEmpty.tsx), the evidence popover aligns with its finding card and clears the board toolbar (Popover topOf and clearBottom), the featured library card leaves room for its stamp, and a narrowed Correcciones panel fits its content.
+
+Not seen working here: the real-app quickstarts, the installed `.app` PDF drop from Finder, real model runs and the independent reviewer scores. Say «no lo he visto funcionar» until they exist.

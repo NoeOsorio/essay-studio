@@ -3,19 +3,14 @@
 import { BubbleMenu } from "@tiptap/react/menus";
 import type { Editor } from "@tiptap/react";
 
-import { Avatar, type SageKey } from "@/components/ui/Avatar";
+import { AgentChip } from "@/components/ui/AgentChip";
+import { Tooltip } from "@/components/ui/Tooltip";
+import { AGENTS, type AgentId } from "@/lib/agent-identity";
 import { useStore } from "@/lib/store";
-
-const SAGES: { key: SageKey; initials: string; name: string }[] = [
-  { key: "em",  initials: "EM", name: "El Empirista" },
-  { key: "sis", initials: "SI", name: "El Sistémico" },
-  { key: "pra", initials: "PR", name: "El Práctico" },
-  { key: "cri", initials: "CR", name: "El Crítico" },
-];
 
 /**
  * Floating bubble that appears over a non-empty selection in the
- * TipTap editor. Pick a sage to interrogate the highlighted text;
+ * TipTap editor. Pick an agent to ask about the highlighted text;
  * the overlay opens prefilled with that text.
  */
 export function SelectionMenu({ editor }: { editor: Editor | null }) {
@@ -36,33 +31,33 @@ export function SelectionMenu({ editor }: { editor: Editor | null }) {
       }}
     >
       <div
-        className="flex items-center gap-1.5 px-2 py-1.5 bg-paper-2 border border-rule-2 rounded-full shadow-(--shadow-pop)"
+        className="flex items-center gap-[6px] rounded-[12px] bg-sheet p-[5px] shadow-[0_0_0_1px_#1D1B1814,0_8px_24px_-6px_#1D1B1838]"
         data-testid="sage-selection-menu"
       >
-        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 pl-1 pr-0.5">
-          Interrogar
+        <span className="pl-[6px] font-sans text-[12px] font-medium leading-[16px] text-ink-3">
+          Preguntas
         </span>
-        {SAGES.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            title={`${s.name} · interrogar selección`}
-            aria-label={`Interrogar como ${s.name}`}
-            // Prevent the mousedown from blurring the editor (which
-            // would collapse the selection before our onClick reads
-            // it). Standard pattern for bubble-menu controls.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              const { state } = editor;
-              const { from, to } = state.selection;
-              const text = state.doc.textBetween(from, to, " ").trim();
-              if (text.length === 0) return;
-              openLectura(s.key, text);
-            }}
-            className="p-0 bg-transparent border-0 cursor-pointer transition-transform hover:scale-110"
-          >
-            <Avatar sage={s.key} initials={s.initials} size={22} title={s.name} />
-          </button>
+        {AGENTS.map((s) => (
+          <Tooltip key={s.id} label={s.lens} side="top">
+            <button
+              type="button"
+              aria-label={`Recibir preguntas de ${s.name}`}
+              // Prevent the mousedown from blurring the editor (which
+              // would collapse the selection before our onClick reads
+              // it). Standard pattern for bubble-menu controls.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                const { state } = editor;
+                const { from, to } = state.selection;
+                const text = state.doc.textBetween(from, to, " ").trim();
+                if (text.length === 0) return;
+                openLectura(s.id as AgentId, text, { instant: e.detail === 0 });
+              }}
+              className={`grid h-[24px] w-[24px] flex-none cursor-pointer place-items-center rounded-[5px] shadow-[inset_0_0_0_1px_#00000014] press ${s.chipClass}`}
+            >
+              <AgentChip author={s.id} size={14} />
+            </button>
+          </Tooltip>
         ))}
       </div>
     </BubbleMenu>

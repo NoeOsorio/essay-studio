@@ -13,12 +13,15 @@
 //   "file:close"           → closeEssay()
 //   "view:history"         → openHistory()
 //   "view:board-toggle"    → toggleBoard()
-//   "view:show-benchmark"  → showScorebar()    (sesión 17)
-//   "sabios:interrogar"    → openLectura()
-//   "sabios:evaluar"       → openPlumaRoja()
+//   "sabios:interrogar"    → openLectura()   (menu: Agentes, Hazme preguntas)
+//   "sabios:evaluar"       → openReview()    (menu: Agentes, Revisar ensayo)
 //   "sabios:rubrica"       → openRubrica()
 //   "sabios:fuentes"       → openFuentes()
-//   "sabios:limpiar"       → clearEvaluacion() (sesión 17)
+//   "sabios:limpiar"       → clearEvaluacion() (menu: Limpiar revisión)
+//
+// Ids stay as they were; only the menu labels changed. Every overlay opener
+// is called with `{ instant: true }` because a native menu activation has no
+// trigger to grow from, so the panel skips its opening animation.
 
 import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -56,41 +59,43 @@ export function useNativeMenuBridge() {
           if (s.current) void s.closeEssay();
           break;
         case "view:history":
-          if (s.current) s.openHistory();
+          if (s.current) s.openHistory({ instant: true });
           break;
+        case "view:search": {
+          // Only while the list shows; with an essay open, ⌘K does nothing.
+          if (s.view !== "list") break;
+          const box = document.querySelector<HTMLInputElement>('[data-testid="library-search"]');
+          box?.focus();
+          box?.select();
+          break;
+        }
         case "view:board-toggle":
           if (s.current) s.toggleBoard();
           break;
         case "sabios:interrogar":
-          // Sin args → openLectura abre en modo "council" por default
-          // (mismo path que el botón Interrogar del topbar).
-          if (s.current) s.openLectura();
+          // Same panel as the Hazme preguntas button, opened with no animation.
+          if (s.current) s.openLectura(undefined, undefined, { instant: true });
           break;
         case "sabios:evaluar":
-          if (s.current) s.openPlumaRoja();
+          if (s.current) s.openReview({ instant: true });
           break;
         case "sabios:rubrica":
-          if (s.current) s.openRubrica();
+          if (s.current) s.openRubrica({ instant: true });
           break;
         case "sabios:fuentes":
-          if (s.current) s.openFuentes();
+          if (s.current) s.openFuentes({ instant: true });
           break;
         case "sabios:limpiar":
-          // Acto destructivo — pedimos confirmación rápida porque
-          // borra TODAS las anotaciones del documento de una vez.
-          // window.confirm bloqueante alcanza para v1; un modal más
-          // suave queda para si lo pedís.
+          // Acto destructivo: se pide confirmación porque quita todas las
+          // correcciones, también las resueltas y las descartadas, y el
+          // puntaje, de una vez. No vuelve con ⌘Z, así que el texto no
+          // promete deshacer.
           if (s.current) {
             const ok = window.confirm(
-              "¿Limpiar la evaluación entera? Esto borra todas las anotaciones del documento. No se puede deshacer (salvo con ⌘Z).",
+              "Se quitarán todas las correcciones, también las resueltas, y el puntaje. No se puede deshacer.",
             );
             if (ok) s.clearEvaluacion();
           }
-          break;
-        case "view:show-benchmark":
-          // No-op si no hay essay o ya está visible — el render del
-          // Scorebar de todas formas chequea hasAnotaciones/wasEvaluated.
-          if (s.current) s.showScorebar();
           break;
         default:
           // Predefined items (cut/copy/paste/quit/undo/redo/etc.)

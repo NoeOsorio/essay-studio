@@ -52,7 +52,15 @@ export function pasadasForMode(mode: EssayMode): Pase[] {
 /** Minimal shape of an applied annotation, as read from a TipTap doc. */
 export type AppliedAnotacion = Pick<
   Anotacion,
-  "id" | "sage" | "pase" | "severidad" | "mensaje" | "reemplazo" | "criterioId"
+  | "id"
+  | "sage"
+  | "pase"
+  | "severidad"
+  | "mensaje"
+  | "reemplazo"
+  | "criterioId"
+  | "evidence"
+  | "provenance"
 >;
 
 /** A snapshot of one criterio's score + the anotaciones that affect it. */
@@ -191,9 +199,19 @@ export function computeBenchmark(args: {
   evaluacionMeta: EvaluacionMeta | undefined;
   essayMode: EssayMode;
   essayUpdatedAt: string;
+  /** Fingerprint of the essay now (see lib/review/fingerprint). When
+   *  given and the meta carries per-pass fingerprints, staleness is
+   *  decided by content, not by the clock. */
+  contentFingerprint?: string;
 }): BenchmarkResult {
-  const { anotaciones, rubrica, evaluacionMeta, essayMode, essayUpdatedAt } =
-    args;
+  const {
+    anotaciones,
+    rubrica,
+    evaluacionMeta,
+    essayMode,
+    essayUpdatedAt,
+    contentFingerprint,
+  } = args;
 
   const hasAnotaciones = anotaciones.length > 0;
   const hasRubrica = !!rubrica && rubrica.criterios.length > 0;
@@ -210,7 +228,7 @@ export function computeBenchmark(args: {
     : 0;
 
   const isStale = wasEvaluated
-    ? essayUpdatedAt > (evaluacionMeta!.evaluadoEn ?? "")
+    ? computeStale(evaluacionMeta!, essayUpdatedAt, contentFingerprint)
     : false;
 
   // Bucket by criterioId (needed even on the "never evaluated" path
@@ -295,6 +313,34 @@ export function computeBenchmark(args: {
     coverageRatio,
     isStale,
   };
+}
+
+/**
+ * Out of date? With a fingerprint for every covered pass and one for the
+ * essay now, a pass is fresh when what it read equals the essay, or when
+ * both are linked in `appliedFingerprints` (Usar este texto). Otherwise
+ * the older timestamp comparison applies.
+ */
+function computeStale(
+  meta: EvaluacionMeta,
+  essayUpdatedAt: string,
+  current: string | undefined,
+): boolean {
+  const fps = meta.fingerprintsByPase;
+  const covered = meta.pasadasCubiertas;
+  if (
+    current &&
+    fps &&
+    covered.length > 0 &&
+    covered.every((p) => typeof fps[p] === "string")
+  ) {
+    const applied = new Set(meta.appliedFingerprints ?? []);
+    return !covered.every((p) => {
+      const read = fps[p]!;
+      return read === current || (applied.has(read) && applied.has(current));
+    });
+  }
+  return essayUpdatedAt > (meta.evaluadoEn ?? "");
 }
 
 /** One decimal place, for display. */

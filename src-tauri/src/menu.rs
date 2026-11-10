@@ -11,11 +11,11 @@
 // switch on them cleanly:
 //   "file:new"            → store.newEssay()
 //   "file:close"          → store.closeEssay()
+//   "view:search"         → focus the library search (list only)
 //   "view:history"        → store.openHistory()
 //   "view:board-toggle"   → store.toggleBoard()
-//   "view:show-benchmark" → store.showScorebar()       (sesión 17)
 //   "sabios:interrogar"   → store.openLectura()
-//   "sabios:evaluar"      → store.openPlumaRoja()
+//   "sabios:evaluar"      → store.openReview()
 //   "sabios:rubrica"      → store.openRubrica()
 //   "sabios:fuentes"      → store.openFuentes()
 //   "sabios:limpiar"      → store.clearEvaluacion()    (sesión 17)
@@ -87,17 +87,15 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .id("view:history")
         .accelerator("CmdOrCtrl+Shift+H")
         .build(app)?;
-    // Sesión 17: el Scorebar tiene un botón × para esconderse a mano.
-    // Este item lo vuelve a mostrar si el usuario se arrepiente.
-    // Sin accelerator — es un recovery action, no algo que el usuario
-    // dispare con frecuencia.
-    let view_show_benchmark = MenuItemBuilder::new("Mostrar Benchmark")
-        .id("view:show-benchmark")
+    // No-op in the renderer until the library search lands (spec 007, T025).
+    let view_search = MenuItemBuilder::new("Buscar ensayos")
+        .id("view:search")
+        .accelerator("CmdOrCtrl+K")
         .build(app)?;
     let view_submenu = SubmenuBuilder::new(app, "Vista")
+        .item(&view_search)
         .item(&view_board_toggle)
         .separator()
-        .item(&view_show_benchmark)
         .item(&view_history)
         .build()?;
 
@@ -107,17 +105,18 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // Sesión 17: ⌘R (Rúbrica) y ⌘F (Fuentes) chocaban con shortcuts
     // built-in del webview (Reload y Find respectivamente) que se
     // interceptan ANTES de llegar al menú nativo. Movimos a ⌘⇧R y
-    // ⌘⇧F. Mantenemos ⌘I (Interrogar) y ⌘⇧E (Evaluar) — esos no
-    // tienen conflictos sistémicos.
+    // ⌘⇧F. ⌘⇧E (Revisar ensayo) no tiene conflictos sistémicos.
+    // Spec 004: ⌘I era de Interrogar pero TipTap lo usa para cursiva, así que
+    // Hazme preguntas pasa a ⌘⇧P.
     //
     // Limpiar evaluación (⌘⌫ + ⇧) es el acto destructivo del consejo
     // — sólo lo ofrecemos vía menú, no atajo único, para evitar
     // borrar todo accidentalmente.
-    let sabios_interrogar = MenuItemBuilder::new("Interrogar")
+    let sabios_interrogar = MenuItemBuilder::new("Hazme preguntas")
         .id("sabios:interrogar")
-        .accelerator("CmdOrCtrl+I")
+        .accelerator("CmdOrCtrl+Shift+P")
         .build(app)?;
-    let sabios_evaluar = MenuItemBuilder::new("Evaluar")
+    let sabios_evaluar = MenuItemBuilder::new("Revisar ensayo")
         .id("sabios:evaluar")
         .accelerator("CmdOrCtrl+Shift+E")
         .build(app)?;
@@ -129,11 +128,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .id("sabios:fuentes")
         .accelerator("CmdOrCtrl+Shift+F")
         .build(app)?;
-    let sabios_limpiar = MenuItemBuilder::new("Limpiar evaluación")
+    let sabios_limpiar = MenuItemBuilder::new("Limpiar revisión")
         .id("sabios:limpiar")
         .accelerator("CmdOrCtrl+Shift+Backspace")
         .build(app)?;
-    let sabios_submenu = SubmenuBuilder::new(app, "Sabios")
+    let sabios_submenu = SubmenuBuilder::new(app, "Agentes")
         .item(&sabios_interrogar)
         .item(&sabios_evaluar)
         .separator()

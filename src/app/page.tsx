@@ -3,19 +3,20 @@
 import { useEffect, useRef } from "react";
 import { Topbar } from "@/components/Topbar";
 import { SidecarBanner } from "@/components/SidecarBanner";
-import { McpConnection } from "@/components/McpConnection";
+import { useMcpHost } from "@/components/McpConnection";
 import { EditorPane } from "@/components/editor/EditorPane";
 import { BoardPane } from "@/components/canvas/BoardPane";
-import { Scorebar } from "@/components/Scorebar";
-import { EssayList } from "@/components/EssayList";
-import { LecturaOverlay } from "@/components/lectura/LecturaOverlay";
-import { PlumaRojaOverlay } from "@/components/lectura/PlumaRojaOverlay";
-import { RubricaOverlay } from "@/components/lectura/RubricaOverlay";
-import { FuentesOverlay } from "@/components/lectura/FuentesOverlay";
-import { HistoryOverlay } from "@/components/lectura/HistoryOverlay";
+import { Library } from "@/components/library/Library";
+import { ReviewPanel } from "@/components/review/ReviewPanel";
+import { ReviewNotice } from "@/components/review/ReviewNotice";
+import { RubricPanel } from "@/components/panels/RubricPanel";
+import { SourcesPanel } from "@/components/panels/SourcesPanel";
+import { HistoryPanel } from "@/components/panels/HistoryPanel";
 import { useStore } from "@/lib/store";
-import { FEATURES } from "@/lib/features";
 import { useNativeMenuBridge } from "@/lib/menu/bridge";
+import { QuestionsPanel } from "@/components/questions/QuestionsPanel";
+import { QuestionRunPill } from "@/components/questions/QuestionRunPill";
+import { installFileDropGuard } from "@/lib/fileDrop";
 
 /** Heartbeat interval for auto snapshots. 10min strikes the balance
  *  between granularity and panel noise (sesión 12 decision). */
@@ -32,6 +33,13 @@ export default function Page() {
   // Native menu bridge — `app:menu` events from Rust dispatch to store
   // actions. See `src/lib/menu/bridge.ts`.
   useNativeMenuBridge();
+
+  // MCP connection stays mounted for the whole session; Más and the list
+  // button only show its state.
+  useMcpHost();
+
+  // A file dropped outside a drop zone does nothing.
+  useEffect(() => installFileDropGuard(), []);
 
   // Initial: load the essay list once the app boots.
   useEffect(() => {
@@ -69,8 +77,7 @@ export default function Page() {
   }, [currentId, snapshotNow]);
 
   // Layout — flexbox columna en vez de grid-rows. Razón: con CSS Grid
-  // auto-placement, los hijos null (SidecarBanner cuando está up,
-  // Scorebar cuando no hay eval) no crean tracks y los visibles se
+  // auto-placement, los hijos null (SidecarBanner cuando está up) no crean tracks y los visibles se
   // ubican en los PRIMEROS tracks del template, no en los que les
   // tocarían. Con `grid-rows-[auto_auto_1fr_auto]` y sólo Topbar + main
   // renderizados, main caía en row 2 (auto) en vez de row 3 (1fr),
@@ -83,31 +90,36 @@ export default function Page() {
       <div className="relative z-[1] flex flex-col h-screen">
         <Topbar />
         <SidecarBanner />
-        <McpConnection />
         {view === "list" ? (
-          <EssayList />
-        ) : boardOpen ? (
-          <main className="flex-1 min-h-0 grid grid-cols-[1fr_1px_1fr]">
-            <EditorPane />
-            <div className="bg-rule-1" />
-            <BoardPane />
-          </main>
+          <Library />
         ) : (
-          // Board hidden: editor takes the full main column. Mantenemos
-          // grid en main para que su único hijo (EditorPane) tenga su
-          // celda con altura definida — sin eso el overflow-y-auto
-          // interno del editor no scrollearía.
-          <main className="flex-1 min-h-0 grid overflow-hidden">
-            <EditorPane />
+          // Desk: the sheet (720 wide) and, when open, the board beside it.
+          // Closed, the sheet sits centered. Flex with flex-1 keeps the body
+          // filling the window whatever siblings render nothing.
+          <main className="flex flex-1 min-h-0 gap-[10px] px-[10px] pb-[10px]">
+            <div
+              className={`flex flex-col flex-none w-[720px] min-w-0 overflow-hidden rounded-[16px] bg-sheet shadow-[0_0_0_1px_#1D1B180F,0_2px_6px_#1D1B180D] ${
+                boardOpen ? "" : "mx-auto"
+              }`}
+            >
+              <EditorPane />
+            </div>
+            {boardOpen ? (
+              <div className="relative flex-1 min-w-0 overflow-hidden rounded-[16px]">
+                <BoardPane />
+                <div className="pointer-events-none absolute inset-0 z-[3] rounded-[16px] shadow-[inset_0_0_0_1px_#1D1B180D]" />
+              </div>
+            ) : null}
           </main>
         )}
-        {view === "editor" && FEATURES.benchmark ? <Scorebar /> : null}
       </div>
-      <LecturaOverlay />
-      <PlumaRojaOverlay />
-      <RubricaOverlay />
-      <FuentesOverlay />
-      <HistoryOverlay />
+      <QuestionsPanel />
+      <QuestionRunPill />
+      <ReviewPanel />
+      <ReviewNotice />
+      <RubricPanel />
+      <SourcesPanel />
+      <HistoryPanel />
     </>
   );
 }

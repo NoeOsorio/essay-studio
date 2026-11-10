@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-07
 
-**Status**: Draft
+**Status**: Superseded by specs 004 to 008. Noe rejected palette B on 2026-11-08; kept as a record.
 
 **Input**: User description: "UI redesign of Essay Studio using palette B «monocromo + sabios», chosen
 by Noe on 2026-11-07. The full critique with rubric, recommendations and proposals per screen is in

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Newsreader, Inter, JetBrains_Mono } from "next/font/google";
+import { Newsreader, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const newsreader = Newsreader({
@@ -9,21 +9,21 @@ const newsreader = Newsreader({
   style: ["normal", "italic"],
 });
 
-const inter = Inter({
-  variable: "--font-inter",
+const geist = Geist({
+  variable: "--font-geist",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
 });
 
-const jetbrains = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
   weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "Essay Studio",
-  description: "Escritura aumentada con un consejo de cuatro sabios.",
+  description: "Escribe tu ensayo con cuatro lectores que te hacen preguntas y revisan tu texto.",
 };
 
 export default function RootLayout({
@@ -32,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="es"
-      className={`${newsreader.variable} ${inter.variable} ${jetbrains.variable} h-full antialiased`}
+      className={`${newsreader.variable} ${geist.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full">{children}</body>
     </html>
