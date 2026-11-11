@@ -152,6 +152,12 @@ de uso, el protocolo de evaluación ciega y la autorización de consumo están e
 
 ### MCP local para trabajar dentro de la app
 
+La ampliación permite editar encabezados y objetos del tablero, conexiones y
+formato del documento, gestionar fuentes, rúbrica y versiones, e iniciar trabajos
+de revisión únicamente por pedido explícito. Incluye importación de imágenes y
+video por fragmentos, consultas paginadas y protección ante reintentos. Consulta
+`get_basic_info` para descubrir las capacidades de la app conectada.
+
 **[Guía de instalación para Codex, Claude Desktop y Claude Code](docs/mcp-installation.md)**:
 preparación, comandos, configuración, verificación y desinstalación por cliente.
 

@@ -179,7 +179,7 @@ pub fn essay_delete(app: AppHandle, id: String) -> Result<(), String> {
     let dir = essays_dir(&app)?;
     // Wipe the history file alongside the essay so a deleted essay
     // doesn't leak its version history to disk.
-    let _ = crate::history::delete_in(&dir, &id);
+    crate::history::delete_in(&dir, &id)?;
     delete_in(&dir, &id)?;
     // Drop the deleted essay's text from the index right away.
     crate::library::reconcile_in_background(&app);

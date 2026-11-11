@@ -29,6 +29,8 @@ export function ScoreStamp() {
       Object.values(s.review.passes).some((p) => p.status === "running"),
   );
   const openReview = useStore((s) => s.openReview);
+  // A client can hide the stamp for the session; a new review or another essay brings it back.
+  const hidden = useStore((s) => s.scorebarDismissed);
   const [view, setView] = useState<View>(null);
   const registerAnchor = useRegisterAnchor("stamp");
   const bump = useStore((s) => s.bumpReviewSurfaces);
@@ -39,7 +41,7 @@ export function ScoreStamp() {
     return () => bump(-1);
   }, [surfaceOpen, bump]);
 
-  if (!reading || !essayId) return null;
+  if (!reading || !essayId || hidden) return null;
   const { result, views } = reading;
 
   const hasNumber = result.overall !== null;

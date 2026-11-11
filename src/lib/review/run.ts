@@ -28,6 +28,8 @@ import {
 import { DEFAULT_REVIEWER_PROFILE, REVIEWER_PROFILES } from "../../../sidecar/src/model-profiles";
 import type { AnnotationAttrs } from "@/components/editor/extensions/Annotation";
 import type {
+  Anotacion,
+  Criterio,
   EssayMode,
   FindingRecord,
   Pase,
@@ -369,6 +371,48 @@ function tryEditor(essayId: string): Editor | null {
   }
 }
 
+/** One pass of results ready to be written as findings. */
+export type PassFindings = {
+  pase: Pase;
+  /** Prepared annotations (see `prepareAnotaciones`); a subset when the caller selected some. */
+  anotaciones: Anotacion[];
+  /** Lines the reviewer returned that could not be read. A pass with any is partial. */
+  invalid: number;
+  provenance?: ReviewProvenance;
+};
+
+/**
+ * Turn the lines a reviewer returned into annotations the essay can take:
+ * diagnosing passes carry no replacement, and any replacement that carries a
+ * figure or a name found neither in the essay nor in its sources is dropped.
+ */
+export function prepareAnotaciones(args: {
+  raw: RawAnotacion[];
+  pase: Pase;
+  mode: EssayMode;
+  criterios?: Criterio[];
+  provenance?: ReviewProvenance;
+  corpus: string;
+  generadoEn: string;
+}): Anotacion[] {
+  const sage = sageForPase(args.pase, args.mode);
+  return args.raw.map((raw) => {
+    const a = buildAnotacion(raw, sage, args.pase, args.generadoEn, args.criterios, args.provenance);
+    if (NO_REEMPLAZO_PASES.has(args.pase)) a.reemplazo = undefined;
+    else if (a.reemplazo) {
+      a.reemplazo = replacementIsGrounded(a.reemplazo, args.corpus)
+        ? matchFirstLetterCase(a.reemplazo, a.cita)
+        : undefined;
+    }
+    return a;
+  });
+}
+
+/** The text a replacement may draw from: the essay and its sources. */
+export function reviewCorpus(content: unknown, fuentes: readonly { contenido: string }[] | undefined): string {
+  return [extractPlainText(content), ...(fuentes ?? []).map((f) => f.contenido)].join("\n");
+}
+
 /** data-model.md, Applying a review, steps 1 to 6. Synchronous. */
 function applyReview(
   editor: Editor,
@@ -380,14 +424,46 @@ function applyReview(
   const view = store.review;
   if (!cur || !view) return;
   const generadoEn = new Date().toISOString();
-  const criterios = cur.rubrica?.criterios;
+  const corpus = reviewCorpus(cur.content, cur.fuentes);
+  const passes: PassFindings[] = [];
+  for (const pase of returned) {
+    const r = results.get(pase);
+    if (r?.kind !== "ok") continue;
+    passes.push({
+      pase,
+      invalid: r.invalid,
+      provenance: r.provenance,
+      anotaciones: prepareAnotaciones({
+        raw: r.raw,
+        pase,
+        mode: cur.mode,
+        criterios: cur.rubrica?.criterios,
+        provenance: r.provenance,
+        corpus,
+        generadoEn,
+      }),
+    });
+  }
+  writeReviewFindings(editor, passes, view.fingerprint, generadoEn);
+}
+
+/**
+ * Steps 2 to 6 for any caller: the review panel, and a review job that a
+ * client applied. The findings, their marks, the coverage and the stamp are
+ * written the same way, so the score and the cards stay consistent.
+ */
+export function writeReviewFindings(
+  editor: Editor,
+  passes: PassFindings[],
+  fingerprint: string,
+  generadoEn: string = new Date().toISOString(),
+): void {
+  const store = useStore.getState();
+  const cur = store.current;
+  if (!cur) return;
   const cleanPases: Pase[] = [];
   const partialPases: Pase[] = [];
-  for (const p of returned) {
-    const r = results.get(p);
-    if (r?.kind !== "ok") continue;
-    (r.invalid > 0 ? partialPases : cleanPases).push(p);
-  }
+  for (const p of passes) (p.invalid > 0 ? partialPases : cleanPases).push(p.pase);
   const replaced = new Set<Pase>([...cleanPases, ...partialPases]);
 
   // Step 2: open findings of clean and partial passes are replaced. Marks
@@ -407,25 +483,12 @@ function applyReview(
 
   // Steps 3 to 5: locate each new finding, suppress what a closed one still
   // covers, keep the rest, located or not.
-  const corpus = [
-    extractPlainText(cur.content),
-    ...(cur.fuentes ?? []).map((f) => f.contenido),
-  ].join("\n");
   const seen = new Map<string, number>();
   const records: FindingRecord[] = [];
   const addMarks: { from: number; to: number; attrs: AnnotationAttrs }[] = [];
-  for (const pase of returned) {
-    const r = results.get(pase);
-    if (r?.kind !== "ok") continue;
-    const sage = sageForPase(pase, cur.mode);
-    for (const raw of r.raw) {
-      const a = buildAnotacion(raw, sage, pase, generadoEn, criterios, r.provenance);
-      if (NO_REEMPLAZO_PASES.has(pase)) a.reemplazo = undefined;
-      else if (a.reemplazo) {
-        a.reemplazo = replacementIsGrounded(a.reemplazo, corpus)
-          ? matchFirstLetterCase(a.reemplazo, a.cita)
-          : undefined;
-      }
+  for (const { pase, anotaciones } of passes) {
+    for (const a of anotaciones) {
+      const sage = a.sage;
       const key = a.cita;
       let skip = seen.get(key) ?? 0;
       let range = findCitaRange(editor, a.cita, skip);
@@ -477,13 +540,10 @@ function applyReview(
   // Step 6: commit meta, then flush. The editor's own update already
   // replaced `current`; `commitReview` reads it fresh.
   useStore.getState().commitReview({
-    fingerprint: view.fingerprint,
+    fingerprint,
     cleanPases,
     partialPases,
-    reviewerRuns: returned.flatMap((p) => {
-      const r = results.get(p);
-      return r?.kind === "ok" ? [{ pase: p, provenance: r.provenance }] : [];
-    }),
+    reviewerRuns: passes.map((p) => ({ pase: p.pase, provenance: p.provenance })),
     findings: (prev) => [...prev.filter((r) => !removeIds.has(r.id)), ...records],
   });
 }

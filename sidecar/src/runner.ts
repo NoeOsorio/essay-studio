@@ -176,8 +176,8 @@ export async function runReview(req: ReviewRequest, config: RunReviewOptions = {
         completed = true;
       }
     }
+    if (config.signal?.aborted) throw new ReviewRunError("CANCELLED", "Review was cancelled.", { costUsd, usage, modelUsage, provenance });
     if (!completed) {
-      if (config.signal?.aborted) throw new ReviewRunError("CANCELLED", "Review was cancelled.", { costUsd, usage, modelUsage, provenance });
       if (timedOut) throw new ReviewRunError("TIMEOUT", "Review timed out; no complete evaluation was recorded.", { costUsd, usage, modelUsage, provenance });
       throw new ReviewRunError("INCOMPLETE_REVIEW", "Reviewer ended without a successful completion event.");
     }

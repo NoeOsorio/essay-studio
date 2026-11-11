@@ -70,17 +70,24 @@ function runSidecarCommand(args: {
   args: Record<string, unknown>;
   id: string;
   onUpdate?: (update: InterrogateUpdate) => void;
+  signal?: AbortSignal;
 }): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
-  const { command, args: invokeArgs, id, onUpdate } = args;
+  const { command, args: invokeArgs, id, onUpdate, signal } = args;
   return new Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }>(
     (resolveOuter, reject) => {
       let unlisten: UnlistenFn | null = null;
       let unlistenStatus: UnlistenFn | null = null;
       let settled = false;
+      let sent = false;
+      const abort = () => {
+        if (sent) void invoke("sage_cancel", { id }).catch(() => undefined);
+        finish(null, new SidecarRequestError("Review was cancelled.", "CANCELLED"));
+      };
 
       const cleanup = () => {
         if (unlisten) unlisten();
         if (unlistenStatus) unlistenStatus();
+        signal?.removeEventListener("abort", abort);
       };
       const finish = (
         ok: { result: string; costUsd?: number; provenance?: ReviewProvenance } | null,
@@ -93,6 +100,8 @@ function runSidecarCommand(args: {
         else reject(err);
       };
 
+      if (signal?.aborted) { finish(null, new SidecarRequestError("Review was cancelled.", "CANCELLED")); return; }
+      signal?.addEventListener("abort", abort, { once: true });
       void listen<SidecarEvent>("sage://event", (e) => {
         const ev = e.payload;
         if (ev.id !== id) return;
@@ -121,7 +130,7 @@ function runSidecarCommand(args: {
             break;
         }
       }).then((un) => {
-        if (settled) {
+        if (settled || signal?.aborted) {
           un();
           return;
         }
@@ -132,21 +141,24 @@ function runSidecarCommand(args: {
           onUpdate?.({ kind: "error", message });
           finish(null, new SidecarRequestError(message, "SIDECAR_DOWN"));
         }).then((unStatus) => {
-          if (settled) {
+          if (settled || signal?.aborted) {
             unStatus();
             return;
           }
           unlistenStatus = unStatus;
           // Send the request only after both listeners exist, so neither
           // the first event nor an early "down" is missed.
-          invoke<string>(command, invokeArgs).catch((err) => {
+          invoke<string>(command, invokeArgs).then(() => {
+            sent = true;
+            if (signal?.aborted) void invoke("sage_cancel", { id }).catch(() => undefined);
+          }).catch((err) => {
             finish(
               null,
               new SidecarRequestError(err instanceof Error ? err.message : String(err)),
             );
           });
         });
-      });
+      }).catch(() => finish(null, new Error("The review event channel is unavailable.")));
     },
   );
 }
@@ -165,6 +177,7 @@ export async function interrogate(args: {
   /** Lets the caller cancel this request with `cancelSidecarRequest`. */
   requestId?: string;
   onUpdate?: (update: InterrogateUpdate) => void;
+  signal?: AbortSignal;
 }): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const id = args.requestId ?? newId();
   return runSidecarCommand({
@@ -177,6 +190,7 @@ export async function interrogate(args: {
     },
     id,
     onUpdate: args.onUpdate,
+    signal: args.signal,
   });
 }
 
@@ -228,6 +242,7 @@ export async function critique(args: {
   /** Lets the caller cancel this request with `cancelSidecarRequest`. */
   requestId?: string;
   onUpdate?: (update: InterrogateUpdate) => void;
+  signal?: AbortSignal;
 }): Promise<{
   result: string;
   costUsd?: number;
@@ -262,6 +277,7 @@ export async function critique(args: {
     },
     id,
     onUpdate: args.onUpdate,
+    signal: args.signal,
   });
   return { ...sent, fuentesOmitidas: budget.omitted };
 }

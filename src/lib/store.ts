@@ -12,6 +12,7 @@ import {
   writeEssay,
 } from "@/lib/storage";
 import { reviewFingerprint } from "@/lib/review/fingerprint";
+import { REVIEWER_PROFILES } from "../../sidecar/src/model-profiles";
 import type {
   BoardSnapshot,
   Essay,
@@ -221,7 +222,7 @@ type State = {
   /** Load the essay list and switch to list view. */
   loadList: () => Promise<void>;
   /** Create a new essay (initial empty doc), open it in the editor. */
-  newEssay: (mode?: EssayMode) => Promise<void>;
+  newEssay: (mode?: EssayMode) => Promise<string | null>;
   /** Open an existing essay by id. */
   openEssay: (id: string, expectedCurrentId?: string | null) => Promise<void>;
   /** Close the current essay and go back to the list, flushing pending writes. */
@@ -236,6 +237,8 @@ type State = {
   updateLanguage: (language: EssayLanguage) => void;
   /** Update the tldraw board snapshot for the open essay. */
   updateBoard: (snapshot: BoardSnapshot | null) => void;
+  /** Persist board navigation without changing content/evaluation timestamps. */
+  updateBoardSession: (snapshot: BoardSnapshot | null) => void;
   /** Append an interrogatorio entry from a sage and flush. */
   addInterrogatorio: (entry: Interrogatorio) => void;
   /** Session-only state of the review run. Owned by `src/lib/review/run.ts`. */
@@ -263,6 +266,13 @@ type State = {
    *  evaluacionMeta. El sello vuelve al estado "nunca revisado"
    *  (sin sello). Sesión 17. */
   clearEvaluacion: () => void;
+  /** The score stamp can be hidden by a client (session state, not saved).
+   *  It comes back on opening another essay or after a new review. */
+  scorebarDismissed: boolean;
+  dismissScorebar: () => void;
+  showScorebar: () => void;
+  /** Choose the reviewer profile the open essay uses. */
+  updateReviewerProfile: (profileId: string) => void;
   /** Open / close the lectura overlay. */
   setOverlay: (overlay: Overlay) => void;
   /** True while the open overlay was opened with `{ instant: true }`
@@ -326,12 +336,12 @@ type State = {
   /** Append a snapshot of `current` with the given kind. Flushes any
    *  pending autosave first so the snapshot captures the persisted
    *  state, not a transient one. */
-  snapshotNow: (kind: SnapshotKind) => Promise<void>;
+  snapshotNow: (kind: SnapshotKind) => Promise<string | null>;
   /** Fetch the full snapshot for preview (without applying it). */
   previewSnapshot: (takenAt: string) => Promise<Snapshot | null>;
   /** Restore an older version. Snapshots the current state first
    *  (kind="before-restore") so the user can always undo. */
-  restoreVersion: (takenAt: string) => Promise<void>;
+  restoreVersion: (takenAt: string, beforeApply?: () => void) => Promise<boolean>;
 
   /** Force-flush any pending save. */
   flush: () => Promise<void>;
@@ -382,6 +392,7 @@ function withCurrentFingerprint(essay: Essay): Essay {
 // prevent an older async open from replacing a newer human choice.
 let activeFlush: Promise<void> | null = null;
 let navigationGeneration = 0;
+const deletingEssayIds = new Set<string>();
 
 export const useStore = create<State>((set, get) => ({
   view: "list",
@@ -398,6 +409,7 @@ export const useStore = create<State>((set, get) => ({
   lecturaPrefill: "",
   history: [],
   restoreNonce: 0,
+  scorebarDismissed: false,
   lecturas: {},
   lecturaRubrica: null,
   review: null,
@@ -432,7 +444,7 @@ export const useStore = create<State>((set, get) => ({
     const navigation = ++navigationGeneration;
     if (get().current) {
       await get().flush();
-      if (navigation !== navigationGeneration || get().saveStatus.kind !== "saved") return;
+      if (navigation !== navigationGeneration || get().saveStatus.kind !== "saved") return null;
     }
     const previous = get().current;
     const now = nowIso();
@@ -447,24 +459,27 @@ export const useStore = create<State>((set, get) => ({
     };
     try {
       await writeEssay(essay);
-      if (navigation !== navigationGeneration || get().current !== previous) return;
+      if (navigation !== navigationGeneration || get().current !== previous) return null;
       set(() => ({
         current: essay,
         view: "editor",
         saveStatus: { kind: "saved", at: Date.now() },
       }));
+      return essay.id;
     } catch (err) {
-      if (navigation !== navigationGeneration || get().current !== previous) return;
+      if (navigation !== navigationGeneration || get().current !== previous) return null;
       set({
         saveStatus: {
           kind: "error",
           message: err instanceof Error ? err.message : String(err),
         },
       });
+      return null;
     }
   },
 
   async openEssay(id, expectedCurrentId) {
+    if (deletingEssayIds.has(id)) return;
     const previousId = get().current?.id ?? null;
     if (expectedCurrentId !== undefined && previousId !== expectedCurrentId) return;
     if (previousId && previousId !== id) runEssayLeaveHooks();
@@ -478,6 +493,7 @@ export const useStore = create<State>((set, get) => ({
       if (previousId === id) return;
       previous = get().current;
       const essay = backfillFingerprints(await readEssay(id));
+      if (deletingEssayIds.has(id)) return;
       // Typing does not navigate, but it still invalidates this pending open.
       // Preserve that live version even if autosave already completed it.
       if (navigation !== navigationGeneration || get().current !== previous) return;
@@ -490,6 +506,7 @@ export const useStore = create<State>((set, get) => ({
         history: [],
         lecturas: {},
         lecturaRubrica: null,
+        scorebarDismissed: false,
       });
       void get().loadHistory();
     } catch (err) {
@@ -544,11 +561,15 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async removeEssay(id) {
+    if (get().current?.id === id) throw new Error("Close the essay before deleting it.");
+    deletingEssayIds.add(id);
     try {
       await deleteEssay(id);
       set((s) => ({ list: s.list.filter((m) => m.id !== id) }));
     } catch (err) {
       console.error("removeEssay failed", err);
+    } finally {
+      deletingEssayIds.delete(id);
     }
   },
 
@@ -603,6 +624,15 @@ export const useStore = create<State>((set, get) => ({
     const updated = { ...cur, language, updatedAt: nowIso() };
     set({ current: updated, saveStatus: { kind: "dirty" } });
     void get().flush();
+  },
+
+  updateBoardSession(snapshot) {
+    const cur = get().current;
+    if (!cur) return;
+    const prev = get()._autosaveTimer;
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => { void get().flush(); }, AUTOSAVE_MS);
+    set({ current: { ...cur, board: snapshot }, saveStatus: { kind: "dirty" }, _autosaveTimer: timer });
   },
 
   updateBoard(snapshot) {
@@ -733,7 +763,24 @@ export const useStore = create<State>((set, get) => ({
         evaluacionMeta,
       },
       saveStatus: { kind: "dirty" },
+      scorebarDismissed: false,
     });
+    void get().flush();
+  },
+
+  dismissScorebar() {
+    set({ scorebarDismissed: true });
+  },
+
+  showScorebar() {
+    set({ scorebarDismissed: false });
+  },
+
+  updateReviewerProfile(profileId) {
+    const cur = get().current;
+    if (!cur) return;
+    if (!REVIEWER_PROFILES.some((p) => p.id === profileId)) throw new Error("Unknown reviewer profile.");
+    set({ current: { ...cur, reviewerProfile: profileId }, saveStatus: { kind: "dirty" } });
     void get().flush();
   },
 
@@ -980,9 +1027,11 @@ export const useStore = create<State>((set, get) => ({
   async snapshotNow(kind) {
     // Flush first so the snapshot reflects what's persisted on disk,
     // not a transient typing state.
-    await get().flush();
     const cur = get().current;
-    if (!cur) return;
+    const navigation = navigationGeneration;
+    if (!cur) return null;
+    await get().flush();
+    if (navigation !== navigationGeneration || get().current !== cur || get().saveStatus.kind !== "saved") return null;
     const snapshot: Snapshot = {
       takenAt: nowIso(),
       kind,
@@ -990,9 +1039,12 @@ export const useStore = create<State>((set, get) => ({
     };
     try {
       await appendSnapshot(snapshot);
+      if (navigation !== navigationGeneration || get().current !== cur) return null;
       await get().loadHistory();
+      return navigation === navigationGeneration && get().current === cur ? snapshot.takenAt : null;
     } catch (err) {
       console.error("snapshotNow failed", err);
+      return null;
     }
   },
 
@@ -1007,20 +1059,26 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async restoreVersion(takenAt) {
+  async restoreVersion(takenAt, beforeApply) {
     const cur = get().current;
-    if (!cur) return;
+    const navigation = navigationGeneration;
+    if (!cur) return false;
     runEssayLeaveHooks();
     // 1) Snapshot the current state as a safety net.
-    await get().snapshotNow("before-restore");
+    if (!await get().snapshotNow("before-restore")) return false;
+    if (navigation !== navigationGeneration || get().current !== cur) return false;
     // 2) Read the target snapshot.
     let target: Snapshot;
     try {
       target = await readSnapshot(cur.id, takenAt);
     } catch (err) {
       console.error("restoreVersion: read failed", err);
-      return;
+      return false;
     }
+    // Reading a version can race with typing, navigation or another restore.
+    // Never overwrite the live document that was not captured by our backup.
+    if (navigation !== navigationGeneration || get().current !== cur || target.essay.id !== cur.id) return false;
+    beforeApply?.();
     // 3) Apply: replace the current essay's mutable fields with the
     //    snapshot's. We keep id/createdAt from the live essay (those
     //    are identity), but everything else comes from the target.
@@ -1038,7 +1096,9 @@ export const useStore = create<State>((set, get) => ({
       restoreNonce: s.restoreNonce + 1,
     }));
     await get().flush();
+    if (get().current !== restored || get().saveStatus.kind !== "saved") return false;
     await get().loadHistory();
+    return get().current === restored;
   },
 
   async flush() {

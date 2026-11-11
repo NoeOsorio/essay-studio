@@ -1,5 +1,5 @@
 import { useStore } from "@/lib/store";
-import { getDocumentEditor } from "@/lib/mcp/document";
+import { getDocumentEditor, isTitleInputFocused, applyTitleHistory } from "@/lib/mcp/document";
 import { applyBoardHistory } from "@/lib/mcp/board";
 
 type Surface = "board" | "document";
@@ -56,6 +56,10 @@ export function applyNativeHistory(direction: "undo" | "redo"): void {
   }
   const essay = useStore.getState().current;
   if (essay && active) {
+    if (isTitleInputFocused(essay.id)) {
+      try { applyTitleHistory(essay.id, direction); } catch { /* Composition must finish before history changes. */ }
+      return;
+    }
     try {
       const editor = getDocumentEditor(essay.id);
       if (editor.view.dom.contains(active)) {
@@ -64,7 +68,7 @@ export function applyNativeHistory(direction: "undo" | "redo"): void {
       }
     } catch { /* The document may be unmounted while navigating. */ }
   }
-  // Title and overlay inputs keep the browser's native text undo stack.
+  // Overlay inputs keep the browser's native text undo stack.
   if (isTextField(active)) {
     document.execCommand(direction);
     return;

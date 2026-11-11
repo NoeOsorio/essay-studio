@@ -89,7 +89,14 @@ function captureView(session: SessionState, editor: Editor): void {
  * board is mounted; rejects with the board's error when it cannot be.
  */
 export async function beginLanding(essayId: string, sages: Sage[], ownQuestion = false): Promise<LandingSession> {
-  const editor = await ensureBoard(essayId);
+  return openLanding(await ensureBoard(essayId), essayId, sages, ownQuestion);
+}
+
+/**
+ * The synchronous core of `beginLanding`, for a caller that already holds the
+ * mounted editor and must not yield (a client applying saved questions).
+ */
+export function openLanding(editor: Editor, essayId: string, sages: Sage[], ownQuestion = false): LandingSession {
   const shapes = editor.getCurrentPageShapes();
   const viewport = editor.getViewportPageBounds();
   const rects = shapes.map((s) => boundsOf(editor, s));
@@ -205,6 +212,12 @@ export async function land(session: LandingSession, note: LandingNote): Promise<
   const s = session as SessionState;
   if (s.closed) throw new Error("landing closed");
   const editor = await ensureBoard(s.essayId);
+  return placeNote(session, editor, note);
+}
+
+/** The synchronous core of `land`: the editor is already mounted. */
+export function placeNote(session: LandingSession, editor: Editor, note: LandingNote): TLShapeId {
+  const s = session as SessionState;
   if (s.closed) throw new Error("landing closed");
   attach(s, editor);
 
