@@ -136,17 +136,31 @@ export async function installTauriStub(page: Page) {
             const deny = ["mensaje", "reemplazo", "sugerencia", "evidence", "provenance"];
             const out = Array.from(essays.values()).map((e) => {
               const texts: string[] = [];
-              const marks: { type: string; attrs?: Record<string, unknown> }[] = [];
-              const walk = (n: Node, top: boolean) => {
-                if (n.type === "text" && typeof n.text === "string") {
-                  texts.push(n.text);
-                  for (const m of n.marks ?? []) {
-                    if (m.type !== "annotation") continue;
-                    const attrs: Record<string, unknown> = {};
-                    for (const [k, v] of Object.entries(m.attrs ?? {})) if (!deny.includes(k)) attrs[k] = v;
-                    marks.push({ type: m.type, attrs });
-                  }
+              // Blocks holding an annotation mark, text intact, annotation marks only.
+              const slim = (m: { type: string; attrs?: Record<string, unknown> }) => {
+                const attrs: Record<string, unknown> = {};
+                for (const [k, v] of Object.entries(m.attrs ?? {})) if (!deny.includes(k)) attrs[k] = v;
+                return { type: m.type, attrs };
+              };
+              const prune = (n: Node): Node | null => {
+                const kids = n.content ?? [];
+                if (kids.length === 0) return null;
+                if (kids.some((c) => c.type === "text")) {
+                  let any = false;
+                  const kept = kids.map((c) => {
+                    const o: Node = { type: c.type, text: c.text };
+                    const ms = (c.marks ?? []).filter((m) => m.type === "annotation").map(slim);
+                    if (c.type === "text" && ms.length > 0) { any = true; o.marks = ms; }
+                    return o;
+                  });
+                  return any ? { type: n.type, content: kept } : null;
                 }
+                const kept = kids.map(prune).filter((x): x is Node => x !== null);
+                return kept.length > 0 ? { type: n.type, content: kept } : null;
+              };
+              const marks = ((e.content as Node).content ?? []).map(prune).filter((x): x is Node => x !== null);
+              const walk = (n: Node, top: boolean) => {
+                if (n.type === "text" && typeof n.text === "string") texts.push(n.text);
                 for (const c of n.content ?? []) walk(c, false);
                 if (!top && n.type === "paragraph") texts.push(" ");
               };
@@ -165,7 +179,7 @@ export async function installTauriStub(page: Page) {
                 fileModifiedMs: Date.parse(e.updatedAt) || 0,
               };
               if (meta || recs.length > 0 || marks.length > 0) {
-                const review: Record<string, unknown> = { marks };
+                const review: Record<string, unknown> = { blocks: marks };
                 if (recs.length > 0) {
                   review.findings = recs.map((r) => ({
                     id: r.id, sage: r.sage, pase: r.pase, severidad: r.severidad,

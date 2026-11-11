@@ -12,6 +12,7 @@ import type {
   FindingStatus,
   Pase,
 } from "@/lib/storage/types";
+import { sentenceSpans } from "@/lib/editor/findCita";
 import {
   computeBenchmark,
   type AppliedAnotacion,
@@ -51,6 +52,33 @@ export type FindingView = {
   spansBlocks: boolean;
   /** A durable record exists for this finding. */
   hasRecord: boolean;
+  /**
+   * Block start position and sentence index of the sentence where the mark
+   * starts. Two findings with the same key point at the same sentence.
+   * Absent when the finding is not located.
+   */
+  sentenceKey?: string;
+};
+
+/** One sentence as the writer sees it: every finding that points at it. Derived, never stored. */
+export type SentenceCard = {
+  /** The sentence key, or a closure key / the finding id for findings with no sentence. */
+  key: string;
+  /** The text under the marks, shown once. */
+  quote: string;
+  /** Every finding in the sentence, most severe first. Ids, score and closing read this. */
+  findings: FindingView[];
+  /**
+   * What the writer sees: one per agent, its most severe finding (ties:
+   * earliest generated). The agent's other findings in the sentence are in
+   * `findings` and close or reopen with the card.
+   */
+  parts: FindingView[];
+  /** Open if any finding is open; resolved when all are resolved. */
+  status: "open" | "resolved";
+  /** Highest severity among the open findings (all of them when none is open). */
+  severidad: FindingRecord["severidad"];
+  located: boolean;
 };
 
 type MarkInfo = {
@@ -60,14 +88,22 @@ type MarkInfo = {
   text: string;
   blocks: Set<number>;
   order: number;
+  /** Block (with its text and start position) where the mark begins. */
+  startBlock: number;
 };
+
+type BlockInfo = { start: number; text: string };
 
 const LEAVES = new Set(["hardBreak", "horizontalRule", "image"]);
 const TEXTBLOCKS = new Set(["paragraph", "heading", "codeBlock"]);
 
 /** Walk the JSON like ProseMirror counts positions and gather each mark's extent. */
-function collectMarks(content: unknown): Map<string, MarkInfo> {
+function collectMarks(content: unknown): {
+  found: Map<string, MarkInfo>;
+  blocks: Map<number, BlockInfo>;
+} {
   const found = new Map<string, MarkInfo>();
+  const blocks = new Map<number, BlockInfo>();
   let pos = 0;
   let block = 0;
   let order = 0;
@@ -76,6 +112,8 @@ function collectMarks(content: unknown): Map<string, MarkInfo> {
       const text = node.text ?? "";
       const start = pos;
       pos += text.length;
+      const info = blocks.get(block);
+      if (info) info.text += text;
       for (const m of node.marks ?? []) {
         if (m.type !== "annotation") continue;
         const attrs = (m.attrs ?? {}) as Record<string, unknown>;
@@ -90,6 +128,7 @@ function collectMarks(content: unknown): Map<string, MarkInfo> {
             text,
             blocks: new Set([block]),
             order: order++,
+            startBlock: block,
           });
         } else {
           hit.to = Math.max(hit.to, pos);
@@ -103,7 +142,12 @@ function collectMarks(content: unknown): Map<string, MarkInfo> {
     if (!Array.isArray(children)) {
       if (isRoot) return;
       // Leaves count 1; an empty container (a blank paragraph) is open plus close.
-      if (node.type && LEAVES.has(node.type)) pos += 1;
+      if (node.type && LEAVES.has(node.type)) {
+        pos += 1;
+        // Same placeholder the editor uses, so offsets line up with `sentenceSpans`.
+        const info = blocks.get(block);
+        if (info) info.text += "\uFFFC";
+      }
       else {
         pos += 2;
         if (node.type && TEXTBLOCKS.has(node.type)) block++;
@@ -114,12 +158,15 @@ function collectMarks(content: unknown): Map<string, MarkInfo> {
       (node.type !== undefined && TEXTBLOCKS.has(node.type)) ||
       children.some((c) => c.type === "text");
     if (!isRoot) pos += 1;
-    if (isBlock) block++;
+    if (isBlock) {
+      block++;
+      blocks.set(block, { start: pos, text: "" });
+    }
     for (const child of children) walk(child, false);
     if (!isRoot) pos += 1;
   };
   walk(content as JSONContent, true);
-  return found;
+  return { found, blocks };
 }
 
 function str(v: unknown): string | undefined {
@@ -130,7 +177,24 @@ export function deriveFindings(
   content: JSONContent,
   records: SlimRecord[] | undefined,
 ): FindingView[] {
-  const marks = collectMarks(content);
+  const { found: marks, blocks } = collectMarks(content);
+  const spansOf = new Map<number, { start: number; end: number }[]>();
+  const sentenceKeyOf = (m: MarkInfo): string | undefined => {
+    const b = blocks.get(m.startBlock);
+    if (!b) return undefined;
+    let spans = spansOf.get(m.startBlock);
+    if (!spans) {
+      spans = sentenceSpans(b.text);
+      spansOf.set(m.startBlock, spans);
+    }
+    const offset = m.from - b.start;
+    let idx = 0;
+    for (let i = 0; i < spans.length; i++) {
+      if (spans[i].start <= offset) idx = i;
+      else break;
+    }
+    return `${b.start}:${idx}`;
+  };
   const byId = new Map<string, SlimRecord>();
   for (const r of records ?? []) byId.set(r.id, r);
 
@@ -160,6 +224,7 @@ export function deriveFindings(
       quote: m.text,
       spansBlocks: m.blocks.size > 1,
       hasRecord: !!rec,
+      sentenceKey: sentenceKeyOf(m),
     });
   }
 
@@ -208,22 +273,109 @@ export function deriveFindings(
   return [...located, ...notLocated, ...resolved];
 }
 
-/** Every open finding, located or not, in the shape the score reads. */
+const RANK: Record<FindingRecord["severidad"], number> = { alta: 3, media: 2, baja: 1 };
+
+function mostSevere(views: FindingView[]): FindingView {
+  return views.reduce((a, b) => (RANK[b.severidad] > RANK[a.severidad] ? b : a));
+}
+
+/**
+ * Group the views into one card per sentence. Located findings that start
+ * in the same sentence share a card; a finding that is not located stands
+ * alone, except resolved ones closed together (same close time), which
+ * return together so reopening brings the whole card back.
+ */
+export function groupBySentence(views: FindingView[]): SentenceCard[] {
+  const order: string[] = [];
+  const buckets = new Map<string, FindingView[]>();
+  for (const v of views) {
+    const key = v.sentenceKey
+      ? `s:${v.sentenceKey}`
+      : v.status === "resolved" && v.closedAt
+        ? `r:${v.closedAt}`
+        : `f:${v.id}`;
+    const list = buckets.get(key);
+    if (list) list.push(v);
+    else {
+      buckets.set(key, [v]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => {
+    const found = buckets.get(key)!;
+    const sorted = found
+      .map((v, i) => ({ v, i }))
+      .sort((x, y) => RANK[y.v.severidad] - RANK[x.v.severidad] || x.i - y.i)
+      .map((e) => e.v);
+    const open = sorted.filter((v) => v.status === "open");
+    // `sorted` is most severe first with ties in generation order, so the
+    // first of each agent is its part. Ties without a date keep input order.
+    const first = new Map<string, FindingView>();
+    for (const v of sorted) {
+      const best = first.get(v.sage);
+      if (!best) first.set(v.sage, v);
+      else if (
+        RANK[v.severidad] === RANK[best.severidad] &&
+        v.generadoEn &&
+        best.generadoEn &&
+        v.generadoEn < best.generadoEn
+      )
+        first.set(v.sage, v);
+    }
+    const parts = sorted.filter((v) => first.get(v.sage) === v);
+    const quote = sorted.reduce(
+      (best, v) => (v.quote.length > best.length ? v.quote : best),
+      "",
+    );
+    return {
+      key,
+      quote,
+      findings: sorted,
+      parts,
+      status: open.length > 0 ? "open" : "resolved",
+      severidad: (open[0] ?? sorted[0]).severidad,
+      located: sorted.some((v) => v.located),
+    } satisfies SentenceCard;
+  });
+}
+
+function toApplied(v: FindingView): AppliedAnotacion {
+  return {
+    id: v.id,
+    sage: v.sage,
+    pase: v.pase,
+    severidad: v.severidad,
+    mensaje: v.mensaje,
+    reemplazo: v.reemplazo,
+    criterioId: v.criterioId,
+    evidence: v.evidence,
+    provenance: v.provenance,
+  };
+}
+
+/**
+ * What the score reads: one problem location costs once. Each open card
+ * contributes one entry per criterion present in it, at that criterion's
+ * highest severity; a card with no criterion contributes one entry at its
+ * highest severity. `computeBenchmark` receives this collapsed input.
+ */
 export function openForScore(views: FindingView[]): AppliedAnotacion[] {
   const out: AppliedAnotacion[] = [];
-  for (const v of views) {
-    if (v.status !== "open") continue;
-    out.push({
-      id: v.id,
-      sage: v.sage,
-      pase: v.pase,
-      severidad: v.severidad,
-      mensaje: v.mensaje,
-      reemplazo: v.reemplazo,
-      criterioId: v.criterioId,
-      evidence: v.evidence,
-      provenance: v.provenance,
-    });
+  for (const card of groupBySentence(views)) {
+    const open = card.findings.filter((v) => v.status === "open");
+    if (open.length === 0) continue;
+    const byCriterio = new Map<string, FindingView[]>();
+    for (const v of open) {
+      if (!v.criterioId) continue;
+      const list = byCriterio.get(v.criterioId) ?? [];
+      list.push(v);
+      byCriterio.set(v.criterioId, list);
+    }
+    if (byCriterio.size === 0) {
+      out.push(toApplied(mostSevere(open)));
+      continue;
+    }
+    for (const list of byCriterio.values()) out.push(toApplied(mostSevere(list)));
   }
   return out;
 }

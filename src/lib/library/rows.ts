@@ -52,7 +52,7 @@ function scoreOf(entry: LibraryEntry): BenchmarkResult | null {
   const review = entry.review;
   if (!review) return null;
   const anotaciones = openForScore(
-    deriveFindings({ content: [{ marks: review.marks }] }, review.findings),
+    deriveFindings({ type: "doc", content: review.blocks }, review.findings),
   );
   return computeBenchmark({
     anotaciones,

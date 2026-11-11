@@ -1,8 +1,9 @@
 "use client";
 
-// The only component that renders a finding. Popover, panel and criterion
-// views all use it; the surface changes layout only. Actions live in
-// lib/review/actions.ts and are called from here directly.
+// The only component that renders findings. A card is one sentence: the
+// quote once, then one part per agent that flagged it, then one footer
+// that acts on the whole card. Popover, panel and criterion views all use
+// it; the surface changes layout only. Actions live in lib/review/actions.ts.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -11,17 +12,17 @@ import { EvidenceChip, EvidencePopover } from "@/components/review/FindingEviden
 import { identityOf } from "@/lib/agent-identity";
 import {
   copyReplacement,
-  markNotApplicable,
-  reopenFinding,
-  resolveFinding,
+  markCardNotApplicable,
+  reopenCard,
+  resolveCard,
   useReplacement as applyReplacement,
 } from "@/lib/review/actions";
-import type { FindingView } from "@/lib/review/findings";
+import type { FindingView, SentenceCard } from "@/lib/review/findings";
 import { useStore } from "@/lib/store";
 import type { Pase, Severidad } from "@/lib/storage/types";
 
 export type FindingProps = {
-  finding: FindingView;
+  card: SentenceCard;
   /** Layout only: the panel shows the quote; popover and criterion do not. */
   surface: "popover" | "panel" | "criterion";
 };
@@ -59,7 +60,15 @@ function CopyIcon() {
   );
 }
 
-export function Finding({ finding, surface }: FindingProps) {
+function Part({
+  finding,
+  surface,
+  footer,
+}: {
+  finding: FindingView;
+  surface: FindingProps["surface"];
+  footer?: React.ReactNode;
+}) {
   const rubrica = useStore((s) => s.current?.rubrica);
   const fuentes = useStore((s) => s.current?.fuentes);
   const [copied, setCopied] = useState(false);
@@ -92,11 +101,8 @@ export function Finding({ finding, surface }: FindingProps) {
     />
   ) : null;
 
+  // Usar este texto and Copiar exist only on a part that has a replacement.
   const canUse = finding.located && !finding.spansBlocks && !!finding.reemplazo && !resolved;
-  const showQuote = surface === "panel" || !finding.located;
-  // In the lists the card has no padding of its own (Paper R4.2: 8 px under
-  // the quote, 12 px between parts, the list's 30 px between cards).
-  const inList = surface !== "popover";
 
   const onCopy = () => {
     void copyReplacement(finding.id)
@@ -110,17 +116,149 @@ export function Finding({ finding, surface }: FindingProps) {
 
   return (
     <div
-      data-testid="finding"
+      data-testid="finding-part"
       data-finding-id={finding.id}
       data-status={finding.status}
-      className="flex flex-col font-sans"
+      className="flex flex-col gap-[12px] px-[16px]"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-[8px]">
+          <AgentChip author={finding.sage} size={16} badge={26} />
+          <span className="text-[13px] font-semibold leading-[16px] text-ink-1">{id.name}</span>
+          {surface !== "criterion" ? (
+            <span className="text-[13px] leading-[16px] text-ink-3" data-testid="finding-where">
+              en {where}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-[6px]" data-testid="finding-importance">
+          <Bars count={importance.bars} />
+          <span className="text-[12px] font-medium leading-[16px] text-ink-2">
+            {importance.label}
+          </span>
+        </div>
+      </div>
+
+      <div className="text-[15px] leading-[22px] text-ink-2" data-testid="finding-mensaje">
+        {finding.mensaje}
+      </div>
+
+      {finding.reemplazo ? (
+        <div className="flex flex-col gap-[12px] rounded-[12px] bg-shade pb-[12px] pl-[16px] pr-[14px] pt-[14px]">
+          <div
+            data-testid="finding-replacement"
+            className="font-serif text-[17px] leading-[25px] text-ink-1"
+          >
+            {finding.reemplazo}
+          </div>
+          {finding.spansBlocks && finding.located ? (
+            <div className="text-[13px] leading-[18px] text-ink-2">
+              Abarca varios párrafos. Cópialo y pégalo a mano.
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-[12px]">
+            <div className="flex min-w-0 flex-1 items-center gap-[6px]">{chip}</div>
+            <div className="flex items-center gap-[6px]">
+              <button
+                type="button"
+                data-testid="finding-copy"
+                onClick={onCopy}
+                className="flex h-[30px] cursor-pointer items-center gap-[6px] rounded-[8px] bg-sheet px-[10px] text-[13px] font-medium leading-[16px] text-ink-1 shadow-[0_0_0_1px_var(--color-rule-2)] transition-transform duration-[120ms] active:scale-[0.97]"
+              >
+                <CopyIcon />
+                {copied ? "Copiado" : "Copiar"}
+              </button>
+              {canUse ? (
+                <button
+                  type="button"
+                  data-testid="finding-use"
+                  onClick={() => {
+                    applyReplacement(finding.id);
+                  }}
+                  className="flex h-[30px] cursor-pointer items-center rounded-[8px] bg-ink-1 px-[12px] text-[13px] font-semibold leading-[16px] text-white transition-transform duration-[120ms] active:scale-[0.97]"
+                >
+                  Usar este texto
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : chip ? (
+        <div className="flex items-center">{chip}</div>
+      ) : null}
+
+      {hasEvidence ? (
+        <EvidencePopover
+          anchor={chipRef}
+          open={evidenceOpen}
+          onClose={() => setEvidenceOpen(false)}
+          evidence={finding.evidence}
+          sources={fuentes}
+        />
+      ) : null}
+
+      {footer}
+    </div>
+  );
+}
+
+export function Finding({ card, surface }: FindingProps) {
+  const first = card.findings[0];
+  const id = identityOf(first.sage);
+  const resolved = card.status === "resolved";
+  const showQuote = surface === "panel" || !card.located;
+  // In the lists the card has no padding of its own (Paper R4.2b: 8 px
+  // between quote and parts, 30 px between cards).
+  const inList = surface !== "popover";
+  const ids = card.findings.map((f) => f.id);
+  const openIds = card.findings.filter((f) => f.status === "open").map((f) => f.id);
+
+  const footer = (
+    <div className="flex items-center justify-between px-[2px] pt-[2px]">
+      <button
+        type="button"
+        data-testid="finding-resolve"
+        aria-pressed={resolved}
+        onClick={() => (resolved ? reopenCard(ids) : resolveCard(openIds))}
+        className="flex cursor-pointer items-center gap-[8px] text-[13px] font-medium leading-[16px] text-ink-1"
+      >
+        {resolved ? (
+          <span className="grid h-[18px] w-[18px] flex-none place-items-center rounded-[6px] bg-ink-1">
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+              <path d="M2.8 6.2l2.1 2.1 4.3-4.4" fill="none" stroke="#FFFFFF" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        ) : (
+          <span className="h-[18px] w-[18px] flex-none rounded-[6px] shadow-[inset_0_0_0_1.5px_var(--color-ink-3)]" />
+        )}
+        Ya lo resolví
+      </button>
+      {!resolved ? (
+        <button
+          type="button"
+          data-testid="finding-not-applicable"
+          onClick={() => markCardNotApplicable(openIds)}
+          className="cursor-pointer text-[13px] font-medium leading-[16px] text-ink-3"
+        >
+          No aplica
+        </button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div
+      data-testid="finding-card"
+      data-finding-id={first.id}
+      data-status={card.status}
+      className={`flex flex-col gap-[8px] font-sans ${inList ? "" : "pb-[14px] pt-[16px]"}`}
     >
       {showQuote ? (
-        <div className={inList ? "px-[16px]" : "px-[16px] pt-[16px]"}>
+        <div className="px-[16px]">
           <div
             className="font-serif text-[16px] leading-[24px] whitespace-pre-wrap"
             style={
-              finding.located
+              card.located
                 ? {
                     color: "var(--color-ink-1)",
                     textDecoration: `underline 2px ${id.line}`,
@@ -129,9 +267,9 @@ export function Finding({ finding, surface }: FindingProps) {
                 : { color: "var(--color-ink-2)" }
             }
           >
-            {finding.quote}
+            {card.quote}
           </div>
-          {!finding.located ? (
+          {!card.located ? (
             <div
               data-testid="finding-not-located"
               className="pt-[2px] text-[13px] leading-[18px] text-ink-2"
@@ -142,118 +280,14 @@ export function Finding({ finding, surface }: FindingProps) {
         </div>
       ) : null}
 
-      <div
-        className={`flex flex-col px-[16px] ${inList ? "gap-[12px] pt-[8px]" : "gap-[14px] pb-[14px] pt-[16px]"}`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-[8px]">
-            <AgentChip author={finding.sage} size={16} badge={26} />
-            <span className="text-[13px] font-semibold leading-[16px] text-ink-1">{id.name}</span>
-            {surface !== "criterion" ? (
-              <span className="text-[13px] leading-[16px] text-ink-3" data-testid="finding-where">
-                en {where}
-              </span>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-[6px]" data-testid="finding-importance">
-            <Bars count={importance.bars} />
-            <span className="text-[12px] font-medium leading-[16px] text-ink-2">
-              {importance.label}
-            </span>
-          </div>
-        </div>
-
-        <div className="text-[15px] leading-[22px] text-ink-2" data-testid="finding-mensaje">
-          {finding.mensaje}
-        </div>
-
-        {finding.reemplazo ? (
-          <div className="flex flex-col gap-[12px] rounded-[12px] bg-shade pb-[12px] pl-[16px] pr-[14px] pt-[14px]">
-            <div
-              data-testid="finding-replacement"
-              className="font-serif text-[17px] leading-[25px] text-ink-1"
-            >
-              {finding.reemplazo}
-            </div>
-            {finding.spansBlocks && finding.located ? (
-              <div className="text-[13px] leading-[18px] text-ink-2">
-                Abarca varios párrafos. Cópialo y pégalo a mano.
-              </div>
-            ) : null}
-            <div className="flex items-center justify-between gap-[12px]">
-              <div className="flex min-w-0 flex-1 items-center gap-[6px]">
-                {chip}
-              </div>
-              <div className="flex items-center gap-[6px]">
-                <button
-                  type="button"
-                  data-testid="finding-copy"
-                  onClick={onCopy}
-                  className="flex h-[30px] cursor-pointer items-center gap-[6px] rounded-[8px] bg-sheet px-[10px] text-[13px] font-medium leading-[16px] text-ink-1 shadow-[0_0_0_1px_var(--color-rule-2)] transition-transform duration-[120ms] active:scale-[0.97]"
-                >
-                  <CopyIcon />
-                  {copied ? "Copiado" : "Copiar"}
-                </button>
-                {canUse ? (
-                  <button
-                    type="button"
-                    data-testid="finding-use"
-                    onClick={() => {
-                      applyReplacement(finding.id);
-                    }}
-                    className="flex h-[30px] cursor-pointer items-center rounded-[8px] bg-ink-1 px-[12px] text-[13px] font-semibold leading-[16px] text-white transition-transform duration-[120ms] active:scale-[0.97]"
-                  >
-                    Usar este texto
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ) : chip ? (
-          <div className="flex items-center">{chip}</div>
-        ) : null}
-
-        {hasEvidence ? (
-          <EvidencePopover
-            anchor={chipRef}
-            open={evidenceOpen}
-            onClose={() => setEvidenceOpen(false)}
-            evidence={finding.evidence}
-            sources={fuentes}
-          />
-        ) : null}
-
-        <div className="flex items-center justify-between px-[2px] pt-[2px]">
-          <button
-            type="button"
-            data-testid="finding-resolve"
-            aria-pressed={resolved}
-            onClick={() => (resolved ? reopenFinding(finding.id) : resolveFinding(finding.id))}
-            className="flex cursor-pointer items-center gap-[8px] text-[13px] font-medium leading-[16px] text-ink-1"
-          >
-            {resolved ? (
-              <span className="grid h-[18px] w-[18px] flex-none place-items-center rounded-[6px] bg-ink-1">
-                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-                  <path d="M2.8 6.2l2.1 2.1 4.3-4.4" fill="none" stroke="#FFFFFF" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-            ) : (
-              <span className="h-[18px] w-[18px] flex-none rounded-[6px] shadow-[inset_0_0_0_1.5px_var(--color-ink-3)]" />
-            )}
-            Ya lo resolví
-          </button>
-          {!resolved ? (
-            <button
-              type="button"
-              data-testid="finding-not-applicable"
-              onClick={() => markNotApplicable(finding.id)}
-              className="cursor-pointer text-[13px] font-medium leading-[16px] text-ink-3"
-            >
-              No aplica
-            </button>
-          ) : null}
-        </div>
-      </div>
+      {card.parts.map((f, i) => (
+        <Part
+          key={f.id}
+          finding={f}
+          surface={surface}
+          footer={i === card.parts.length - 1 ? footer : undefined}
+        />
+      ))}
     </div>
   );
 }

@@ -15,7 +15,7 @@ import { identityOf } from "@/lib/agent-identity";
 import type { CriterioBreakdown } from "@/lib/benchmark/score";
 import { getDocumentEditor } from "@/lib/mcp/document";
 import { revealFinding } from "@/lib/review/actions";
-import type { FindingView } from "@/lib/review/findings";
+import { groupBySentence, type SentenceCard } from "@/lib/review/findings";
 import { useStore } from "@/lib/store";
 
 type CorrectionsPanelProps = {
@@ -88,8 +88,9 @@ function CriterionChip({
   );
 }
 
-function ResolvedRow({ view }: { view: FindingView }) {
+function ResolvedRow({ card }: { card: SentenceCard }) {
   const [open, setOpen] = useState(false);
+  const view = card.findings[0];
   const id = identityOf(view.sage);
   const Icon = id.Icon;
   if (open) {
@@ -101,9 +102,9 @@ function ResolvedRow({ view }: { view: FindingView }) {
           className="block w-full cursor-pointer text-left"
           aria-label="Cerrar"
         >
-          <ResolvedLine view={view} />
+          <ResolvedLine view={view} quote={card.quote} />
         </button>
-        <Finding finding={view} surface="panel" />
+        <Finding card={card} surface="panel" />
       </div>
     );
   }
@@ -114,12 +115,20 @@ function ResolvedRow({ view }: { view: FindingView }) {
       data-testid="corrections-resolved-row"
       className="block w-full cursor-pointer text-left"
     >
-      <ResolvedLine view={view} icon={<Icon size={14} />} />
+      <ResolvedLine view={view} quote={card.quote} icon={<Icon size={14} />} />
     </button>
   );
 }
 
-function ResolvedLine({ view, icon }: { view: FindingView; icon?: React.ReactNode }) {
+function ResolvedLine({
+  view,
+  quote,
+  icon,
+}: {
+  view: SentenceCard["findings"][number];
+  quote: string;
+  icon?: React.ReactNode;
+}) {
   const id = identityOf(view.sage);
   const Icon = id.Icon;
   return (
@@ -136,7 +145,7 @@ function ResolvedLine({ view, icon }: { view: FindingView; icon?: React.ReactNod
         {icon ?? <Icon size={14} />}
       </span>
       <span className="min-w-0 flex-1 truncate whitespace-nowrap font-serif text-[16px] leading-[22px] text-ink-2">
-        {view.quote}
+        {quote}
       </span>
     </span>
   );
@@ -144,11 +153,11 @@ function ResolvedLine({ view, icon }: { view: FindingView; icon?: React.ReactNod
 
 /** R4.3: the underline fades out (200 ms) while the card folds. The mark
  *  itself goes when the action runs; nothing here is stored. */
-function eraseUnderline(findingId: string): void {
+function eraseUnderline(findingIds: string[]): void {
   const essayId = useStore.getState().current?.id;
   if (!essayId) return;
   try {
-    getDocumentEditor(essayId).commands.annotationFx({ erase: [findingId] });
+    getDocumentEditor(essayId).commands.annotationFx({ erase: findingIds });
   } catch {
     /* editor gone: nothing to erase */
   }
@@ -157,12 +166,12 @@ function eraseUnderline(findingId: string): void {
 /** Card wrapper: reveals on click, folds before a mouse resolve. Keyboard
  *  activations (detail 0) and reduced motion act at once, with no animation. */
 function CorrectionCard({
-  view,
+  card,
   index,
   surface,
   onReveal,
 }: {
-  view: FindingView;
+  card: SentenceCard;
   index: number;
   surface: "panel" | "criterion";
   onReveal: (e: React.MouseEvent, id: string) => void;
@@ -179,7 +188,7 @@ function CorrectionCard({
     e.stopPropagation();
     e.preventDefault();
     setFolding(true);
-    eraseUnderline(view.id);
+    eraseUnderline(card.findings.map((f) => f.id));
     window.setTimeout(() => {
       replay.current = true;
       btn.click();
@@ -189,7 +198,7 @@ function CorrectionCard({
 
   return (
     <div
-      onClick={(e) => onReveal(e, view.id)}
+      onClick={(e) => onReveal(e, card.findings[0].id)}
       onClickCapture={onClickCapture}
       className={folding ? "card-fold" : index < 4 ? "card-in" : undefined}
       style={{
@@ -198,7 +207,7 @@ function CorrectionCard({
         ["--card-i" as string]: index,
       }}
     >
-      <Finding finding={view} surface={surface} />
+      <Finding card={card} surface={surface} />
     </div>
   );
 }
@@ -222,12 +231,14 @@ export function CorrectionsPanel({
   const narrowed = breakdown !== null;
   useNarrowedUnderlines(open && narrowed ? criterioId : null);
 
-  const { openViews, resolvedViews } = useMemo(() => {
+  // One card per sentence. In the criterion view only that criterion's parts remain.
+  const { openCards, resolvedCards } = useMemo(() => {
     const all = reading?.views ?? [];
     const pick = narrowed ? all.filter((v) => v.criterioId === criterioId) : all;
+    const cards = groupBySentence(pick);
     return {
-      openViews: pick.filter((v) => v.status === "open"),
-      resolvedViews: pick.filter((v) => v.status === "resolved"),
+      openCards: cards.filter((c) => c.status === "open"),
+      resolvedCards: cards.filter((c) => c.status === "resolved"),
     };
   }, [reading, narrowed, criterioId]);
 
@@ -316,15 +327,15 @@ export function CorrectionsPanel({
           className="thin-scroll flex min-h-0 flex-1 flex-col gap-[30px] overflow-y-auto px-[6px] pt-[18px] pb-[18px]"
           data-testid="corrections-list"
         >
-          {openViews.length === 0 ? (
+          {openCards.length === 0 ? (
             <div className="px-[16px] text-[15px] leading-[22px] text-ink-3">
               No hay correcciones pendientes.
             </div>
           ) : (
-            openViews.map((v, i) => (
+            openCards.map((c, i) => (
               <CorrectionCard
-                key={v.id}
-                view={v}
+                key={c.key}
+                card={c}
                 index={i}
                 surface={narrowed ? "criterion" : "panel"}
                 onReveal={onCardClick}
@@ -349,8 +360,8 @@ export function CorrectionsPanel({
           </button>
           {resolvedOpen ? (
             <div className="thin-scroll max-h-[260px] overflow-y-auto" data-testid="corrections-resolved-list">
-              {resolvedViews.map((v) => (
-                <ResolvedRow key={v.id} view={v} />
+              {resolvedCards.map((c) => (
+                <ResolvedRow key={c.key} card={c} />
               ))}
             </div>
           ) : null}

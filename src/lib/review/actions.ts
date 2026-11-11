@@ -69,50 +69,83 @@ function upsert(list: FindingRecord[], record: FindingRecord): FindingRecord[] {
   return next;
 }
 
-function close(
-  id: string,
+/** Close findings together: one editor transaction (one undo step), one stamp, one save. */
+function closeMany(
+  ids: string[],
   status: "resolved" | "not_applicable",
   closedBy?: "check" | "replacement",
 ): void {
-  const hit = currentView(id);
-  if (!hit) return;
-  const { essayId, view } = hit;
+  const cur = useStore.getState().current;
+  if (!cur) return;
+  const wanted = new Set(ids);
+  const views = deriveFindings(cur.content, cur.findings).filter((v) => wanted.has(v.id));
+  if (views.length === 0) return;
   setUndoSurface("document");
-  const editor = getDocumentEditor(essayId);
-  const occurrence = occurrenceOf(editor, view);
-  if (view.located) editor.commands.removeAnnotationById(id);
+  const editor = getDocumentEditor(cur.id);
+  // Occurrences are read before the marks go: they depend on the marks' positions.
+  const occurrences = new Map(views.map((v) => [v.id, occurrenceOf(editor, v)]));
+  const located = views.filter((v) => v.located);
+  if (located.length > 0) {
+    let chain = editor.chain();
+    for (const v of located) chain = chain.removeAnnotationById(v.id);
+    chain.run();
+  }
   // The command's own onUpdate has already replaced `current`; read fresh.
-  const existing = useStore.getState().current?.findings?.find((r) => r.id === id);
-  const base = recordFrom(view, existing, occurrence);
-  const record: FindingRecord = {
-    ...base,
-    status,
-    closedAt: nowIso(),
-    ...(closedBy ? { closedBy } : {}),
-  };
-  if (!closedBy) delete record.closedBy;
-  useStore.getState().commitFindings((prev) => upsert(prev, record));
+  const fresh = useStore.getState().current?.findings ?? [];
+  const closedAt = nowIso();
+  const records = views.map((view): FindingRecord => {
+    const base = recordFrom(view, fresh.find((r) => r.id === view.id), occurrences.get(view.id));
+    const record: FindingRecord = {
+      ...base,
+      status,
+      closedAt,
+      ...(closedBy ? { closedBy } : {}),
+    };
+    if (!closedBy) delete record.closedBy;
+    return record;
+  });
+  useStore.getState().commitFindings((prev) =>
+    records.reduce((list, record) => upsert(list, record), prev),
+  );
 }
 
 export function resolveFinding(id: string): void {
-  close(id, "resolved", "check");
+  closeMany([id], "resolved", "check");
 }
 
 export function markNotApplicable(id: string): void {
-  close(id, "not_applicable");
+  closeMany([id], "not_applicable");
+}
+
+/** Ya lo resolví on a sentence card: every finding in it closes, as one undo step. */
+export function resolveCard(ids: string[]): void {
+  closeMany(ids, "resolved", "check");
+}
+
+/** No aplica on a sentence card. */
+export function markCardNotApplicable(ids: string[]): void {
+  closeMany(ids, "not_applicable");
 }
 
 /** Uncheck: the underline returns when the quote is still in the text; otherwise the finding is open and not located. */
 export function reopenFinding(id: string): void {
+  reopenCard([id]);
+}
+
+/** Reopen every finding of a card together. */
+export function reopenCard(ids: string[]): void {
   const cur = useStore.getState().current;
-  const rec = cur?.findings?.find((r) => r.id === id);
-  if (!cur || !rec) return;
+  if (!cur) return;
+  const wanted = new Set(ids);
+  const recs = (cur.findings ?? []).filter((r) => wanted.has(r.id));
+  if (recs.length === 0) return;
   setUndoSurface("document");
   const editor = getDocumentEditor(cur.id);
-  const range =
-    findCitaRange(editor, rec.cita, rec.occurrence ?? 0) ??
-    findCitaRange(editor, rec.cita, 0);
-  if (range) {
+  for (const rec of recs) {
+    const range =
+      findCitaRange(editor, rec.cita, rec.occurrence ?? 0) ??
+      findCitaRange(editor, rec.cita, 0);
+    if (!range) continue;
     editor
       .chain()
       .command(({ tr }) => {
@@ -134,7 +167,7 @@ export function reopenFinding(id: string): void {
   }
   useStore.getState().commitFindings((prev) =>
     prev.map((r) => {
-      if (r.id !== id) return r;
+      if (!wanted.has(r.id)) return r;
       const { closedAt: _a, closedBy: _b, ...rest } = r;
       void _a;
       void _b;

@@ -1,0 +1,47 @@
+---
+description: "Task list for finding quality"
+---
+
+# Tasks: Finding Quality
+
+**Input**: specs/010-finding-quality (spec.md, plan.md, research.md, data-model.md, contracts/ui.md, quickstart.md). Approved by Noe 2026-11-10.
+**Tests**: no test-writing tasks. Existing E2E stays green; `tests/e2e/score.spec.ts` is not edited.
+**Paper**: R4.2b «Correcciones, una tarjeta por frase» (HON-0) in file 01M6VXNCR0ZBA410S026XSG7JT, next to R4.2 (67J-0) and R2.2 (57T-0). Read values with get_jsx and get_computed_styles.
+
+## Phase 1: Foundational (Slice 1, derive and score)
+
+- [x] T001 Extract a pure `sentenceSpans(text): {start,end}[]` from `sentenceRange` in src/lib/editor/findCita.ts (same `Intl.Segmenter` sentence granularity, trailing whitespace trimmed) and make `sentenceRange` use it. Done: `npx tsc --noEmit`; existing E2E for suppression pass.
+- [x] T002 [US1] In src/lib/review/findings.ts add `sentenceKey?: string` to `FindingView`, computed in `deriveFindings` for located views from the block start position and the index of the sentence (via `sentenceSpans` on the block text) where the mark starts; absent for not-located views. Done: tsc.
+- [x] T003 [US1] Add `groupBySentence(views): SentenceCard[]` in src/lib/review/findings.ts per data-model.md: key, quote once, findings most severe first, status open if any open, resolved when all resolved, hidden when all not applicable; a not-located finding is its own card keyed by its id. Done: tsc.
+- [x] T004 [US1] Change `openForScore` in src/lib/review/findings.ts to emit one entry per open card at its highest severity for the overall score, plus one entry per criterion present in the card at that criterion's highest severity, with no criterion entry counted twice. `computeBenchmark` and score.spec.ts untouched; `reachableScore` keeps working. Done: a stub essay where three passes flag one sentence gives one penalty; existing E2E pass.
+
+## Phase 2: User Story 1 (Slice 2, actions and UI; after Phase 1)
+
+- [x] T005 [US1] In src/lib/review/actions.ts add card-level resolve, not applicable and reopen that apply to every finding of a card as one undo step; keep the per-finding functions for callers that need them. Done: tsc; resolve a card in the stub and all its findings close; reopen brings all back.
+- [x] T006 [US1] Render one card per sentence in src/components/review/CorrectionsPanel.tsx and the criterion view, using Finding.tsx for each agent part per contracts/ui.md and Paper R4.2b: quote once, each part with chip, «en criterio» (not in the criterion view), severity and diagnosis, one footer with Ya lo resolví and No aplica for the card. Testids `finding-card`, `finding-part`. Done: side by side with HON-0.
+- [x] T007 [US1] The popover on an underline (src/components/editor/AnnotationPopover.tsx) shows the whole card of that sentence. Done: click an underline of a grouped sentence and see every part.
+- [x] T008 [US1] Update only the E2E selectors and counts in tests/e2e that assume one card per finding for the same sentence; say which and why. Done: full E2E passes.
+
+## Phase 3: User Story 2 and 3 (Slice 3, replacements and prompts; parallel with Phase 1)
+
+- [x] T009 [P] [US2] In src/lib/review/run.ts drop `reemplazo` for pases `coherencia` and `argumento`; for the rest, uppercase or lowercase the first letter of the replacement to match the first letter of its quote; extend `numbersAreGrounded` into a guard that also drops a replacement carrying a capitalized word, other than its first word, absent from the essay and sources. Done: tsc; stub review shows no replacement on those passes.
+- [x] T010 [P] [US2] In sidecar/src/prompts.ts make the coherencia and argumento pass instructions ask for diagnosis only, with no `reemplazo`, and their examples carry none; keep `reemplazo` for estilo and apa. Done: `npm run sidecar:build`.
+- [x] T011 [P] [US3] In sidecar/src/prompts.ts restate the no-memory rule: never say a fact in the draft is false or give the right value unless the draft or the sources show it; say it cannot be verified with the sources and ask to check the original. Done: sidecar build.
+- [x] T012 [US2] Finding.tsx shows Usar este texto and Copiar only on parts that have a replacement. Done: stub check.
+
+## Phase 4: Verify (Slice 4)
+
+- [ ] T013 lint, tsc, build, sidecar build, full E2E on a free port with score.spec.ts unedited, cargo test.
+- [ ] T014 Real review, about 8 calls, on two test essays in the scratchpad (one with rubric): no sentence with two cards, no replacement on Coherencia or Argumento, replacements keep the quote's first-letter case and add no name or number absent from essay and sources. Record the outputs.
+- [ ] T015 Independent reviewer, who did not build it, grades usefulness of those outputs and the grouped card against R4.2b; minimum 4 of 5.
+- [ ] T016 QA build in the real window: open a reviewed test essay and see grouped cards and the new score.
+
+## Phase 5: Unir y acotar (approved by Noe 2026-11-10)
+
+- [x] T017 [US1] In src/lib/review/findings.ts `groupBySentence` makes one part per agent within a card: the agent's most severe finding is the part shown, its other findings in that sentence belong to the part and close or reopen with the card; score unchanged. Update Finding.tsx only as needed. Done: stub essay with one agent twice in a sentence shows one part.
+- [ ] T018 [P] [US2] In sidecar/src/prompts.ts give each pass its subject per FR-011, at most one finding per sentence per pass, no questioning a cited fact from memory, mensaje under 30 words in plain tú with no rhetorical questions. Done: sidecar build.
+- [ ] T019 Real review, about 8 calls, on the same two test essays; independent reviewer grades usefulness, minimum 4.
+
+## Dependencies
+
+Phase 1 and Phase 3 run in parallel (disjoint files: findCita.ts and findings.ts versus run.ts and prompts.ts). Phase 2 after Phase 1; T012 after T009 and with Phase 2 (same file Finding.tsx, one owner). Phase 4 last.

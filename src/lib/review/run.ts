@@ -317,13 +317,48 @@ async function settle(run: ActiveRun, results: Map<Pase, PassResult>): Promise<v
   );
 }
 
+/** Passes that only diagnose; a replacement there would invent the author's idea. */
+const NO_REEMPLAZO_PASES: ReadonlySet<Pase> = new Set<Pase>(["coherencia", "argumento", "estilo"]);
+
+const fold = (t: string): string =>
+  t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
 /**
  * A replacement goes straight into the essay, so it may not carry a number
- * (page, year, statistic) found neither in the essay nor in its sources.
- * The finding stays; only the ready-to-paste text is dropped.
+ * (page, year, statistic) or a proper name found neither in the essay nor in
+ * its sources. A capitalized word counts as a name unless it is the first
+ * word of the replacement. The finding stays; only the ready-to-paste text
+ * is dropped.
  */
-function numbersAreGrounded(reemplazo: string, corpus: string): boolean {
-  return (reemplazo.match(/\d+/g) ?? []).every((n) => corpus.includes(n));
+export function replacementIsGrounded(reemplazo: string, corpus: string): boolean {
+  if (!(reemplazo.match(/\d+/g) ?? []).every((n) => corpus.includes(n))) return false;
+  const folded = fold(corpus);
+  // A capital after the start or after a sentence end is grammar, not a name.
+  for (const m of reemplazo.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const w = m[0];
+    if (!/^\p{Lu}/u.test(w)) continue;
+    const before = reemplazo.slice(0, m.index).trimEnd();
+    if (before === "" || /[.!?¿¡«"“(]$/u.test(before)) continue;
+    if (!folded.includes(fold(w))) return false;
+  }
+  return true;
+}
+
+/** The replacement takes the first-letter case of the text it replaces. */
+export function matchFirstLetterCase(reemplazo: string, cita: string): string {
+  const q = cita.match(/\p{L}/u)?.[0];
+  const idx = reemplazo.search(/\p{L}/u);
+  if (!q || idx < 0) return reemplazo;
+  const r = reemplazo[idx];
+  const wantUpper = q !== q.toLowerCase();
+  const wantLower = q !== q.toUpperCase();
+  if (wantUpper && r !== r.toUpperCase()) {
+    return reemplazo.slice(0, idx) + r.toUpperCase() + reemplazo.slice(idx + 1);
+  }
+  if (wantLower && r !== r.toLowerCase()) {
+    return reemplazo.slice(0, idx) + r.toLowerCase() + reemplazo.slice(idx + 1);
+  }
+  return reemplazo;
 }
 
 function tryEditor(essayId: string): Editor | null {
@@ -385,7 +420,12 @@ function applyReview(
     const sage = sageForPase(pase, cur.mode);
     for (const raw of r.raw) {
       const a = buildAnotacion(raw, sage, pase, generadoEn, criterios, r.provenance);
-      if (a.reemplazo && !numbersAreGrounded(a.reemplazo, corpus)) a.reemplazo = undefined;
+      if (NO_REEMPLAZO_PASES.has(pase)) a.reemplazo = undefined;
+      else if (a.reemplazo) {
+        a.reemplazo = replacementIsGrounded(a.reemplazo, corpus)
+          ? matchFirstLetterCase(a.reemplazo, a.cita)
+          : undefined;
+      }
       const key = a.cita;
       let skip = seen.get(key) ?? 0;
       let range = findCitaRange(editor, a.cita, skip);

@@ -34,6 +34,8 @@ type TooltipProps = {
    */
   sentence?: boolean;
   children: ReactElement<{ "aria-describedby"?: string }>;
+  /** Classes for the wrapper; default inline-flex. Use to let the trigger stretch in a flex row. */
+  className?: string;
 };
 
 type Placement = { x: number; y: number; shift: number };
@@ -43,7 +45,7 @@ const SENTENCE_WIDTH = 232;
 const SENTENCE_GAP = 18;
 const EDGE = 8;
 
-export function Tooltip({ label, shortcut, side = "bottom", sentence = false, children }: TooltipProps) {
+export function Tooltip({ label, shortcut, side = "bottom", sentence = false, className, children }: TooltipProps) {
   const id = useId();
   const wrapRef = useRef<HTMLSpanElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,7 +117,7 @@ export function Tooltip({ label, shortcut, side = "bottom", sentence = false, ch
     <>
       <span
         ref={wrapRef}
-        className="inline-flex"
+        className={className ?? "inline-flex"}
         onMouseEnter={onEnter}
         onMouseLeave={hide}
         onMouseDown={hide}

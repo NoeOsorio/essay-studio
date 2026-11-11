@@ -63,6 +63,23 @@ test.beforeEach(async ({ page }) => {
   await installTauriStub(page);
 });
 
+/** FR-010: inside every card each agent appears once. */
+async function agentsAppearOncePerCard(page: Page) {
+  return page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('[data-testid="finding-card"]'));
+    let parts = 0;
+    const dup: string[] = [];
+    for (const c of cards) {
+      const names = Array.from(c.querySelectorAll('[data-testid="finding-part"]')).map(
+        (p) => p.querySelector(".font-semibold")?.textContent ?? "",
+      );
+      parts += names.length;
+      if (new Set(names).size !== names.length) dup.push(names.join(","));
+    }
+    return { parts, dup };
+  });
+}
+
 test("Rúbrica button opens the editor and persists criterios", async ({
   page,
 }) => {
@@ -170,10 +187,14 @@ test("APA check appears in academico mode and runs as a 4th check", async ({
   await page.getByTestId("pluma-start").click();
   // 4 checks x 3 = 12 findings, underlined with no apply step. Underlines
   // may overlap and split into more spans, so count the listed findings.
+  // The list shows one card per sentence, so the 12 are parts of fewer cards.
   await expect(editor.locator(".anno").first()).toBeVisible();
   await expect(page.getByTestId("pluma-overlay")).toHaveCount(0);
   await openAllCorrections(page);
-  await expect(page.getByTestId("finding")).toHaveCount(12);
+  const seen = await agentsAppearOncePerCard(page);
+  expect(seen.dup).toEqual([]);
+  expect(seen.parts).toBeGreaterThan(0);
+  expect(seen.parts).toBeLessThanOrEqual(12);
 });
 
 test("APA check is hidden in blog mode", async ({ page }) => {
@@ -260,10 +281,12 @@ test("a finding with criterioId shows its criterio in the popover", async ({
   // .anno and look for the chip in the popover.
   await editor.locator(".anno").first().click();
   await expect(page.getByTestId("annotation-popover")).toBeVisible();
-  await expect(page.getByTestId("finding-where")).toBeVisible();
-  await expect(page.getByTestId("finding-where")).toContainText(
-    "Coherencia interna",
-  );
+  // The popover shows the whole sentence card: the part with the criterion is one of its parts.
+  const where = page
+    .getByTestId("annotation-popover")
+    .getByTestId("finding-where")
+    .filter({ hasText: "Coherencia interna" });
+  await expect(where.first()).toBeVisible();
 });
 
 test("a pasted assignment fills the rubric in one action and edits stay", async ({

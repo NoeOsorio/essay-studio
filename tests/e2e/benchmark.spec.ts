@@ -65,7 +65,7 @@ test("essay with findings but no rúbrica: score and corrections, no criterion r
   await expect(page.getByTestId("stamp-all-corrections")).toBeVisible();
 
   await page.getByTestId("stamp-all-corrections").click();
-  await expect(page.getByTestId("finding").first()).toBeVisible();
+  await expect(page.getByTestId("finding-card").first()).toBeVisible();
 });
 
 test("with rúbrica and a review, the report card has a row per criterio and a real score", async ({
@@ -112,7 +112,7 @@ test("a criterio row lists its findings; No aplica removes the mark and moves th
   await page.locator('[data-testid^="scorebar-criterio-"]').first().click();
   await expect(page.getByTestId("corrections-panel")).toBeVisible();
 
-  const cards = page.getByTestId("finding");
+  const cards = page.getByTestId("finding-card");
   await expect(cards.first()).toBeVisible();
   expect(await cards.count()).toBeGreaterThan(0);
 

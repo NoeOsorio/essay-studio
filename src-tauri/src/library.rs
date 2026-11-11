@@ -25,7 +25,7 @@ use tauri::{AppHandle, Manager};
 /// Bump when ReviewInputs or the entry shape changes (see
 /// specs/007-essay-library/contracts/score-inputs.md). A mismatch forces
 /// one rebuild at the next read.
-pub const INDEX_VERSION: u32 = 1;
+pub const INDEX_VERSION: u32 = 2;
 
 const EXCERPT_MAX_CHARS: usize = 320;
 const MARK_DENY_LIST: [&str; 5] = ["mensaje", "reemplazo", "sugerencia", "evidence", "provenance"];
@@ -36,7 +36,10 @@ const MAX_WALK_DEPTH: usize = 64;
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewInputs {
-    pub marks: Vec<Value>,
+    /// The blocks of the essay that carry at least one annotation mark, text
+    /// intact, annotation marks only. The renderer wraps them in a doc and runs
+    /// the editor's own `deriveFindings` over them, so grouping is identical.
+    pub blocks: Vec<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub findings: Option<Vec<Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -127,10 +130,9 @@ struct EssayLite {
 
 struct Extracted {
     text: String,
-    marks: Vec<Value>,
 }
 
-fn walk(node: &Value, depth: usize, out: &mut Extracted, seen_ids: &mut HashSet<String>) {
+fn walk(node: &Value, depth: usize, out: &mut Extracted) {
     if depth > MAX_WALK_DEPTH {
         return;
     }
@@ -140,16 +142,11 @@ fn walk(node: &Value, depth: usize, out: &mut Extracted, seen_ids: &mut HashSet<
         if let Some(t) = obj.get("text").and_then(Value::as_str) {
             out.text.push_str(t);
         }
-        if let Some(marks) = obj.get("marks").and_then(Value::as_array) {
-            for m in marks {
-                copy_annotation_mark(m, &mut out.marks, seen_ids);
-            }
-        }
         return;
     }
     if let Some(children) = obj.get("content").and_then(Value::as_array) {
         for c in children {
-            walk(c, depth + 1, out, seen_ids);
+            walk(c, depth + 1, out);
         }
         if !out.text.ends_with('\n') && !out.text.is_empty() {
             out.text.push('\n');
@@ -157,10 +154,10 @@ fn walk(node: &Value, depth: usize, out: &mut Extracted, seen_ids: &mut HashSet<
     }
 }
 
-fn copy_annotation_mark(mark: &Value, marks: &mut Vec<Value>, seen_ids: &mut HashSet<String>) {
-    let Some(m) = mark.as_object() else { return };
+fn slim_annotation_mark(mark: &Value) -> Option<Value> {
+    let m = mark.as_object()?;
     if m.get("type").and_then(Value::as_str) != Some("annotation") {
-        return;
+        return None;
     }
     let mut attrs = Map::new();
     if let Some(src) = m.get("attrs").and_then(Value::as_object) {
@@ -170,13 +167,73 @@ fn copy_annotation_mark(mark: &Value, marks: &mut Vec<Value>, seen_ids: &mut Has
             }
         }
     }
-    // A mark repeats on every text node it spans; one copy per id is enough.
-    if let Some(id) = attrs.get("id").and_then(Value::as_str) {
-        if !seen_ids.insert(id.to_string()) {
-            return;
-        }
+    Some(json!({ "type": "annotation", "attrs": Value::Object(attrs) }))
+}
+
+/// The subtree reduced to what holds annotations: a text block keeps all its
+/// inline nodes (sentences need the whole text) with annotation marks only;
+/// a container keeps only the children that hold annotations. None when the
+/// subtree has no annotation mark.
+fn prune_to_annotated(node: &Value, depth: usize) -> Option<Value> {
+    if depth > MAX_WALK_DEPTH {
+        return None;
     }
-    marks.push(json!({ "type": "annotation", "attrs": Value::Object(attrs) }));
+    let obj = node.as_object()?;
+    let children = obj.get("content").and_then(Value::as_array)?;
+    let is_text_block = children
+        .iter()
+        .any(|c| c.get("type").and_then(Value::as_str) == Some("text"));
+    let mut out = Map::new();
+    if let Some(t) = obj.get("type") {
+        out.insert("type".to_string(), t.clone());
+    }
+    if is_text_block {
+        let mut any = false;
+        let mut kept = Vec::with_capacity(children.len());
+        for c in children {
+            let Some(co) = c.as_object() else { continue };
+            let mut n = Map::new();
+            for k in ["type", "text"] {
+                if let Some(v) = co.get(k) {
+                    n.insert(k.to_string(), v.clone());
+                }
+            }
+            if co.get("type").and_then(Value::as_str) == Some("text") {
+                let marks: Vec<Value> = co
+                    .get("marks")
+                    .and_then(Value::as_array)
+                    .map(|ms| ms.iter().filter_map(slim_annotation_mark).collect())
+                    .unwrap_or_default();
+                if !marks.is_empty() {
+                    any = true;
+                    n.insert("marks".to_string(), Value::Array(marks));
+                }
+            }
+            kept.push(Value::Object(n));
+        }
+        if !any {
+            return None;
+        }
+        out.insert("content".to_string(), Value::Array(kept));
+        return Some(Value::Object(out));
+    }
+    let kept: Vec<Value> = children
+        .iter()
+        .filter_map(|c| prune_to_annotated(c, depth + 1))
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    out.insert("content".to_string(), Value::Array(kept));
+    Some(Value::Object(out))
+}
+
+fn annotated_blocks(content: &Value) -> Vec<Value> {
+    content
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|bs| bs.iter().filter_map(|b| prune_to_annotated(b, 1)).collect())
+        .unwrap_or_default()
 }
 
 fn collapse_ws(s: &str) -> String {
@@ -195,9 +252,8 @@ fn make_excerpt(content: &Value) -> String {
         }
         let mut ex = Extracted {
             text: String::new(),
-            marks: Vec::new(),
         };
-        walk(block, 0, &mut ex, &mut HashSet::new());
+        walk(block, 0, &mut ex);
         let t = collapse_ws(&ex.text);
         if t.is_empty() {
             continue;
@@ -257,10 +313,9 @@ fn derive(raw: &str, mtime_ns: u64, size: u64) -> Result<IndexRecord, String> {
 
     let mut ex = Extracted {
         text: String::new(),
-        marks: Vec::new(),
     };
-    let mut seen = HashSet::new();
-    walk(&e.content, 0, &mut ex, &mut seen);
+    walk(&e.content, 0, &mut ex);
+    let blocks = annotated_blocks(&e.content);
     let text = ex.text.trim_end().to_string();
     let excerpt = make_excerpt(&e.content);
 
@@ -278,9 +333,9 @@ fn derive(raw: &str, mtime_ns: u64, size: u64) -> Result<IndexRecord, String> {
         .and_then(|r| r.get("criterios"))
         .map(|c| json!({ "criterios": c }));
 
-    let review = if evaluacion_meta.is_some() || findings.is_some() || !ex.marks.is_empty() {
+    let review = if evaluacion_meta.is_some() || findings.is_some() || !blocks.is_empty() {
         Some(ReviewInputs {
-            marks: ex.marks,
+            blocks,
             findings,
             evaluacion_meta,
             rubrica,

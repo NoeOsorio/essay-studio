@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { installTauriStub, openNewEssay, runReview, openAllCorrections } from "./setup";
 
 /**
@@ -11,6 +11,23 @@ import { installTauriStub, openNewEssay, runReview, openAllCorrections } from ".
  * text the renderer sent, so resolving them against the doc always
  * succeeds.
  */
+
+/** FR-010: inside every card each agent appears once. */
+async function agentsAppearOncePerCard(page: Page) {
+  return page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('[data-testid="finding-card"]'));
+    let parts = 0;
+    const dup: string[] = [];
+    for (const c of cards) {
+      const names = Array.from(c.querySelectorAll('[data-testid="finding-part"]')).map(
+        (p) => p.querySelector(".font-semibold")?.textContent ?? "",
+      );
+      parts += names.length;
+      if (new Set(names).size !== names.length) dup.push(names.join(","));
+    }
+    return { parts, dup };
+  });
+}
 
 const SAMPLE_BODY = [
   "El liderazgo del CEO determina la cultura. Cuando alguien tóxico ocupa",
@@ -61,7 +78,11 @@ test("three checks yield 9 findings, underlined and listed", async ({
   await expect(editor.locator(".anno")).toHaveCount(9);
 
   await openAllCorrections(page);
-  await expect(page.getByTestId("finding")).toHaveCount(9);
+  // One card per sentence, each agent once per card: fewer parts than findings.
+  const seen = await agentsAppearOncePerCard(page);
+  expect(seen.dup).toEqual([]);
+  expect(seen.parts).toBeGreaterThan(0);
+  expect(seen.parts).toBeLessThanOrEqual(9);
 });
 
 test("clicking an annotation opens the popover; No aplica removes the mark", async ({
@@ -83,7 +104,11 @@ test("clicking an annotation opens the popover; No aplica removes the mark", asy
   await expect(popover).toContainText(/problema [ABC]/);
 
   // No aplica removes the mark and closes the popover.
+  // No aplica acts on the whole sentence card: every part's mark goes.
+  // The card closes every finding of the sentence, including those not shown as a part.
+  const before = await editor.locator(".anno").count();
   await popover.getByTestId("finding-not-applicable").click();
   await expect(popover).toHaveCount(0);
-  await expect(editor.locator(".anno")).toHaveCount(8);
+  const after = await editor.locator(".anno").count();
+  expect(after).toBeLessThan(before);
 });

@@ -243,10 +243,12 @@ export type EssayMeta = Omit<
 /**
  * What the library index carries so the list can compute the same score
  * as the editor (specs/007-essay-library/contracts/score-inputs.md).
- * Marks are annotation marks minus their large attributes.
+ * `blocks` are the essay's blocks that hold an annotation mark, text intact,
+ * annotation marks only (minus their large attributes), so the list runs the
+ * editor's own `deriveFindings` over them.
  */
 export type ReviewInputs = {
-  marks: { type: string; attrs?: Record<string, unknown> }[];
+  blocks: JSONContent[];
   findings?: FindingRecordSlim[];
   evaluacionMeta?: EvaluacionMeta;
   rubrica?: Rubrica;

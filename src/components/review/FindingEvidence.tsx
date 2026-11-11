@@ -125,7 +125,7 @@ export function EvidencePopover({
   const card = useMemo<RefObject<HTMLElement | null>>(
     () => ({
       get current() {
-        return anchor.current?.closest<HTMLElement>('[data-testid="finding"]') ?? null;
+        return anchor.current?.closest<HTMLElement>('[data-testid="finding-card"]') ?? null;
       },
       set current(_v: HTMLElement | null) {},
     }),

@@ -121,7 +121,13 @@ const EssayLine = memo(function EssayLine({
           <span className="flex">{academic ? <AcademicIcon /> : <BlogIcon />}</span>
         </Tooltip>
       </div>
-      {row.displayTitle.length > 70 ? <Tooltip label={row.displayTitle}>{title}</Tooltip> : title}
+      {row.displayTitle.length > 70 ? (
+        <Tooltip label={row.displayTitle} className="flex min-w-0 flex-1">
+          {title}
+        </Tooltip>
+      ) : (
+        title
+      )}
       <span className="w-[120px] flex-none text-right font-sans text-[13px] leading-[20px] text-ink-3">
         {entry.wordCount > 0 ? `${formatCount(entry.wordCount)} ${entry.wordCount === 1 ? "palabra" : "palabras"}` : ""}
       </span>

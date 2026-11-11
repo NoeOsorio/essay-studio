@@ -83,8 +83,10 @@ test("popover: 'Aplicar sugerencia' replaces the text and removes the mark", asy
 
   // Popover closes.
   await expect(popover).toHaveCount(0);
-  // One less mark on the doc.
-  await expect(editor.locator(".anno")).toHaveCount(initialMarks - 1);
+  // The applied finding's mark is gone. Only Citas APA offers text now, and
+  // replacing its quote also removes other agents' marks on those words, so
+  // the drop can be more than one.
+  await expect.poll(() => editor.locator(".anno").count()).toBeLessThan(initialMarks);
   // The doc now contains the sugerencia text and no longer the original cita.
   const editorText = await editor.innerText();
   expect(editorText).toContain(sugerencia!);
@@ -145,8 +147,8 @@ test("Correcciones: 'Usar este texto' on a card replaces the text", async ({
   await expect(useButtons.first()).toBeVisible();
   await useButtons.first().click();
 
-  // One mark removed.
-  await expect(editor.locator(".anno")).toHaveCount(initialMarks - 1);
+  // The applied finding's mark is removed (others on the same words may go too).
+  await expect.poll(() => editor.locator(".anno").count()).toBeLessThan(initialMarks);
 });
 
 test("after applying, the Scorebar overall recomputes", async ({ page }) => {
@@ -210,16 +212,17 @@ test("popover muestra 'Reemplazar por' como bloque literal separado del mensaje 
   await expect(popover).toBeVisible();
 
   // El mensaje y el reemplazo literal viven en bloques distintos.
-  await expect(page.getByTestId("finding-mensaje")).toBeVisible();
+  // The popover shows the whole sentence card: one part per agent, so scope to the first.
+  await expect(popover.getByTestId("finding-mensaje").first()).toBeVisible();
   // El bloque del reemplazo tiene su propio testid y muestra el texto
   // entre comillas — comunica visualmente que es texto literal y no
   // advice del sabio.
-  const reemplazo = page.getByTestId("finding-replacement");
+  const reemplazo = popover.getByTestId("finding-replacement").first();
   await expect(reemplazo).toBeVisible();
   await expect(reemplazo).toContainText(/\(referencia\)/);
 
   // El botón actualizado lee "Reemplazar", no "Aplicar sugerencia".
-  await expect(page.getByTestId("finding-use")).toHaveText(/Usar este texto/);
+  await expect(popover.getByTestId("finding-use").first()).toHaveText(/Usar este texto/);
 });
 
 test("parseAnotaciones strippea prefijos conversacionales como 'Reescribí:' (sesión 16)", async () => {

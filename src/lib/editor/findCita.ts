@@ -102,6 +102,23 @@ export function findCitaRange(
 }
 
 /**
+ * The sentences of one text block as `{start, end}` offsets into `text`,
+ * trailing whitespace trimmed so adjacent sentences never touch. The one
+ * segmentation shared by suppression (`sentenceRange`) and by the grouping
+ * of findings, so both agree on what a sentence is.
+ */
+export function sentenceSpans(text: string): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  if (text.length === 0) return out;
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
+  for (const seg of segmenter.segment(text)) {
+    const trimmed = seg.segment.replace(/\s+$/, "");
+    out.push({ start: seg.index, end: seg.index + trimmed.length });
+  }
+  return out;
+}
+
+/**
  * The sentence that contains document position `pos`, as a PM range,
  * limited to its textblock (a sentence never crosses a paragraph).
  * Used to decide whether a new finding lands on a sentence the author
@@ -121,14 +138,12 @@ export function sentenceRange(
   const text = block.textBetween(0, block.content.size, undefined, "￼");
   if (text.length === 0) return null;
   const offset = Math.min(Math.max(pos - start, 0), text.length - 1);
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
-  for (const seg of segmenter.segment(text)) {
-    const end = seg.index + seg.segment.length;
-    if (offset >= seg.index && offset < end) {
-      // Trim trailing whitespace so adjacent sentences do not touch.
-      const trimmed = seg.segment.replace(/\s+$/, "");
-      return { from: start + seg.index, to: start + seg.index + trimmed.length };
-    }
+  // Segments tile the text, so the sentence is the last span starting at or before the offset.
+  const spans = sentenceSpans(text);
+  let hit: { start: number; end: number } | null = null;
+  for (const sp of spans) {
+    if (sp.start <= offset) hit = sp;
+    else break;
   }
-  return null;
+  return hit ? { from: start + hit.start, to: start + hit.end } : null;
 }

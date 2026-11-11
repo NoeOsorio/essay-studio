@@ -232,7 +232,7 @@ function check(dir) {
   }
   const problems = [];
   const add = (id, what) => problems.push(`${id}: ${what}`);
-  if (index.version !== 1) add("index", "version field");
+  if (index.version !== 2) add("index", "version field");
   const records = index.records ?? {};
   const seen = new Set();
   let derived = 0;

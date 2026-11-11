@@ -76,15 +76,18 @@ export function buildAskPrompt(req: AskRequest): string {
 
 // --------- Pluma Roja (critique) ---------
 
+/** Passes that only diagnose: a replacement there invents the idea the author has to supply. */
+export const DIAGNOSIS_ONLY_PASES: ReadonlySet<Pase> = new Set<Pase>(["coherencia", "argumento", "estilo"]);
+
 const PASE_INSTR: Record<Pase, string> = {
   coherencia:
-    "Esta es la pasada \"coherencia\": estructura del argumento, niveles de análisis, ciclos que se refuerzan, atribuciones individuales vs sistémicas, efectos que tardan en verse, intervenciones sin explicar cómo producirían el cambio.",
+    "Esta es la pasada \"coherencia\". Tu único tema es cómo se conectan las ideas y la estructura entre ellas: saltos entre un párrafo y otro, ideas que se contradicen, un orden que confunde, una conclusión que no sale de lo anterior, una intervención sin explicar cómo produciría el cambio. NO comentes la redacción de la frase, ni fuentes ni citas, ni si una afirmación tiene evidencia: eso lo revisan otras pasadas.",
   estilo:
-    "Esta es la pasada \"estilo\": registro, precisión, voz, claridad, jerga vacía, frases-comodín. Marca fragmentos donde el estilo flaquea, no el contenido.",
+    "Esta es la pasada \"estilo\". Tu único tema es cómo está escrita la frase: claridad, registro, precisión de las palabras, voz, jerga vacía, frases-comodín. NUNCA comentes de dónde viene una idea, si falta una fuente o atribución, ni si el argumento se sostiene: eso lo revisan otras pasadas. Marca fragmentos donde la redacción flaquea, no el contenido.",
   argumento:
-    "Esta es la pasada \"argumento\": no enfrentar la versión más fuerte de la postura contraria, supuestos ideológicos no examinados, lo no dicho, retórica gratuita, originalidad real vs sentido común disfrazado, quién no aparece.",
+    "Esta es la pasada \"argumento\". Tu único tema es el razonamiento: afirmaciones sin evidencia que las sostenga, supuestos sin examinar, posturas contrarias que no se enfrentan, sentido común presentado como hallazgo. NUNCA comentes cómo está redactada la frase ni el formato de una cita. Un dato que el borrador ya cita no se pone en duda: tampoco lo corrijas ni lo cuestiones de memoria.",
   apa:
-    "Esta es la pasada \"APA\" (formato académico). Revisa EXCLUSIVAMENTE el formato APA 7 de las citas y referencias en el texto: paréntesis con autor y año, comas entre elementos, localizador en citas textuales: página si la fuente está paginada, o sección/párrafo verificable si no tiene páginas, \"et al.\" cuando hay 3+ autores en una cita parentética, & en lugar de \"y\" dentro del paréntesis, mayúsculas sólo donde corresponde, localizadores opcionales en paráfrasis: una paráfrasis con página o párrafo correcto también es válida, congruencia entre citas en el texto y la sección de referencias. NO juzgues contenido, sólo formato. NUNCA inventes un número de página, año o autor: si falta un localizador y no aparece en las fuentes, dilo en mensaje y omite reemplazo.",
+    "Esta es la pasada \"APA\" (formato académico). Revisa EXCLUSIVAMENTE el formato APA 7 de las citas y referencias en el texto: paréntesis con autor y año, comas entre elementos, localizador en citas textuales: página si la fuente está paginada, o sección/párrafo verificable si no tiene páginas, \"et al.\" cuando hay 3+ autores en una cita parentética, & en lugar de \"y\" dentro del paréntesis, mayúsculas sólo donde corresponde, localizadores opcionales en paráfrasis: una paráfrasis con página o párrafo correcto también es válida, congruencia entre citas en el texto y la sección de referencias. NO juzgues contenido ni redacción, sólo formato. Si el borrador cita a alguien en el texto y no hay lista de referencias, dilo en un solo hallazgo, no uno por cita. NUNCA inventes un número de página, año o autor: si falta un localizador y no aparece en las fuentes, dilo en mensaje y omite reemplazo.",
 };
 
 /** Render the rubric as a compact block the sage can read in-prompt. */
@@ -124,6 +127,58 @@ export function buildCritiquePrompt(req: CritiqueRequest): string {
   ];
   if (rubricaBlock) parts.push(rubricaBlock);
   if (fuentesBlock) parts.push(fuentesBlock);
+  const withReemplazo = !DIAGNOSIS_ONLY_PASES.has(req.pase);
+  const mensajeLine = withReemplazo
+    ? "  \"mensaje\":    diagnóstico pedagógico. ÚNICAMENTE explicas QUÉ está mal en la cita y POR QUÉ importa. Menos de 30 palabras, en tú, con palabras llanas que use cualquier estudiante, sin términos de especialista y sin preguntas retóricas. EL MENSAJE NUNCA INCLUYE EL TEXTO NUEVO. Si te encuentras escribiendo \"podrías decir...\", \"sería mejor que...\", \"reescríbelo como...\", DETENTE: esa parte va en \"reemplazo\", no aquí. El mensaje es de ti AL autor; el reemplazo es prosa que se inserta en su documento."
+    : "  \"mensaje\":    diagnóstico pedagógico. Explicas QUÉ está mal en la cita y POR QUÉ importa, y qué tendría que aclarar o sostener el autor, con tus propias palabras. Menos de 30 palabras, en tú, con palabras llanas que use cualquier estudiante, sin términos de especialista y sin preguntas retóricas. En esta pasada NO propones texto nuevo para pegar: el autor decide cómo resolverlo. No incluyas la llave \"reemplazo\".";
+  const reemplazoLines: string[] = withReemplazo
+    ? [
+        "  \"reemplazo\":  OPCIONAL. El texto LITERAL, COMPLETO, listo para pegar EN LUGAR DE la cita en el documento del autor. Imagina un botón que aprieta el autor y reemplaza la cita por este valor — tiene que leerse gramaticalmente dentro de su párrafo, con la misma función en la oración que la cita: si la cita es una oración completa, el reemplazo también; si es una frase subordinada, el reemplazo también, y cubre TODO lo que la cita abarca. Dice lo mismo que el autor quiso decir, mejor dicho: NUNCA añade una afirmación, dato, causa o matiz que el autor no haya escrito o que no esté en sus fuentes. Si arreglar el problema exige una idea nueva, omite el campo y dilo en el mensaje. No es un mensaje al autor; es prosa de su documento. NO empieces con verbos como \"Reescribe:\", \"Reformula:\", \"Cambia a:\", \"Mejor:\". El campo es ÚNICAMENTE la versión nueva — sin prefacios, sin dos puntos, sin meta-comentarios. Si no puedes dar un fragmento limpio (a veces el problema es estructural y no hay un fragmento aislado que reemplace), OMITE el campo entero. Idioma: coincide con el idioma de la cita, no con tu idioma de respuesta.",
+      ]
+    : [];
+  const tail: string[] = [];
+  if (withReemplazo) {
+    tail.push(
+      "⚠️ ANTI-PATRÓN A EVITAR — patrones que el modelo a veces produce y que rompen el documento al aplicar:",
+      "  ❌ MAL: {\"reemplazo\":\"Reescribe: el equipo mejoró sus resultados\"}  ← \"Reescribe:\" es un verbo dirigido al autor; el autor terminaría con esa palabra pegada en su documento.",
+      "  ❌ MAL: {\"reemplazo\":\"Mejor así: \\\"la transparencia tiene efecto sólo cuando...\\\"\"}  ← mete prefacio meta y comillas extras.",
+      "  ❌ MAL: {\"mensaje\":\"Frase pesada. Reescríbela como: el equipo mejoró sus resultados.\"}  ← el mensaje terminó conteniendo el reemplazo embutido. El reemplazo va en \"reemplazo\", el mensaje sólo diagnostica.",
+      req.pase === "apa"
+        ? "  ✅ BIEN: {\"mensaje\":\"Falta la coma entre autor y año.\",\"reemplazo\":\"(Edmondson, 1999)\"}"
+        : "  ✅ BIEN: {\"mensaje\":\"La frase es larga y esconde quién hace la acción. Dilo directo.\",\"reemplazo\":\"el equipo mejoró sus resultados\"}",
+      "",
+      "Ejemplo válido típico de tu pasada actual (nota la separación entre mensaje = diagnóstico y reemplazo = prosa pura para pegar):",
+    );
+  } else {
+    tail.push("Ejemplo válido típico de tu pasada actual (sólo diagnóstico, sin texto para pegar):");
+  }
+  tail.push(exampleLineFor(req.language, req.pase), "");
+  if (withReemplazo) {
+    tail.push(
+      "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". El mensaje sigue tu idioma de respuesta (el autor lo lee), pero el reemplazo queda en el idioma del fragmento original (se inserta en lugar de la cita y tiene que leerse gramaticalmente en su párrafo):",
+      crossLingualExampleFor(req.language),
+      "",
+    );
+  }
+  tail.push(
+    "Nunca corrijas datos de memoria. NUNCA digas que un dato del borrador es falso ni des el valor correcto (cifra, año, autor, estudio, página) a menos que el borrador o las fuentes suministradas lo muestren. Si no aparece ahí, di que no puedes verificarlo con sus fuentes y pide revisar el original.",
+    "REGLAS DE ALCANCE: (1) Una sola anotación por oración en esta pasada: si una oración tiene varios problemas de tu tema, elige el más importante. (2) Quédate en el tema de tu pasada; si algo pertenece a otra pasada, no lo reportes aunque lo veas. (3) Un dato del borrador que ya lleva cita no se cuestiona de memoria; sólo la pasada APA puede comentar cómo está citado.",
+    "Cada línea es un problema que el autor debe corregir. Si algo está bien, no lo reportes: nunca escribas una línea para decir que algo es correcto o que no requiere cambios, porque cada línea baja la nota.",
+    "Si no encuentras nada interesante en tu dominio, devuelve una sola línea: {\"vacio\":true,\"razon\":\"...\"}",
+    "",
+  );
+  if (withReemplazo) {
+    tail.push(
+      "Recuerda las dos reglas que más se rompen:",
+      "  1. \"mensaje\" es PURO DIAGNÓSTICO — el texto nuevo NUNCA va ahí. Si tu mensaje contiene la versión corregida, mueve esa parte a \"reemplazo\".",
+      "  2. \"reemplazo\" es PURA PROSA — sin prefijos conversacionales ni meta-comentarios. Si arranca con un verbo dirigido al autor (\"Reescribe:\", \"Cambia a:\", \"Mejor:\"), está mal — quítale el prefijo.",
+      "Las LLAVES del JSON (cita, severidad, mensaje, reemplazo, criterioId) son técnicas y van siempre en español tal como las defino. El VALOR de \"mensaje\" va en el idioma del ensayo (lo lee el autor). El VALOR de \"reemplazo\" coincide con el idioma de \"cita\".",
+    );
+  } else {
+    tail.push(
+      "Las LLAVES del JSON (cita, severidad, mensaje, criterioId) son técnicas y van siempre en español tal como las defino. El VALOR de \"mensaje\" va en el idioma del ensayo (lo lee el autor).",
+    );
+  }
   parts.push(
     "Texto a revisar:",
     "",
@@ -136,32 +191,13 @@ export function buildCritiquePrompt(req: CritiqueRequest): string {
     "FORMATO ESTRICTO: una línea de JSON por anotación. Nada antes, nada después, sin envoltura markdown, sin numeración, sin comentarios. Cada línea es un objeto con las llaves exactas:",
     "  \"cita\":       fragmento literal copiado del texto del autor, entre 4 y 25 palabras, exacto carácter por carácter. Es lo que el usuario verá subrayado.",
     "  \"severidad\":  una de \"alta\" | \"media\" | \"baja\".",
-    "  \"mensaje\":    diagnóstico pedagógico. ÚNICAMENTE explicas QUÉ está mal en la cita y POR QUÉ importa. Hasta 35 palabras, en lenguaje que entienda un estudiante, sin términos técnicos que no se expliquen solos. EL MENSAJE NUNCA INCLUYE EL TEXTO NUEVO. Si te encuentras escribiendo \"podrías decir...\", \"sería mejor que...\", \"reescríbelo como...\", DETENTE: esa parte va en \"reemplazo\", no aquí. El mensaje es de ti AL autor; el reemplazo es prosa que se inserta en su documento.",
-    "  \"reemplazo\":  OPCIONAL. El texto LITERAL, COMPLETO, listo para pegar EN LUGAR DE la cita en el documento del autor. Imagina un botón que aprieta el autor y reemplaza la cita por este valor — tiene que leerse gramaticalmente dentro de su párrafo, con la misma función en la oración que la cita: si la cita es una oración completa, el reemplazo también; si es una frase subordinada, el reemplazo también, y cubre TODO lo que la cita abarca. Dice lo mismo que el autor quiso decir, mejor dicho: NUNCA añade una afirmación, dato, causa o matiz que el autor no haya escrito o que no esté en sus fuentes. Si arreglar el problema exige una idea nueva, omite el campo y dilo en el mensaje. No es un mensaje al autor; es prosa de su documento. NO empieces con verbos como \"Reescribe:\", \"Reformula:\", \"Cambia a:\", \"Mejor:\". El campo es ÚNICAMENTE la versión nueva — sin prefacios, sin dos puntos, sin meta-comentarios. Si no puedes dar un fragmento limpio (a veces el problema es estructural y no hay un fragmento aislado que reemplace), OMITE el campo entero. Idioma: coincide con el idioma de la cita, no con tu idioma de respuesta.",
+    mensajeLine,
+    ...reemplazoLines,
     "  \"criterioId\": opcional, sólo si la anotación se alinea con un criterio de la rúbrica de arriba.",
     "  \"evidence\": opcional salvo que tu diagnóstico o reemplazo se apoye en una fuente suministrada. Array de {sourceId, quote, from, to, relation: \"supports\" | \"contradicts\" | \"context\", locator?}. quote es texto literal de esa fuente; from/to son su rango UTF-16 exacto, fin exclusivo. Nunca confundas evidence.quote con cita: cita subraya el ensayo, quote señala la fuente. No emitas verification: la app comprueba el rango, no la veracidad semántica.",
     "Si la evidencia es insuficiente, describe exactamente qué no se puede verificar. No concluyas que un estudio no hizo algo porque no aparece en el fragmento. No añadas autores, DOI, fechas, páginas, estadísticas o resultados en reemplazo sin respaldo en las fuentes suministradas. El formato APA correcto no prueba que exista la referencia ni que sostenga la afirmación.",
     "",
-    "⚠️ ANTI-PATRÓN A EVITAR — patrones que el modelo a veces produce y que rompen el documento al aplicar:",
-    "  ❌ MAL: {\"reemplazo\":\"Reescribe: la cultura emerge de ciclos de incentivos\"}  ← \"Reescribe:\" es un verbo dirigido al autor; el autor terminaría con esa palabra pegada en su documento.",
-    "  ❌ MAL: {\"reemplazo\":\"Mejor así: \\\"la transparencia tiene efecto sólo cuando...\\\"\"}  ← mete prefacio meta y comillas extras.",
-    "  ❌ MAL: {\"mensaje\":\"Atribución individual. Reescríbelo como propiedad emergente sostenida por ciclos.\"}  ← el mensaje terminó conteniendo el reemplazo embutido. El reemplazo va en \"reemplazo\", el mensaje sólo diagnostica.",
-    "  ✅ BIEN: {\"mensaje\":\"Atribución individual de un fenómeno sistémico — borra los ciclos y rituales que sostienen la cultura.\",\"reemplazo\":\"la cultura emerge de ciclos de incentivos, rituales sostenidos y narrativas compartidas\"}",
-    "",
-    "Ejemplo válido típico de tu pasada actual (nota la separación entre mensaje = diagnóstico y reemplazo = prosa pura para pegar):",
-    exampleLineFor(req.language, req.pase),
-    "",
-    "Ejemplo CROSS-LINGÜE — el ensayo está en " + (req.language === "en" ? "English" : "español") + " pero el autor citó textualmente algo en " + (req.language === "en" ? "Spanish" : "English") + ". El mensaje sigue tu idioma de respuesta (el autor lo lee), pero el reemplazo queda en el idioma del fragmento original (se inserta en lugar de la cita y tiene que leerse gramaticalmente en su párrafo):",
-    crossLingualExampleFor(req.language),
-    "",
-    "Nunca corrijas datos de memoria. Si una cifra, autor o estudio del borrador no aparece en las fuentes suministradas, no digas que es falso ni afirmes cuál es el dato correcto: di que no puedes verificarlo con sus fuentes y pide revisar el original.",
-    "Cada línea es un problema que el autor debe corregir. Si algo está bien, no lo reportes: nunca escribas una línea para decir que algo es correcto o que no requiere cambios, porque cada línea baja la nota.",
-    "Si no encuentras nada interesante en tu dominio, devuelve una sola línea: {\"vacio\":true,\"razon\":\"...\"}",
-    "",
-    "Recuerda las dos reglas que más se rompen:",
-    "  1. \"mensaje\" es PURO DIAGNÓSTICO — el texto nuevo NUNCA va ahí. Si tu mensaje contiene la versión corregida, mueve esa parte a \"reemplazo\".",
-    "  2. \"reemplazo\" es PURA PROSA — sin prefijos conversacionales ni meta-comentarios. Si arranca con un verbo dirigido al autor (\"Reescribe:\", \"Cambia a:\", \"Mejor:\"), está mal — quítale el prefijo.",
-    "Las LLAVES del JSON (cita, severidad, mensaje, reemplazo, criterioId) son técnicas y van siempre en español tal como las defino. El VALOR de \"mensaje\" va en el idioma del ensayo (lo lee el autor). El VALOR de \"reemplazo\" coincide con el idioma de \"cita\".",
+    ...tail,
   );
   return parts.join("\n");
 }
@@ -188,15 +224,15 @@ function exampleLineFor(lang: Language | undefined, pase: Pase): string {
 // Esto rompe el patrón del modelo de duplicar contenido entre los
 // dos campos.
 const EXAMPLES_ES: Record<Pase, string> = {
-  coherencia: JSON.stringify({ cita: "La rotación aumentó por falta de confianza", severidad: "media", mensaje: "Afirmas una causa sin explicar cómo la evidencia del borrador permite distinguirla de otras explicaciones. Preséntala como hipótesis mientras no esté demostrada.", reemplazo: "La falta de confianza es una posible explicación del aumento de la rotación" }),
-  estilo: JSON.stringify({ cita: "el resultado fue positivo y muy efectivo", severidad: "baja", mensaje: "Positivo y efectivo no especifican qué cambió. Nombra el resultado observado con los datos que ya tienes; sin esos datos, evita intensificar la valoración." }),
-  argumento: JSON.stringify({ cita: "todos sabemos que la transparencia mejora la confianza", severidad: "media", mensaje: "La apelación a lo que todos saben reemplaza la justificación. El borrador debe presentar evidencia o marcar esta relación como propuesta.", reemplazo: "la transparencia podría mejorar la confianza; esta relación requiere respaldo" }),
+  coherencia: JSON.stringify({ cita: "Por eso la solución es capacitar a los jefes", severidad: "media", mensaje: "Esta conclusión no sale de lo anterior: el párrafo previo habla de salarios, no de jefes. Conecta ambas ideas o cambia el orden." }),
+  estilo: JSON.stringify({ cita: "el resultado fue positivo y muy efectivo", severidad: "baja", mensaje: "Positivo y efectivo no dicen qué cambió. Nombra el resultado con los datos que ya tienes; si no los tienes, quita el refuerzo." }),
+  argumento: JSON.stringify({ cita: "todos sabemos que la transparencia mejora la confianza", severidad: "media", mensaje: "Decir que todos lo saben no prueba nada. Aporta evidencia de esta relación o preséntala como una propuesta tuya." }),
   apa: JSON.stringify({ cita: "(Edmondson 1999)", severidad: "baja", mensaje: "Falta la coma entre autor y año en esta cita parentética.", reemplazo: "(Edmondson, 1999)" }),
 };
 const EXAMPLES_EN: Record<Pase, string> = {
-  coherencia: JSON.stringify({ cita: "Turnover rose because employees lacked trust", severidad: "media", mensaje: "The draft asserts a cause without explaining how its evidence separates that cause from alternatives. Present it as a hypothesis unless the evidence establishes it.", reemplazo: "A lack of trust is one possible explanation for the rise in turnover" }),
-  estilo: JSON.stringify({ cita: "the outcome was positive and very effective", severidad: "baja", mensaje: "Positive and effective do not specify what changed. Name the observed outcome using available data; do not invent measurements to make the sentence precise." }),
-  argumento: JSON.stringify({ cita: "we all know that transparency improves trust", severidad: "media", mensaje: "An appeal to shared belief takes the place of support. The draft needs evidence for this relation or must present it as a proposal.", reemplazo: "transparency may improve trust; this relation needs supporting evidence" }),
+  coherencia: JSON.stringify({ cita: "That is why the answer is training managers", severidad: "media", mensaje: "This conclusion does not follow from the paragraph before, which is about pay, not managers. Connect the two ideas or reorder them." }),
+  estilo: JSON.stringify({ cita: "the outcome was positive and very effective", severidad: "baja", mensaje: "Positive and effective do not say what changed. Name the result with the data you already have, or drop the intensifier." }),
+  argumento: JSON.stringify({ cita: "we all know that transparency improves trust", severidad: "media", mensaje: "Saying everyone knows it proves nothing. Give evidence for this link or present it as your own proposal." }),
   apa: JSON.stringify({ cita: "(Edmondson 1999)", severidad: "baja", mensaje: "The parenthetical author-year citation is missing a comma.", reemplazo: "(Edmondson, 1999)" }),
 };
 

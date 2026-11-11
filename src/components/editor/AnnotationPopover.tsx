@@ -1,6 +1,6 @@
 "use client";
 
-// A thin anchor: clicking an underline opens the one finding card in the
+// A thin anchor: clicking an underline opens the card of that sentence in the
 // shared Popover. All content and actions live in `Finding`.
 
 import { useEffect, useMemo, useState } from "react";
@@ -8,7 +8,7 @@ import type { Editor } from "@tiptap/core";
 
 import { Finding } from "@/components/review/Finding";
 import { Popover } from "@/components/ui/Popover";
-import { deriveFindings } from "@/lib/review/findings";
+import { deriveFindings, groupBySentence } from "@/lib/review/findings";
 import { useStore } from "@/lib/store";
 
 type Open = { id: string; el: HTMLElement };
@@ -57,13 +57,17 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
     [open],
   );
 
-  const view = useMemo(() => {
+  // The whole card of the clicked underline's sentence, every part.
+  const card = useMemo(() => {
     if (!open || !content) return null;
-    return deriveFindings(content, findings).find((v) => v.id === open.id) ?? null;
+    const views = deriveFindings(content, findings);
+    return (
+      groupBySentence(views).find((c) => c.findings.some((f) => f.id === open.id)) ?? null
+    );
   }, [open, content, findings]);
 
-  // Closing the finding removes its underline: the card unmounts with it.
-  if (!open || !view || !view.located) return null;
+  // Closing the card removes its underlines: the card unmounts with them.
+  if (!open || !card || !card.located) return null;
 
   return (
     <Popover
@@ -77,7 +81,7 @@ export function AnnotationPopover({ editor }: { editor: Editor | null }) {
       width={456}
       testId="annotation-popover"
     >
-      <Finding finding={view} surface="popover" />
+      <Finding card={card} surface="popover" />
     </Popover>
   );
 }

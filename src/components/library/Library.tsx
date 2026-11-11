@@ -98,48 +98,46 @@ export function Library() {
 
   const open = useCallback((id: string) => void openEssay(id), [openEssay]);
 
+  // One bar at one place in the tree for every state. When the first letter
+  // of a search switches the desk to the ruled page, the field must not be
+  // remounted, or it loses focus and the rest of the word is lost.
   let body: React.ReactNode;
+  let showTools = true;
+  let bodyClass = "flex-1 min-h-0 overflow-y-auto thin-scroll";
   if (listStatus === "loading") {
     body = <Building />;
   } else if (listStatus === "error" && list.length === 0) {
     body = <LoadFailed onRetry={() => void loadList()} />;
   } else if (rows.length === 0) {
-    return (
-      <div data-testid="library" className="flex flex-col flex-1 min-h-0 bg-paper">
-        <LibraryBar showTools={false} />
-        <FirstUse onCreate={(mode) => void newEssay(mode)} />
-      </div>
-    );
+    showTools = false;
+    bodyClass = "flex flex-1 min-h-0 flex-col";
+    body = <FirstUse onCreate={(mode) => void newEssay(mode)} />;
   } else if (rows.length > DESK_LIMIT || searching) {
     // The ruled page owns its scroller, so the windowing sees the real one.
-    return (
-      <div data-testid="library" className="flex flex-col flex-1 min-h-0 bg-paper">
-        <LibraryBar />
-        <div className="flex-1 min-h-0">
-          <Ledger
-            rows={rows}
-            deskIds={rows.length > DESK_LIMIT ? deskIds : EMPTY_IDS}
-            onOpen={open}
-            query={query}
-            hits={found?.hits ?? null}
-            hitsCurrent={found?.q === trimmed}
-            tipo={tipo}
-            revision={revision}
-            orden={orden}
-            onTipo={(v) => setLibrary({ tipo: v })}
-            onRevision={(v) => setLibrary({ revision: v })}
-            onOrden={(v) => {
-              setPicked(true);
-              setLibrary({ orden: v });
-            }}
-            onClearNarrowing={() =>
-              tipo || revision ? setLibrary({ tipo: null, revision: null }) : setLibrary({ query: "" })
-            }
-            initialScrollTop={useStore.getState().library.scrollTop}
-            onScrollTop={(top) => setLibrary({ scrollTop: top })}
-          />
-        </div>
-      </div>
+    bodyClass = "flex-1 min-h-0";
+    body = (
+      <Ledger
+        rows={rows}
+        deskIds={rows.length > DESK_LIMIT ? deskIds : EMPTY_IDS}
+        onOpen={open}
+        query={query}
+        hits={found?.hits ?? null}
+        hitsCurrent={found?.q === trimmed}
+        tipo={tipo}
+        revision={revision}
+        orden={orden}
+        onTipo={(v) => setLibrary({ tipo: v })}
+        onRevision={(v) => setLibrary({ revision: v })}
+        onOrden={(v) => {
+          setPicked(true);
+          setLibrary({ orden: v });
+        }}
+        onClearNarrowing={() =>
+          tipo || revision ? setLibrary({ tipo: null, revision: null }) : setLibrary({ query: "" })
+        }
+        initialScrollTop={useStore.getState().library.scrollTop}
+        onScrollTop={(top) => setLibrary({ scrollTop: top })}
+      />
     );
   } else {
     body = <Desk rows={rows} onOpen={open} />;
@@ -147,8 +145,8 @@ export function Library() {
 
   return (
     <div data-testid="library" className="flex flex-col flex-1 min-h-0 bg-paper">
-      <LibraryBar />
-      <div className="flex-1 min-h-0 overflow-y-auto thin-scroll">{body}</div>
+      <LibraryBar showTools={showTools} />
+      <div className={bodyClass}>{body}</div>
     </div>
   );
 }
