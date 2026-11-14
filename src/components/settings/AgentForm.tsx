@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AGENT_COLORS,
   AGENT_COLOR_KEYS,
@@ -11,6 +11,9 @@ import type { AgentColorKey, AgentIconKey, CustomAgent, CustomAgentId } from "@/
 import { useStore } from "@/lib/store";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { Popover } from "@/components/ui/Popover";
+import { cancelSidecarRequest } from "@/lib/agents";
+import { improveInstructions } from "@/lib/agents/improve";
+import { GlyphChispa } from "@/components/ui/icons";
 
 const NAME_MAX = 40;
 const TEXT_MAX = 2000;
@@ -32,6 +35,15 @@ const DOES: readonly { value: Does; label: string }[] = [
   { value: "ask", label: "Te hace preguntas" },
   { value: "both", label: "Las dos" },
 ];
+
+function MiniSpinner() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="flex-none animate-spin motion-reduce:animate-none">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="#1D1B1833" strokeWidth="2" />
+      <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="var(--color-ink-1)" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 const LABEL = "font-sans text-[13px] font-medium leading-[16px] text-ink-2";
 const RING = { boxShadow: "0 0 0 1px #1D1B181F" } as const;
@@ -107,10 +119,61 @@ export function AgentForm({
   const [confirming, setConfirming] = useState(false);
   const [picking, setPicking] = useState(false);
   const chip = useRef<HTMLButtonElement | null>(null);
+  // Improve flow: the writer's own text is kept in memory for undo, never stored.
+  const [improving, setImproving] = useState(false);
+  const [original, setOriginal] = useState<string | null>(null);
+  const [improveFailed, setImproveFailed] = useState(false);
+  const pending = useRef<string | null>(null);
+
+  useEffect(
+    () => () => {
+      // Closing the sheet or switching agents cancels a running rewrite.
+      if (pending.current) void cancelSidecarRequest(pending.current);
+    },
+    [],
+  );
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => {
     setError(false);
+    if (k === "instructions") {
+      setOriginal(null);
+      setImproveFailed(false);
+    }
     setDraft((d) => ({ ...d, [k]: v }));
+  };
+
+  const improve = async () => {
+    if (improving || !draft.instructions.trim()) return;
+    const requestId = crypto.randomUUID();
+    const before = draft.instructions;
+    pending.current = requestId;
+    setImproving(true);
+    setImproveFailed(false);
+    setOriginal(null);
+    try {
+      const better = await improveInstructions({
+        name: draft.name.trim(),
+        does: draft.does,
+        instructions: before,
+        requestId,
+      });
+      if (pending.current !== requestId) return;
+      setDraft((d) => ({ ...d, instructions: better }));
+      setOriginal(before);
+    } catch {
+      if (pending.current === requestId) setImproveFailed(true);
+    } finally {
+      if (pending.current === requestId) {
+        pending.current = null;
+        setImproving(false);
+      }
+    }
+  };
+
+  const undoImprove = () => {
+    if (original === null) return;
+    setDraft((d) => ({ ...d, instructions: original }));
+    setOriginal(null);
   };
 
   const name = draft.name.trim();
@@ -130,6 +193,7 @@ export function AgentForm({
     };
     try {
       await saveAgent(record);
+      setOriginal(null);
       setBaseline(draft);
       setError(false);
       if (!agent) onSaved(record.id);
@@ -246,25 +310,66 @@ export function AgentForm({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-center justify-between">
           <label htmlFor="agent-instructions" className={LABEL}>
             Instrucciones
           </label>
-          {draft.instructions.length > COUNT_FROM ? (
-            <span className="text-[12px] leading-[16px] text-ink-3" data-testid="agent-remaining">
-              {TEXT_MAX - draft.instructions.length}
-            </span>
-          ) : null}
+          <div className="flex items-center gap-3">
+            {draft.instructions.length > COUNT_FROM ? (
+              <span className="text-[12px] leading-[16px] text-ink-3" data-testid="agent-remaining">
+                {TEXT_MAX - draft.instructions.length}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              data-testid="agent-improve"
+              disabled={improving || !draft.instructions.trim()}
+              onClick={improve}
+              className="flex h-[28px] items-center gap-[6px] rounded-[8px] bg-shade px-[10px] text-[13px] font-medium leading-[16px] text-ink-1 outline-none transition-[opacity,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ink-1 enabled:active:scale-[0.97] disabled:opacity-40 motion-reduce:transition-none"
+            >
+              {improving ? <MiniSpinner /> : <GlyphChispa size={14} />}
+              Mejorar
+            </button>
+          </div>
         </div>
         <textarea
           id="agent-instructions"
           value={draft.instructions}
           maxLength={TEXT_MAX}
+          readOnly={improving}
+          aria-busy={improving}
           onChange={(e) => set("instructions", e.target.value)}
           data-testid="agent-instructions"
           className="min-h-[150px] w-full flex-1 resize-none rounded-[10px] bg-sheet text-[15px] leading-[22px] text-ink-1 outline-none focus-visible:ring-2 focus-visible:ring-ink-1"
           style={{ ...RING, padding: "12px 14px" }}
         />
+        {original !== null ? (
+          <p
+            className="flex flex-none items-center gap-[6px] text-[13px] leading-[16px] text-ink-3"
+            style={{ animation: "fade-in 150ms ease-out both" }}
+            data-testid="agent-improved"
+          >
+            Las reescribí más claras.
+            <button
+              type="button"
+              data-testid="agent-improve-undo"
+              onClick={undoImprove}
+              className="rounded-[4px] font-medium text-ink-1 underline outline-none focus-visible:ring-2 focus-visible:ring-ink-1"
+            >
+              Volver a las tuyas
+            </button>
+          </p>
+        ) : null}
+        {improveFailed ? (
+          <p
+            className="flex-none text-[13px] leading-[16px] text-ink-2"
+            style={{ animation: "fade-in 150ms ease-out both" }}
+            role="alert"
+            data-testid="agent-improve-error"
+          >
+            No pude mejorarlas. Intenta de nuevo.
+          </p>
+        ) : null}
       </div>
 
       {asks ? null : (

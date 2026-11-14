@@ -672,7 +672,13 @@ export async function installTauriStub(page: Page) {
             const after = (re: RegExp) =>
               lines.map((l) => re.exec(l)).filter((m): m is RegExpExecArray => !!m);
             let result: string;
-            if (task === "citation") {
+            if (task === "instructions") {
+              // Deterministic rewrite: keeps the writer's words, adds clarity.
+              const input = JSON.parse(text) as { instrucciones: string };
+              result = JSON.stringify({
+                instrucciones: `${input.instrucciones.trim().replace(/[.\s]+$/, "")}. Marca solo lo que pediste, con la frase exacta del ensayo, y deja todo lo demás sin tocar.`,
+              });
+            } else if (task === "citation") {
               const out: Record<string, unknown> = {};
               const title = after(/^(?:Title|Título)\s*:\s*(.+)$/i)[0];
               if (title) out.titulo = title[1];

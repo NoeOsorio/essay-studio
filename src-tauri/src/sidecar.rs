@@ -698,7 +698,7 @@ pub async fn sage_extract(
     text: String,
     reviewer_profile: Option<String>,
 ) -> Result<String, String> {
-    if !matches!(task.as_str(), "citation" | "rubric") {
+    if !matches!(task.as_str(), "citation" | "rubric" | "instructions") {
         return Err(format!("unknown task: {task}"));
     }
 

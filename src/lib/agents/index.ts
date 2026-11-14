@@ -309,7 +309,7 @@ export async function critique(args: {
  * checked by `parseCitation` / `parseRubric` before anything is shown.
  */
 export async function extract(args: {
-  task: "citation" | "rubric";
+  task: "citation" | "rubric" | "instructions";
   text: string;
   /** Lets the caller cancel this request with `cancelSidecarRequest`. */
   requestId?: string;

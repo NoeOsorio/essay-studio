@@ -25,7 +25,7 @@ export type InterrogationRequest = { id: string; type: "interrogate"; sage: Sage
 export type CritiqueRequest = { id: string; type: "critique"; sage: Sage | "custom"; custom?: CustomAgentSpec; pase: Pase | CustomPase; text: string; language?: Language; rubrica?: Criterio[]; fuentes?: Fuente[]; reviewerProfile?: string };
 export type AskRequest = { id: string; type: "ask"; sage: Sage | "custom"; custom?: CustomAgentSpec; text: string; question: string; language?: Language; reviewerProfile?: string };
 /** Reads material (a citation from a source, criteria from an assignment). No persona, no `sage`. */
-export type ExtractTask = "citation" | "rubric";
+export type ExtractTask = "citation" | "rubric" | "instructions";
 export type ExtractRequest = { id: string; type: "extract"; task: ExtractTask; text: string; reviewerProfile?: string };
 export type ReviewRequest = InterrogationRequest | CritiqueRequest | AskRequest | ExtractRequest;
 
@@ -116,7 +116,7 @@ function assertCritique(r: Record<string, unknown>): void {
 }
 
 function assertExtract(r: Record<string, unknown>): void {
-  if (r.task !== "citation" && r.task !== "rubric") throw invalid("Invalid extract task.");
+  if (r.task !== "citation" && r.task !== "rubric" && r.task !== "instructions") throw invalid("Invalid extract task.");
   const limit = r.task === "citation" ? CITATION_PREFIX_CHARS : ASSIGNMENT_MAX_CHARS;
   if ((r.text as string).length > limit) throw new ReviewRequestError("SOURCE_TOO_LARGE", "The text is too large for this extraction.");
 }

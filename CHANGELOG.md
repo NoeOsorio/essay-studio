@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.7.0
+
+- Botón «Mejorar» en Configurar agentes: la IA reescribe tus instrucciones más claras y concretas, sin cambiar lo que pediste. «Volver a las tuyas» regresa tu texto.
+
 ## 0.6.0
 
 - Ajustes de agentes (menú Agentes, Configurar agentes…, ⌘,): crea tus propios agentes con tus instrucciones, por ejemplo un corrector de ortografía que solo revisa.
