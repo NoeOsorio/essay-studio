@@ -7,7 +7,6 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { AgentChip } from "@/components/ui/AgentChip";
 import { EvidenceChip, EvidencePopover } from "@/components/review/FindingEvidence";
 import { identityOf } from "@/lib/agent-identity";
 import {
@@ -19,7 +18,7 @@ import {
 } from "@/lib/review/actions";
 import type { FindingView, SentenceCard } from "@/lib/review/findings";
 import { useStore } from "@/lib/store";
-import type { Pase, Severidad } from "@/lib/storage/types";
+import type { BuiltinPase, Severidad } from "@/lib/storage/types";
 
 export type FindingProps = {
   card: SentenceCard;
@@ -27,7 +26,7 @@ export type FindingProps = {
   surface: "popover" | "panel" | "criterion";
 };
 
-const PASE_LABEL: Record<Pase, string> = {
+const PASE_LABEL: Record<BuiltinPase, string> = {
   coherencia: "Coherencia",
   estilo: "Estilo",
   argumento: "Argumentación",
@@ -80,11 +79,14 @@ function Part({
     [],
   );
 
-  const id = identityOf(finding.sage);
+  const id = identityOf(finding.sage, finding);
   const criterio = finding.criterioId
     ? rubrica?.criterios.find((c) => c.id === finding.criterioId)
     : undefined;
-  const where = criterio?.nombre ?? PASE_LABEL[finding.pase] ?? finding.pase;
+  const where =
+    criterio?.nombre ??
+    (finding.pase.startsWith("custom:") ? id.name : (PASE_LABEL as Record<string, string>)[finding.pase]) ??
+    finding.pase;
   const importance = IMPORTANCE[finding.severidad] ?? IMPORTANCE.media;
   const resolved = finding.status === "resolved";
 
@@ -123,9 +125,15 @@ function Part({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-[8px]">
-          <AgentChip author={finding.sage} size={16} badge={26} />
+          <span
+            className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full"
+            style={{ background: id.note, color: id.ink }}
+            aria-hidden="true"
+          >
+            <id.Icon size={16} />
+          </span>
           <span className="text-[13px] font-semibold leading-[16px] text-ink-1">{id.name}</span>
-          {surface !== "criterion" ? (
+          {surface !== "criterion" && where !== id.name ? (
             <span className="text-[13px] leading-[16px] text-ink-3" data-testid="finding-where">
               en {where}
             </span>
@@ -204,7 +212,7 @@ function Part({
 
 export function Finding({ card, surface }: FindingProps) {
   const first = card.findings[0];
-  const id = identityOf(first.sage);
+  const id = identityOf(first.sage, first);
   const resolved = card.status === "resolved";
   const showQuote = surface === "panel" || !card.located;
   // In the lists the card has no padding of its own (Paper R4.2b: 8 px

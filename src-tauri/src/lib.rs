@@ -1,3 +1,4 @@
+mod agents;
 mod history;
 mod library;
 mod menu;
@@ -51,6 +52,8 @@ pub fn run() {
       let _ = app.emit("app:menu", id);
     })
     .invoke_handler(tauri::generate_handler![
+      agents::agents_list,
+      agents::agents_save,
       storage::essay_list,
       storage::essay_read,
       storage::essay_write,

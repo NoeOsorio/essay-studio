@@ -7,7 +7,7 @@
 
 import { useRef, useState } from "react";
 import { useValue, type Editor, type TLNoteShape } from "tldraw";
-import { NOTE_AUTHORS, type AuthorId } from "@/lib/agent-identity";
+import { identityOf, NOTE_AUTHORS, type AuthorId } from "@/lib/agent-identity";
 import { peelNote } from "@/lib/canvas/note-motion";
 import { Popover } from "@/components/ui/Popover";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -68,7 +68,10 @@ function Bar({ editor, note, placement }: { editor: Editor; note: TLNoteShape; p
   const [kindOpen, setKindOpen] = useState(false);
 
   const meta = (note.meta ?? {}) as PostItMeta;
-  const author: AuthorId = NOTE_AUTHORS.find((a) => a.id === meta.author)?.id ?? "tu";
+  const current = identityOf(meta.author, meta);
+  const author: AuthorId = current.id;
+  // A note from a custom agent shows that agent first, even if it was deleted.
+  const authors = NOTE_AUTHORS.some((a) => a.id === current.id) ? NOTE_AUTHORS : [current, ...NOTE_AUTHORS];
   const kind = KINDS.find((k) => k.key === meta.kind) ?? KINDS[0];
 
   // One undo step each: a stopping point, then the change.
@@ -88,7 +91,7 @@ function Bar({ editor, note, placement }: { editor: Editor; note: TLNoteShape; p
       onMouseDown={(e) => e.preventDefault()}
     >
       <div role="radiogroup" aria-label="Autor" className="flex items-center gap-[6px] px-[6px]">
-        {NOTE_AUTHORS.map((a) => {
+        {authors.map((a) => {
           const on = a.id === author;
           const Icon = a.Icon;
           return (

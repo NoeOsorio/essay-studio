@@ -97,6 +97,9 @@ export function useNativeMenuBridge() {
             if (ok) s.clearEvaluacion();
           }
           break;
+        case "app:settings":
+          s.openSettings({ instant: true });
+          break;
         default:
           // Predefined items (cut/copy/paste/quit/undo/redo/etc.)
           // never come through here — Tauri handles them on the

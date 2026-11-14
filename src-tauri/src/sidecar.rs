@@ -442,7 +442,36 @@ pub async fn sage_status(
     Ok(state.status.lock().await.clone())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// A writer-defined agent sent along with sage "custom".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomAgentPayload {
+    pub name: String,
+    pub instructions: String,
+    #[serde(rename = "canPaste")]
+    pub can_paste: bool,
+}
+
+/// Built-in sages need no payload; "custom" requires a valid one.
+fn check_sage(sage: &str, custom: Option<&CustomAgentPayload>) -> Result<(), String> {
+    match (sage, custom) {
+        ("em" | "sis" | "pra" | "cri", _) => Ok(()),
+        ("custom", Some(c)) => {
+            let n = c.name.trim().chars().count();
+            let i = c.instructions.trim().chars().count();
+            if !(1..=40).contains(&n) {
+                return Err("custom agent name must be 1 to 40 characters".into());
+            }
+            if !(1..=2000).contains(&i) {
+                return Err("custom agent instructions must be 1 to 2000 characters".into());
+            }
+            Ok(())
+        }
+        ("custom", None) => Err("custom sage requires a custom payload".into()),
+        _ => Err(format!("unknown sage: {sage}")),
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct InterrogateRequest<'a> {
     id: &'a str,
     #[serde(rename = "type")]
@@ -453,6 +482,8 @@ struct InterrogateRequest<'a> {
     /// defaults to "es" when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom: Option<&'a CustomAgentPayload>,
 }
 
 #[derive(Debug, Serialize)]
@@ -465,6 +496,8 @@ struct AskRequest<'a> {
     question: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom: Option<&'a CustomAgentPayload>,
 }
 
 #[derive(Debug, Serialize)]
@@ -487,6 +520,8 @@ struct CritiqueRequest<'a> {
     language: Option<&'a str>,
     #[serde(rename = "reviewerProfile", skip_serializing_if = "Option::is_none")]
     reviewer_profile: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom: Option<&'a CustomAgentPayload>,
 }
 
 #[derive(Debug, Serialize)]
@@ -510,10 +545,9 @@ pub async fn sage_interrogate(
     sage: String,
     text: String,
     language: Option<String>,
+    custom: Option<CustomAgentPayload>,
 ) -> Result<String, String> {
-    if !matches!(sage.as_str(), "em" | "sis" | "pra" | "cri") {
-        return Err(format!("unknown sage: {sage}"));
-    }
+    check_sage(&sage, custom.as_ref())?;
     if let Some(l) = language.as_deref() {
         if !matches!(l, "es" | "en") {
             return Err(format!("unknown language: {l}"));
@@ -526,6 +560,7 @@ pub async fn sage_interrogate(
         sage: &sage,
         text: &text,
         language: language.as_deref(),
+        custom: custom.as_ref(),
     };
     let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     line.push('\n');
@@ -553,10 +588,9 @@ pub async fn sage_ask(
     text: String,
     question: String,
     language: Option<String>,
+    custom: Option<CustomAgentPayload>,
 ) -> Result<String, String> {
-    if !matches!(sage.as_str(), "em" | "sis" | "pra" | "cri") {
-        return Err(format!("unknown sage: {sage}"));
-    }
+    check_sage(&sage, custom.as_ref())?;
     if let Some(l) = language.as_deref() {
         if !matches!(l, "es" | "en") {
             return Err(format!("unknown language: {l}"));
@@ -570,6 +604,7 @@ pub async fn sage_ask(
         text: &text,
         question: &question,
         language: language.as_deref(),
+        custom: custom.as_ref(),
     };
     let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     line.push('\n');
@@ -601,11 +636,18 @@ pub async fn sage_critique(
     fuentes: Option<serde_json::Value>,
     language: Option<String>,
     reviewer_profile: Option<String>,
+    custom: Option<CustomAgentPayload>,
 ) -> Result<String, String> {
-    if !matches!(sage.as_str(), "em" | "sis" | "pra" | "cri") {
-        return Err(format!("unknown sage: {sage}"));
-    }
-    if !matches!(
+    check_sage(&sage, custom.as_ref())?;
+    if sage == "custom" {
+        let ok = pase
+            .strip_prefix("custom:")
+            .map(|id| !id.is_empty())
+            .unwrap_or(false);
+        if !ok {
+            return Err(format!("unknown pase: {pase}"));
+        }
+    } else if !matches!(
         pase.as_str(),
         "coherencia" | "estilo" | "argumento" | "apa"
     ) {
@@ -627,6 +669,7 @@ pub async fn sage_critique(
         fuentes: fuentes.as_ref(),
         language: language.as_deref(),
         reviewer_profile: reviewer_profile.as_deref(),
+        custom: custom.as_ref(),
     };
     let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     line.push('\n');

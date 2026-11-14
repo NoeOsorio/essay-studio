@@ -23,20 +23,22 @@ import { Mark, mergeAttributes } from "@tiptap/core";
 import { closeHistory } from "@tiptap/pm/history";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { ReviewEvidence, ReviewProvenance } from "@/lib/storage/types";
+import type { AgentColorKey, Pase, ReviewEvidence, ReviewProvenance, Sage } from "@/lib/storage/types";
 import { identityOf } from "@/lib/agent-identity";
 
 export type AnnotationAttrs = {
   evidence?: ReviewEvidence[] | null;
   provenance?: ReviewProvenance | null;
   id: string | null;
-  sage: "em" | "sis" | "pra" | "cri" | null;
-  pase: "coherencia" | "estilo" | "argumento" | "apa" | null;
+  sage: Sage | null;
+  pase: Pase | null;
   severidad: "alta" | "media" | "baja" | null;
   mensaje: string | null;
   reemplazo: string | null;
   /** Optional id of the rubric criterio this annotation maps to. */
   criterioId: string | null;
+  /** Custom agents: color key saved with the mark, so its underline keeps the color. */
+  agentColor?: AgentColorKey | null;
 };
 
 // Transient visual effects on underlines (R4.3 draw and erase, R5.4
@@ -162,6 +164,12 @@ export const Annotation = Mark.create({
         default: null,
         parseHTML: (el) => readJsonAttribute(el, "data-provenance"),
         renderHTML: (attrs) => attrs.provenance ? { "data-provenance": JSON.stringify(attrs.provenance) } : {},
+      },
+      agentColor: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-color"),
+        renderHTML: (attrs) =>
+          attrs.agentColor ? { "data-color": String(attrs.agentColor) } : {},
       },
       criterioId: {
         default: null,

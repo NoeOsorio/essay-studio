@@ -1,7 +1,9 @@
-import { identityOf, type AuthorId } from "@/lib/agent-identity";
+import { identityOf, type AgentRecordHint, type AuthorId } from "@/lib/agent-identity";
 
 type AgentChipProps = {
   author: AuthorId;
+  /** Saved name and color of a custom agent, for records that outlive it. */
+  record?: AgentRecordHint;
   /** Show the name beside the icon. */
   showName?: boolean;
   size?: number;
@@ -13,12 +15,13 @@ type AgentChipProps = {
 /** Icon (and optionally the name) of an agent, drawn from `identityOf`. Never initials. */
 export function AgentChip({
   author,
+  record,
   showName = false,
   size = 16,
   badge,
   className = "",
 }: AgentChipProps) {
-  const id = identityOf(author);
+  const id = identityOf(author, record);
   const Icon = id.Icon;
   const inner = (
     <span

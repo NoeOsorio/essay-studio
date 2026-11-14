@@ -27,7 +27,7 @@ import { ALL_SAGES } from "@/lib/sages";
 import { markLanding } from "@/lib/canvas/note-motion";
 import { NOTE_WIDTH } from "@/components/ui/StickyNote";
 import { boundsOf, clearObstacles, common, ensureBoard, type Rect } from "@/lib/mcp/board";
-import type { Sage } from "@/lib/storage/types";
+import type { AgentColorKey, Sage } from "@/lib/storage/types";
 
 /** Space between the board content and the first column. */
 const EDGE_GAP = 56;
@@ -103,7 +103,8 @@ export function openLanding(editor: Editor, essayId: string, sages: Sage[], ownQ
   const anchorX = (rects.length > 0 ? common(rects).x + common(rects).w : viewport.x) + EDGE_GAP;
   const anchorY = viewport.y + CHIP_ROOM + (ownQuestion ? OWN_CHIP_ROOM : 0);
 
-  const ordered = ALL_SAGES.filter((s) => sages.includes(s));
+  // Built-ins in their fixed order, then custom agents in the order given.
+  const ordered: Sage[] = [...ALL_SAGES.filter((s) => sages.includes(s)), ...sages.filter((s) => !(ALL_SAGES as readonly Sage[]).includes(s))];
   const columns = new Map<Sage, number>();
   const nextY = new Map<Sage, number>();
   ordered.forEach((sage, i) => {
@@ -202,6 +203,9 @@ export type LandingNote = {
   text: string;
   title?: string;
   fuenteId?: string;
+  /** Custom agents only: name and color key saved on the note. */
+  agentName?: string;
+  agentColor?: AgentColorKey;
 };
 
 /**
@@ -245,6 +249,8 @@ export function placeNote(session: LandingSession, editor: Editor, note: Landing
           kind: "pregunta",
           createdAt: Date.now(),
           ...(note.title ? { title: note.title } : {}),
+          ...(note.agentName ? { agentName: note.agentName } : {}),
+          ...(note.agentColor ? { agentColor: note.agentColor } : {}),
           ...(note.fuenteId ? { fuenteId: note.fuenteId } : {}),
         },
       });

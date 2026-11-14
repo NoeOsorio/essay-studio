@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  CustomAgent,
   Essay,
   EssayMeta,
   LibraryEntry,
@@ -67,3 +68,13 @@ export type {
   SearchHit,
   Segment,
 } from "./types";
+
+/** Agents the writer made in Ajustes. */
+export async function listAgents(): Promise<CustomAgent[]> {
+  return invoke<CustomAgent[]>("agents_list");
+}
+
+/** Replaces the whole list. */
+export async function saveAgents(agents: CustomAgent[]): Promise<void> {
+  await invoke("agents_save", { agents });
+}

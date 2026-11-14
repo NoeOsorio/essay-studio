@@ -16,6 +16,7 @@ import { useStore } from "@/lib/store";
 import { useNativeMenuBridge } from "@/lib/menu/bridge";
 import { QuestionsPanel } from "@/components/questions/QuestionsPanel";
 import { QuestionRunPill } from "@/components/questions/QuestionRunPill";
+import { SettingsSheet } from "@/components/settings/SettingsSheet";
 import { installFileDropGuard } from "@/lib/fileDrop";
 
 /** Heartbeat interval for auto snapshots. 10min strikes the balance
@@ -27,6 +28,7 @@ export default function Page() {
   const boardOpen = useStore((s) => s.boardOpen);
   const flush = useStore((s) => s.flush);
   const loadList = useStore((s) => s.loadList);
+  const loadAgents = useStore((s) => s.loadAgents);
   const snapshotNow = useStore((s) => s.snapshotNow);
   const currentId = useStore((s) => s.current?.id ?? null);
 
@@ -44,7 +46,8 @@ export default function Page() {
   // Initial: load the essay list once the app boots.
   useEffect(() => {
     void loadList();
-  }, [loadList]);
+    void loadAgents();
+  }, [loadList, loadAgents]);
 
   // Best-effort flush on window close / unload.
   useEffect(() => {
@@ -120,6 +123,7 @@ export default function Page() {
       <RubricPanel />
       <SourcesPanel />
       <HistoryPanel />
+      <SettingsSheet />
     </>
   );
 }

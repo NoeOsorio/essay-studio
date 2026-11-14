@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { identityOf, type AuthorId } from "@/lib/agent-identity";
+import { identityOf, type AgentRecordHint, type AuthorId } from "@/lib/agent-identity";
 
 export const NOTE_WIDTH = 212;
 
@@ -20,6 +20,8 @@ export function tiltOf(id: string): number {
 
 type StickyNoteProps = {
   author: AuthorId;
+  /** Saved name and color of a custom agent whose note outlives it. */
+  record?: AgentRecordHint;
   title?: ReactNode;
   tilt?: number;
   tape?: boolean;
@@ -36,6 +38,7 @@ type StickyNoteProps = {
  */
 export function StickyNote({
   author,
+  record,
   title,
   tilt = 0,
   tape = true,
@@ -43,7 +46,7 @@ export function StickyNote({
   authorTestId,
   children,
 }: StickyNoteProps) {
-  const id = identityOf(author);
+  const id = identityOf(author, record);
   const Icon = id.Icon;
   const style: CSSProperties = {
     width,

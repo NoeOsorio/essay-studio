@@ -160,6 +160,7 @@ export function reopenCard(ids: string[]): void {
         mensaje: rec.mensaje,
         reemplazo: rec.reemplazo ?? null,
         criterioId: rec.criterioId ?? null,
+        ...(rec.agentColor ? { agentColor: rec.agentColor } : {}),
         evidence: rec.evidence ?? null,
         provenance: rec.provenance ?? null,
       })

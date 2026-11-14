@@ -11,30 +11,66 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import { Popover } from "@/components/ui/Popover";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useAnchor } from "@/components/ui/useAnchor";
-import { identityOf } from "@/lib/agent-identity";
-import { cancelReview, defaultReviewPases, dismissReview, startReview } from "@/lib/review/run";
+import { identityOf, type Identity } from "@/lib/agent-identity";
+import {
+  cancelReview,
+  capturedReviewAgent,
+  defaultReviewPases,
+  dismissReview,
+  isCustomPase,
+  runPases,
+  startReview,
+} from "@/lib/review/run";
 import { agentOfPase } from "@/components/review/useReviewResult";
 import { ALL_PASES } from "@/lib/sages";
 import { useStore } from "@/lib/store";
 import type { EssayMode, Pase } from "@/lib/storage/types";
 
-const PASE_LABEL: Record<Pase, string> = {
+const BUILTIN_LABEL = {
   coherencia: "Coherencia",
   estilo: "Estilo",
   argumento: "Argumento",
   apa: "Citas APA",
-};
+} as const;
 
 /** Tile tilt and tape tilt, copied from Paper R4.1. */
-const TILT: Record<Pase, { rotate: number; tape: number }> = {
+const BUILTIN_TILT = {
   coherencia: { rotate: 1.6, tape: 3 },
   estilo: { rotate: -2, tape: -4 },
   argumento: { rotate: 2.2, tape: -5 },
   apa: { rotate: -1, tape: -3 },
-};
+} as const;
+const CUSTOM_TILTS: readonly { rotate: number; tape: number }[] = [
+  { rotate: 1.2, tape: -3 },
+  { rotate: -1.6, tape: 4 },
+  { rotate: 2, tape: -4 },
+  { rotate: -1.2, tape: 3 },
+];
+
+/** Who a pass belongs to. A custom agent deleted mid-run keeps the name and color it started with. */
+function idOfPase(pase: Pase, mode: EssayMode): Identity {
+  const captured = capturedReviewAgent(pase);
+  return identityOf(
+    agentOfPase(pase, mode),
+    captured ? { agentName: captured.name, agentColor: captured.color } : undefined,
+  );
+}
+
+/** What the options and the progress lines call a pass: the check's name or the agent's. */
+function labelOfPase(pase: Pase, mode: EssayMode): string {
+  return isCustomPase(pase) ? idOfPase(pase, mode).name : BUILTIN_LABEL[pase as keyof typeof BUILTIN_LABEL];
+}
+
+function tiltOfPase(pase: Pase): { rotate: number; tape: number } {
+  if (!isCustomPase(pase)) return BUILTIN_TILT[pase as keyof typeof BUILTIN_TILT];
+  let h = 0;
+  for (const ch of pase) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return CUSTOM_TILTS[h % CUSTOM_TILTS.length];
+}
 
 function tooltipOf(pase: Pase, mode: EssayMode): string {
-  const who = identityOf(agentOfPase(pase, mode)).name;
+  const who = idOfPase(pase, mode).name;
+  if (pase.startsWith("custom:")) return `${who} revisa tu ensayo con lo que le pediste.`;
   switch (pase) {
     case "coherencia":
       return `${who} revisa que las ideas se sostengan entre sí.`;
@@ -42,13 +78,13 @@ function tooltipOf(pase: Pase, mode: EssayMode): string {
       return `${who} revisa que el texto se lea claro y preciso.`;
     case "argumento":
       return `${who} revisa que tus argumentos resistan una objeción.`;
-    case "apa":
+    default:
       return `${who} revisa que tus citas sigan APA.`;
   }
 }
 
 function PaseIcon({ pase, mode, size }: { pase: Pase; mode: EssayMode; size: number }) {
-  const Icon = identityOf(agentOfPase(pase, mode)).Icon;
+  const Icon = idOfPase(pase, mode).Icon;
   return <Icon size={size} />;
 }
 
@@ -122,8 +158,14 @@ function PanelBody({ onClose }: { onClose: () => void }) {
   );
   const [selected, setSelected] = useState<Pase[]>(() => defaultReviewPases());
 
-  const running = !!review && ALL_PASES.some((p) => review.passes[p].status === "running");
-  const available = ALL_PASES.filter((p) => p !== "apa" || mode === "academico");
+  const agents = useStore((s) => s.agents);
+  const running = !!review && runPases(review).some((p) => review.passes[p].status === "running");
+  const available: Pase[] = [
+    ...ALL_PASES.filter((p) => p !== "apa" || mode === "academico"),
+    ...agents
+      .filter((a) => a.does === "review" || a.does === "both")
+      .map((a): Pase => `custom:${a.id}`),
+  ];
   const chosen = selected.filter((p) => available.includes(p));
 
   // The review landed while this panel was open: the findings are in the
@@ -227,11 +269,11 @@ function Options({
         </button>
       </div>
 
-      <div className="flex gap-[10px] pb-[12px] pt-[18px]">
+      <div className="flex flex-wrap gap-x-[10px] gap-y-[16px] pb-[12px] pt-[18px]">
         {available.map((pase) => {
           const active = chosen.includes(pase);
-          const id = identityOf(agentOfPase(pase, mode));
-          const tilt = TILT[pase];
+          const id = idOfPase(pase, mode);
+          const tilt = tiltOfPase(pase);
           return (
             <Tooltip key={pase} label={tooltipOf(pase, mode)} side="top" sentence>
               <button
@@ -240,7 +282,7 @@ function Options({
                 data-active={active}
                 aria-pressed={active}
                 onClick={() => onToggle(pase)}
-                className="relative flex h-[76px] w-[80px] flex-none cursor-pointer flex-col items-center justify-center gap-[6px] rounded-[3px] pt-[6px] transition-transform duration-[120ms]"
+                className="relative flex h-[76px] min-w-[80px] flex-none px-[10px] cursor-pointer flex-col items-center justify-center gap-[6px] rounded-[3px] pt-[6px] transition-transform duration-[120ms]"
                 style={{
                   rotate: `${tilt.rotate}deg`,
                   background: active ? id.note : "var(--color-sheet)",
@@ -251,7 +293,9 @@ function Options({
                 }}
               >
                 <PaseIcon pase={pase} mode={mode} size={18} />
-                <span className="text-[13px] font-semibold leading-[16px]">{PASE_LABEL[pase]}</span>
+                <span className="max-w-[140px] truncate text-[13px] font-semibold leading-[16px]">
+                  {labelOfPase(pase, mode)}
+                </span>
                 <span
                   aria-hidden="true"
                   className="absolute left-[22px] top-[-8px] h-[14px] w-[36px]"
@@ -293,7 +337,7 @@ function RunningLines({
   review: NonNullable<ReturnType<typeof useStore.getState>["review"]>;
   mode: EssayMode;
 }) {
-  const lines = ALL_PASES.filter((p) => review.passes[p].status !== "idle");
+  const lines = runPases(review).filter((p) => review.passes[p].status !== "idle");
   return (
     <div className="flex flex-col gap-[16px] p-[20px]">
       <div role="status" className="text-[22px] font-semibold leading-[28px] text-ink-1">
@@ -302,7 +346,7 @@ function RunningLines({
       <div className="flex flex-col gap-[2px]">
         {lines.map((pase) => {
           const st = review.passes[pase];
-          const id = identityOf(agentOfPase(pase, mode));
+          const id = idOfPase(pase, mode);
           const Icon = id.Icon;
           const pct = st.status === "running" ? st.progress : st.status === "failed" ? 0 : 100;
           return (
@@ -318,15 +362,15 @@ function RunningLines({
               >
                 <Icon size={16} />
               </span>
-              <span className="w-[100px] flex-none text-[15px] font-medium leading-[20px] text-ink-1">
-                {PASE_LABEL[pase]}
+              <span className="w-[100px] flex-none truncate text-[15px] font-medium leading-[20px] text-ink-1">
+                {labelOfPase(pase, mode)}
               </span>
               <span
                 role="progressbar"
                 aria-valuenow={Math.round(pct)}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-label={PASE_LABEL[pase]}
+                aria-label={labelOfPase(pase, mode)}
                 className="flex h-[4px] grow rounded-full bg-shade"
               >
                 <span
@@ -371,13 +415,13 @@ function FailureLine({
 }) {
   const some = outcome.kind === "some_failed" ? (outcome as { failed: Pase[] }).failed : null;
   // All failed: retry what the run attempted (its passes keep their status).
-  const attempted = review ? ALL_PASES.filter((p) => review.passes[p].status !== "idle") : [];
+  const attempted = review ? runPases(review).filter((p) => review.passes[p].status !== "idle") : [];
   const retry = some ?? (attempted.length > 0 ? attempted : fallback);
 
   let lead: string;
   let tail: string | null = null;
   if (some) {
-    const names = some.map((p) => PASE_LABEL[p]);
+    const names = some.map((p) => labelOfPase(p, mode));
     const joined = names.length > 1 ? `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}` : names[0];
     lead = `${joined} ${names.length > 1 ? "no terminaron" : "no terminó"}.`;
   } else {
@@ -385,7 +429,7 @@ function FailureLine({
     tail = hadReview ? "Tu revisión anterior sigue igual." : null;
   }
   const first = some?.[0];
-  const id = first ? identityOf(agentOfPase(first, mode)) : null;
+  const id = first ? idOfPase(first, mode) : null;
   const Icon = id?.Icon;
 
   return (

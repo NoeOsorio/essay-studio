@@ -31,6 +31,9 @@ export async function installTauriStub(page: Page) {
     const held = new Set<string>();
 
     const essays = new Map<string, EssayLike>();
+    // Custom agents (agents.json on the native side), replaced whole on save.
+    let agentsStore: unknown[] = [];
+    type CustomArg = { name?: string; instructions?: string; canPaste?: boolean } | undefined;
     // Sesión 12: in-memory history per essay. Mirrors what `history.rs`
     // persists: append-only list of full Snapshot objects, keyed by
     // essay id. The stub's history_append also implements the retention
@@ -117,6 +120,14 @@ export async function installTauriStub(page: Page) {
       },
       invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
         switch (cmd) {
+          case "agents_list":
+            return JSON.parse(JSON.stringify(agentsStore));
+          case "agents_save": {
+            const list = args.agents;
+            if (!Array.isArray(list)) throw new Error("agents must be a list");
+            agentsStore = JSON.parse(JSON.stringify(list));
+            return null;
+          }
           case "essay_list": {
             const out = Array.from(essays.values()).map((e) => ({
               id: e.id,
@@ -359,6 +370,15 @@ export async function installTauriStub(page: Page) {
                 "3. ¿Qué supuestos ideológicos asume el autor sin examinar?",
               ],
             };
+            const customArg = args.custom as CustomArg;
+            if (sage === "custom") {
+              const who = customArg?.name ?? "Agente";
+              fakeAnswers.custom = [
+                `1. ¿Qué dirías, desde el foco de ${who}, que falta aquí?`,
+                `2. ¿Qué parte de esto cambiaría si miras con el foco de ${who}?`,
+                `3. ¿Qué te preguntaría ${who} sobre la fuente?`,
+              ];
+            }
             const fakeAnswer = fakeAnswers[sage] ?? fakeAnswers.em;
             // Per-agent behavior, set by a spec before the run:
             //   hold       stays open until sage_cancel ends it with CANCELLED
@@ -423,6 +443,7 @@ export async function installTauriStub(page: Page) {
                 text: string;
                 question: string;
                 language?: string;
+                custom?: CustomArg;
               };
             };
             winAsk.__E2E_LAST_ASK__ = {
@@ -430,6 +451,7 @@ export async function installTauriStub(page: Page) {
               text: String(args.text),
               question: String(args.question),
               language: args.language as string | undefined,
+              ...(args.custom ? { custom: args.custom as CustomArg } : {}),
             };
             queueMicrotask(() => {
               dispatchEvent("sage://event", { id, type: "started" });
@@ -461,6 +483,7 @@ export async function installTauriStub(page: Page) {
                   rubrica: RubricaPayload;
                   fuentes: FuentesPayload;
                   language?: string;
+                  custom?: CustomArg;
                 }
               >;
             };
@@ -472,6 +495,7 @@ export async function installTauriStub(page: Page) {
               rubrica: args.rubrica as RubricaPayload,
               fuentes: args.fuentes as FuentesPayload,
               language: args.language as string | undefined,
+              ...(args.custom ? { custom: args.custom as CustomArg } : {}),
             });
             // Pick three distinct anchors per pase so the three passes
             // each land on different ranges — otherwise the same span
@@ -576,6 +600,11 @@ export async function installTauriStub(page: Page) {
                 reemplazo: `${C} con cita`,
               },
             ];
+            // A custom agent proposes text to paste only when the writer allowed it.
+            const customCritique = args.custom as CustomArg;
+            if (sage === "custom" && !customCritique?.canPaste) {
+              for (const it of items) delete it.reemplazo;
+            }
             if (behavior === "unlocated") {
               items.length = 0;
               items.push({

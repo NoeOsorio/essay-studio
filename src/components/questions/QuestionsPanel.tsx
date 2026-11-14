@@ -156,7 +156,8 @@ function PanelBody({ onClose }: { onClose: () => void }) {
         label: source.label,
         text: source.text,
       },
-      sages: ALL_SAGES.filter((s) => on.includes(s)),
+      // Built-ins in their order, then custom agents in the order they were switched on.
+      sages: [...ALL_SAGES.filter((s) => on.includes(s)), ...on.filter((s) => !(ALL_SAGES as readonly Sage[]).includes(s))],
       ...(own.trim() ? { ownQuestion: own.trim() } : {}),
     });
     foldAway();

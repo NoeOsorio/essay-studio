@@ -30,8 +30,14 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // SubmenuBuilder::new — convention for macOS is that the first
     // submenu's title is the app name, even though macOS replaces it
     // visually with the actual product name.
+    let app_settings = MenuItemBuilder::new("Ajustes…")
+        .id("app:settings")
+        .accelerator("CmdOrCtrl+Comma")
+        .build(app)?;
     let app_submenu = SubmenuBuilder::new(app, "Essay Studio")
         .about(None)
+        .separator()
+        .item(&app_settings)
         .separator()
         .services()
         .separator()

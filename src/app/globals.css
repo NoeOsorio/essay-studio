@@ -169,6 +169,13 @@ html, body {
 .anno[data-by="sis"] { --anno-line: var(--color-sis-line); }
 .anno[data-by="pra"] { --anno-line: var(--color-pra-line); }
 .anno[data-by="cri"] { --anno-line: var(--color-cri-line); }
+/* Custom agents: the color key travels with the mark. */
+.anno[data-color="rosa"] { --anno-line: #E0567A; }
+.anno[data-color="durazno"] { --anno-line: #E07A3A; }
+.anno[data-color="lima"] { --anno-line: #7FA82A; }
+.anno[data-color="cielo"] { --anno-line: #2E9AC4; }
+.anno[data-color="arena"] { --anno-line: #B0915A; }
+.anno[data-color="gris"] { --anno-line: #8A8A82; }
 
 /* ---------------------------------------------------------
    Post-it with vintage tape

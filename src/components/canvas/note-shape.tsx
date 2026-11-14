@@ -21,10 +21,11 @@ import {
   type TLRichText,
 } from "tldraw";
 import { identityOf } from "@/lib/agent-identity";
+import type { AgentColorKey, CustomAgentId } from "@/lib/storage/types";
 import { NOTE_WIDTH, StickyNote, tiltOf } from "@/components/ui/StickyNote";
 import { consumeLanding, isLanding } from "@/lib/canvas/note-motion";
 
-export type PostItAuthor = "tu" | "em" | "sis" | "pra" | "cri";
+export type PostItAuthor = "tu" | "em" | "sis" | "pra" | "cri" | CustomAgentId;
 export type PostItKind =
   | "concepto"
   | "pregunta"
@@ -45,6 +46,9 @@ export type PostItMeta = {
   title?: string;
   /** Saved source a landed question came from. */
   fuenteId?: string;
+  /** Custom agents only: name and color key saved at creation. */
+  agentName?: string;
+  agentColor?: AgentColorKey;
 };
 
 // Paper R2.1: 22 top padding, 16 header, 10 gap, 20 bottom padding; 18 sides.
@@ -224,7 +228,7 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
 
   override toSvg(shape: TLNoteShape, ctx: Parameters<NoteShapeUtil["toSvg"]>[1]) {
     const meta = shape.meta as PostItMeta;
-    const id = identityOf(meta.author);
+    const id = identityOf(meta.author, meta);
     const title = titleOf(shape);
     const style = getComputedStyle(document.documentElement);
     const resolve = (value: string) => {
@@ -305,7 +309,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
     [editor, shape],
   );
 
-  const id = identityOf((shape.meta as PostItMeta).author);
+  const id = identityOf((shape.meta as PostItMeta).author, shape.meta as PostItMeta);
   const title = titleOf(shape);
   const tilt = shape.rotation === 0 ? tiltOf(shape.id) : 0;
   const { richText } = shape.props;
@@ -353,7 +357,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
             boxShadow: "#3C2D0A59 0 18px 24px -10px",
           }}
         />
-        <StickyNote author={id.id} authorTestId="note-author">
+        <StickyNote author={id.id} record={shape.meta as PostItMeta} authorTestId="note-author">
           <div style={{ display: "flex", flexDirection: "column", gap: TITLE_GAP, minHeight: height - PAD_TOP - HEADER - GAP - PAD_BOTTOM }}>
             {isEditing ? (
               <NoteTitleField editor={editor} shape={shape} title={title} fieldRef={titleRef} />

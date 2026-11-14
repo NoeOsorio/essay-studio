@@ -13,6 +13,7 @@ import { selectSourcesForReview } from "@/lib/materials/review-budget";
 import type {
   Anotacion,
   Criterio,
+  CustomAgent,
   EssayLanguage,
   Fuente,
   Pase,
@@ -54,6 +55,15 @@ export async function cancelSidecarRequest(id: string): Promise<void> {
     // Nothing to cancel when the sidecar is gone; the run already ended.
     console.warn("sage_cancel failed", err);
   }
+}
+
+/** The wire form of a custom agent: what the sidecar needs, nothing else. */
+function customPayload(agent: CustomAgent) {
+  return {
+    name: agent.name,
+    instructions: agent.instructions,
+    canPaste: agent.does !== "ask" && agent.canPaste,
+  };
 }
 
 function newId(): string {
@@ -170,7 +180,10 @@ function runSidecarCommand(args: {
  * arrive as `question` updates; the renderer never parses model text.
  */
 export async function interrogate(args: {
+  /** Ignored when `custom` is given: the wire sage is then "custom". */
   sage: Sage;
+  /** A custom agent: sends sage "custom" plus its instructions. */
+  custom?: CustomAgent;
   text: string;
   /** Output language. Defaults to "es". */
   language?: EssayLanguage;
@@ -184,7 +197,8 @@ export async function interrogate(args: {
     command: "sage_interrogate",
     args: {
       id,
-      sage: args.sage,
+      sage: args.custom ? "custom" : args.sage,
+      ...(args.custom ? { custom: customPayload(args.custom) } : {}),
       text: args.text,
       ...(args.language ? { language: args.language } : {}),
     },
@@ -200,7 +214,9 @@ export async function interrogate(args: {
  */
 export async function ask(args: {
   requestId?: string;
+  /** Ignored when `custom` is given: the wire sage is then "custom". */
   sage: Sage;
+  custom?: CustomAgent;
   text: string;
   question: string;
   language?: EssayLanguage;
@@ -211,7 +227,8 @@ export async function ask(args: {
     command: "sage_ask",
     args: {
       id,
-      sage: args.sage,
+      sage: args.custom ? "custom" : args.sage,
+      ...(args.custom ? { custom: customPayload(args.custom) } : {}),
       text: args.text,
       question: args.question,
       ...(args.language ? { language: args.language } : {}),
@@ -229,8 +246,11 @@ export async function ask(args: {
  * annotations anchored against the essay's plain text.
  */
 export async function critique(args: {
+  /** Ignored when `custom` is given: the wire sage is then "custom". */
   sage: Sage;
+  /** Ignored when `custom` is given: the wire pase is then `custom:<id>`. */
   pase: Pase;
+  custom?: CustomAgent;
   text: string;
   /** Optional rubric criterios — forwarded to the sage. */
   rubrica?: Criterio[];
@@ -267,8 +287,9 @@ export async function critique(args: {
     command: "sage_critique",
     args: {
       id,
-      sage: args.sage,
-      pase: args.pase,
+      sage: args.custom ? "custom" : args.sage,
+      pase: args.custom ? `custom:${args.custom.id}` : args.pase,
+      ...(args.custom ? { custom: customPayload(args.custom) } : {}),
       text: args.text,
       ...(rubricaPayload ? { rubrica: rubricaPayload } : {}),
       ...(fuentesPayload ? { fuentes: fuentesPayload } : {}),

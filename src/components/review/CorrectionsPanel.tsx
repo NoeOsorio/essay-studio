@@ -91,7 +91,7 @@ function CriterionChip({
 function ResolvedRow({ card }: { card: SentenceCard }) {
   const [open, setOpen] = useState(false);
   const view = card.findings[0];
-  const id = identityOf(view.sage);
+  const id = identityOf(view.sage, view);
   const Icon = id.Icon;
   if (open) {
     return (
@@ -129,7 +129,7 @@ function ResolvedLine({
   quote: string;
   icon?: React.ReactNode;
 }) {
-  const id = identityOf(view.sage);
+  const id = identityOf(view.sage, view);
   const Icon = id.Icon;
   return (
     <span className="flex h-[42px] items-center gap-[10px] rounded-[10px] px-[12px]">

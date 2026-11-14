@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 
 import { computeBenchmark, type BenchmarkResult } from "@/lib/benchmark/score";
-import type { Pase } from "@/lib/storage/types";
+import type { CustomAgentId, Pase, Sage } from "@/lib/storage/types";
 import { deriveFindings, openForScore, type FindingView } from "@/lib/review/findings";
 import { reviewFingerprint } from "@/lib/review/fingerprint";
 import { useStore } from "@/lib/store";
@@ -21,7 +21,8 @@ export type ReviewReading = {
 };
 
 /** Who owns each pass: the agent shown for it. */
-export function agentOfPase(pase: Pase, mode: "academico" | "blog"): "em" | "sis" | "pra" | "cri" {
+export function agentOfPase(pase: Pase, mode: "academico" | "blog"): Sage {
+  if (pase.startsWith("custom:")) return pase.slice("custom:".length) as CustomAgentId;
   if (pase === "coherencia") return "sis";
   if (pase === "argumento") return "cri";
   if (pase === "apa") return "em";

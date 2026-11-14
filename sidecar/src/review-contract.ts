@@ -1,7 +1,10 @@
 /** Browser-safe production/benchmark contract. Source text is data, never instructions. */
 export type Sage = "em" | "sis" | "pra" | "cri";
 export type Pase = "coherencia" | "estilo" | "argumento" | "apa";
+export type CustomPase = `custom:${string}`;
 export type Language = "es" | "en";
+/** A user-defined agent. The sidecar never reads a prompt file for it. */
+export type CustomAgentSpec = { name: string; instructions: string; canPaste: boolean };
 export type Criterio = { id: string; nombre: string; peso: number; descripcion: string };
 export type EvidenceSource = { id: string; contenido: string };
 /** `recortada`: only a prefix of the source was sent, so evidence offsets stay valid but the end is unseen. */
@@ -18,9 +21,9 @@ export type ReviewProvenance = {
   startedAt: string; tools: string[]; settingSources: string[];
   modelUsage?: unknown; cliVersion?: string; authMode?: string;
 };
-export type InterrogationRequest = { id: string; type: "interrogate"; sage: Sage; text: string; language?: Language; reviewerProfile?: string };
-export type CritiqueRequest = { id: string; type: "critique"; sage: Sage; pase: Pase; text: string; language?: Language; rubrica?: Criterio[]; fuentes?: Fuente[]; reviewerProfile?: string };
-export type AskRequest = { id: string; type: "ask"; sage: Sage; text: string; question: string; language?: Language; reviewerProfile?: string };
+export type InterrogationRequest = { id: string; type: "interrogate"; sage: Sage | "custom"; custom?: CustomAgentSpec; text: string; language?: Language; reviewerProfile?: string };
+export type CritiqueRequest = { id: string; type: "critique"; sage: Sage | "custom"; custom?: CustomAgentSpec; pase: Pase | CustomPase; text: string; language?: Language; rubrica?: Criterio[]; fuentes?: Fuente[]; reviewerProfile?: string };
+export type AskRequest = { id: string; type: "ask"; sage: Sage | "custom"; custom?: CustomAgentSpec; text: string; question: string; language?: Language; reviewerProfile?: string };
 /** Reads material (a citation from a source, criteria from an assignment). No persona, no `sage`. */
 export type ExtractTask = "citation" | "rubric";
 export type ExtractRequest = { id: string; type: "extract"; task: ExtractTask; text: string; reviewerProfile?: string };
@@ -84,11 +87,21 @@ function assertCommon(r: Record<string, unknown>): void {
     || (r.reviewerProfile !== undefined && typeof r.reviewerProfile !== "string")) throw invalid("Invalid review request fields.");
 }
 function assertSage(r: Record<string, unknown>): void {
-  if (!SAGES.includes(String(r.sage))) throw invalid("Invalid review request fields.");
+  if (r.sage === "custom") {
+    const c = r.custom as Record<string, unknown> | undefined;
+    if (!c || typeof c !== "object" || typeof c.name !== "string" || typeof c.instructions !== "string" || typeof c.canPaste !== "boolean") throw invalid("Invalid custom agent.");
+    const name = c.name.trim().length, instructions = c.instructions.trim().length;
+    if (name < 1 || name > 40 || instructions < 1 || instructions > 2000) throw invalid("Invalid custom agent.");
+    return;
+  }
+  if (r.custom !== undefined || !SAGES.includes(String(r.sage))) throw invalid("Invalid review request fields.");
 }
 
 function assertCritique(r: Record<string, unknown>): void {
-  if (!["coherencia", "estilo", "argumento", "apa"].includes(String(r.pase))) throw invalid("Invalid review pass.");
+  const isCustomPase = typeof r.pase === "string" && /^custom:.+/.test(r.pase);
+  // Custom passes belong to custom agents only, and custom agents run only custom passes.
+  if (isCustomPase !== (r.sage === "custom")) throw invalid("Invalid review pass.");
+  if (!isCustomPase && !["coherencia", "estilo", "argumento", "apa"].includes(String(r.pase))) throw invalid("Invalid review pass.");
   if (r.fuentes !== undefined) {
     if (!Array.isArray(r.fuentes)) throw invalid("Invalid sources.");
     const ids = new Set<string>();

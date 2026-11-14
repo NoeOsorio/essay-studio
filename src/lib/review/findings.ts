@@ -37,6 +37,9 @@ export type FindingView = {
   evidence?: FindingRecord["evidence"];
   provenance?: FindingRecord["provenance"];
   generadoEn?: string;
+  /** Custom agents: name and color saved on the record, for `identityOf(sage, view)`. */
+  agentName?: FindingRecord["agentName"];
+  agentColor?: FindingRecord["agentColor"];
   /** Never `not_applicable`: those are hidden from the list. */
   status: Exclude<FindingStatus, "not_applicable">;
   closedAt?: string;
@@ -215,6 +218,8 @@ export function deriveFindings(
       evidence: rec?.evidence ?? (Array.isArray(a.evidence) ? (a.evidence as FindingView["evidence"]) : undefined),
       provenance: rec?.provenance ?? (a.provenance && typeof a.provenance === "object" ? (a.provenance as FindingView["provenance"]) : undefined),
       generadoEn: rec?.generadoEn,
+      agentName: rec?.agentName,
+      agentColor: rec?.agentColor,
       // Presence wins: a mark in the document is always open.
       status: "open",
       occurrence: rec?.occurrence,
@@ -254,6 +259,8 @@ export function deriveFindings(
       evidence: r.evidence,
       provenance: r.provenance,
       generadoEn: r.generadoEn,
+      agentName: r.agentName,
+      agentColor: r.agentColor,
       status: r.status === "resolved" ? "resolved" : "open",
       closedAt: r.closedAt,
       closedBy: r.closedBy,

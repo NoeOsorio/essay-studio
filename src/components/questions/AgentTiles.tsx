@@ -5,7 +5,8 @@
 // and its tooltip says in one sentence what that agent asks.
 
 import { Tooltip } from "@/components/ui/Tooltip";
-import { AGENTS, type AgentId } from "@/lib/agent-identity";
+import { AGENTS, identityOf, type AgentId } from "@/lib/agent-identity";
+import { useStore } from "@/lib/store";
 import type { Sage } from "@/lib/storage/types";
 
 export type AgentTilesProps = {
@@ -22,17 +23,30 @@ const TILT: Record<AgentId, { rotate: number; tape: number }> = {
   cri: { rotate: 2.2, tape: -5 },
 };
 
+/** Custom tiles cycle through these tilts, so a long row never looks ruled. */
+const CUSTOM_TILT = [
+  { rotate: 1.2, tape: 4 },
+  { rotate: -1.6, tape: -3 },
+  { rotate: 2, tape: 3 },
+  { rotate: -2.4, tape: -4 },
+];
+
 const SHADOW = "#3C2D0A14 0 1px 1px, #3C2D0A40 0 8px 14px -8px";
 const SHADOW_LIFTED = "#3C2D0A14 0 1px 1px, #3C2D0A59 0 12px 18px -8px";
 
 export function AgentTiles({ on, onToggle, disabled }: AgentTilesProps) {
+  const agents = useStore((s) => s.agents);
+  // Agents that only review never appear here.
+  const asking = agents.filter((a) => a.does !== "review");
   return (
     <div className="flex flex-col gap-[12px] pt-[4px]">
-      <div className="flex gap-[10px] pt-[6px]" data-testid="lectura-sage-selector">
-        {AGENTS.map((agent) => {
-          const id = agent.id as AgentId;
+      <div className="flex flex-wrap gap-x-[10px] gap-y-[14px] pt-[6px]" data-testid="lectura-sage-selector">
+        {[
+          ...AGENTS.map((a, i) => ({ id: a.id as Sage, tilt: TILT[a.id as AgentId], i })),
+          ...asking.map((a, i) => ({ id: a.id as Sage, tilt: CUSTOM_TILT[i % CUSTOM_TILT.length], i })),
+        ].map(({ id, tilt }) => {
+          const agent = identityOf(id);
           const active = on.includes(id);
-          const tilt = TILT[id];
           const Icon = agent.Icon;
           return (
             <Tooltip key={id} label={agent.asks} side="top" sentence>
@@ -55,7 +69,7 @@ export function AgentTiles({ on, onToggle, disabled }: AgentTilesProps) {
                 }}
               >
                 <Icon size={18} />
-                <span className="text-[13px] font-semibold leading-[16px]">{agent.name}</span>
+                <span className="max-w-[72px] truncate text-[13px] font-semibold leading-[16px]">{agent.name}</span>
                 <span
                   aria-hidden="true"
                   className="absolute"

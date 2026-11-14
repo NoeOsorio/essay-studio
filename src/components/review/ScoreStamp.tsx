@@ -12,8 +12,7 @@ import { Stamp } from "@/components/review/Stamp";
 import { useReviewReading } from "@/components/review/useReviewResult";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useRegisterAnchor } from "@/components/ui/useAnchor";
-import { startReview } from "@/lib/review/run";
-import { defaultPasesForMode } from "@/lib/sages";
+import { defaultReviewPases, startReview } from "@/lib/review/run";
 import { useStore } from "@/lib/store";
 
 type View = null | { kind: "report" } | { kind: "corrections"; criterioId: string | null };
@@ -21,7 +20,6 @@ type View = null | { kind: "report" } | { kind: "corrections"; criterioId: strin
 export function ScoreStamp() {
   const reading = useReviewReading();
   const essayId = useStore((s) => s.current?.id ?? null);
-  const mode = useStore((s) => s.current?.mode ?? "academico");
   const running = useStore(
     (s) =>
       s.review !== null &&
@@ -101,7 +99,7 @@ export function ScoreStamp() {
         onCriterioChange={(criterioId) => setView({ kind: "corrections", criterioId })}
         onReview={() => {
           setView(null);
-          startReview(defaultPasesForMode(mode));
+          startReview(defaultReviewPases());
         }}
       />
     </>

@@ -25,7 +25,7 @@ import {
   type FailureKind,
   type QuestionRun,
 } from "@/lib/store";
-import type { Interrogatorio, Sage } from "@/lib/storage/types";
+import type { CustomAgent, Interrogatorio, Sage } from "@/lib/storage/types";
 import { MAX_QUESTION_CHARS, QUESTIONS_PER_AGENT, sourceFits } from "../../../sidecar/src/review-contract";
 import { beginLanding, endLanding, land, type LandingSession } from "./landing";
 
@@ -75,6 +75,8 @@ type Active = {
   startedAt: string;
   view: QuestionRun;
   tasks: Map<Sage, Task>;
+  /** Custom agents in this run, captured at start: a rename or delete later changes nothing here. */
+  customs: Map<Sage, CustomAgent>;
   ownTask: OwnTask | null;
   session: Promise<LandingSession>;
   sessionRef: LandingSession | null;
@@ -126,7 +128,13 @@ export function startQuestionRun(input: { source: QuestionSource; sages: Sage[];
   if (!essay || state.view !== "editor") return;
   const running = state.questionRun;
   if (running && running.status !== "ended") return;
-  const sages = ALL_SAGES.filter((s) => input.sages.includes(s));
+  // Built-ins in their fixed order, then the custom agents that ask, in the order given.
+  const customs = new Map<Sage, CustomAgent>();
+  for (const s of input.sages) {
+    const found = state.agents.find((a) => a.id === s);
+    if (found && found.does !== "review" && !customs.has(s)) customs.set(s, found);
+  }
+  const sages: Sage[] = [...ALL_SAGES.filter((s) => input.sages.includes(s)), ...customs.keys()];
   const text = input.source.text;
   if (sages.length === 0 || text.trim().length === 0 || !sourceFits(text)) return;
   // The writer's own question is answered by Evidencia, or by the first agent that is on.
@@ -158,6 +166,7 @@ export function startQuestionRun(input: { source: QuestionSource; sages: Sage[];
         { sage, requestId: null, terminal: false, completed: false, slots: QUESTIONS_PER_AGENT, seen: new Set<string>(), pending: 0, attempt: 0 },
       ]),
     ),
+    customs,
     ownTask: question
       ? { sage: answerer, question, requestId: null, terminal: false, completed: false, pending: 0, attempt: 0 }
       : null,
@@ -224,8 +233,10 @@ function startOwn(run: Active): void {
   task.completed = false;
 
   // The source is the one he chose and nothing else: no essay, no other sources.
+  const custom = run.customs.get(task.sage);
   ask({
     sage: task.sage,
+    ...(custom ? { custom } : {}),
     text: run.source.text,
     question: task.question,
     language: run.language,
@@ -279,8 +290,10 @@ function startTask(run: Active, sage: Sage): void {
   task.terminal = false;
   task.completed = false;
 
+  const custom = run.customs.get(sage);
   interrogate({
     sage,
+    ...(custom ? { custom } : {}),
     text: run.source.text,
     language: run.language,
     requestId,
@@ -339,8 +352,10 @@ async function drain(run: Active): Promise<void> {
       try {
         const session = await run.session;
         if (run.halted || active !== run) break;
+        const custom = run.customs.get(job.sage);
         const id = await land(session, {
           sage: job.sage,
+          ...(custom ? { agentName: custom.name, agentColor: custom.color } : {}),
           text: job.text,
           ...(own ? { title: job.question } : {}),
           ...(run.source.fuenteId ? { fuenteId: run.source.fuenteId } : {}),
@@ -580,7 +595,7 @@ export function attachRunToEditor(editor: Editor): void {
  */
 function rebuildEntries(run: Active): void {
   const entries: Interrogatorio[] = [];
-  for (const sage of ALL_SAGES) {
+  for (const sage of [...ALL_SAGES, ...run.customs.keys()]) {
     const questions = [...run.known.values()]
       .filter((k) => k.sage === sage && k.present && k.question === undefined)
       .sort((a, b) => a.order - b.order)

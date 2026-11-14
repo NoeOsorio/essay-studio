@@ -28,8 +28,11 @@ import {
 import { DEFAULT_REVIEWER_PROFILE, REVIEWER_PROFILES } from "../../../sidecar/src/model-profiles";
 import type { AnnotationAttrs } from "@/components/editor/extensions/Annotation";
 import type {
+  AgentColorKey,
   Anotacion,
   Criterio,
+  CustomAgent,
+  CustomAgentId,
   EssayMode,
   FindingRecord,
   Pase,
@@ -37,8 +40,17 @@ import type {
   Sage,
 } from "@/lib/storage/types";
 
+/** `custom:<agent id>` passes belong to the agent whose id follows the prefix. */
+export function isCustomPase(pase: Pase): pase is `custom:${string}` {
+  return pase.startsWith("custom:");
+}
+export function customAgentOfPase(pase: `custom:${string}`): CustomAgentId {
+  return pase.slice("custom:".length) as CustomAgentId;
+}
+
 /** The agent that owns each pass. Estilo rotates with the essay type. */
 export function sageForPase(pase: Pase, mode: EssayMode): Sage {
+  if (isCustomPase(pase)) return customAgentOfPase(pase);
   switch (pase) {
     case "coherencia":
       return "sis";
@@ -64,6 +76,8 @@ type PassResult =
   | { kind: "canceled" };
 
 type ActiveRun = {
+  /** Custom agents of this run, captured at start: a deleted or renamed agent still finishes as it began. */
+  agents: Map<Pase, CustomAgent>;
   essayId: string;
   restoreNonce: number;
   canceled: boolean;
@@ -82,9 +96,27 @@ function idlePass(): ReviewPassState {
   return { status: "idle", progress: 0, requestId: null };
 }
 
+/** The passes of a run: the four checks that took part first, then the custom agents in the order they started. */
+export function runPases(run: ReviewRun): Pase[] {
+  const custom = (Object.keys(run.passes) as Pase[]).filter(isCustomPase);
+  return [...ALL_PASES, ...custom];
+}
+
 function isRunning(): boolean {
   const run = useStore.getState().review;
-  return !!run && ALL_PASES.some((p) => run.passes[p].status === "running");
+  return !!run && runPases(run).some((p) => run.passes[p].status === "running");
+}
+
+/** Agents that reviewed in a past run, so Reintentar still works if one was deleted since. */
+const capturedAgents = new Map<Pase, CustomAgent>();
+
+/** The agent a custom pass ran with, as captured when it started. Undefined for the four checks. */
+export function capturedReviewAgent(pase: Pase): CustomAgent | undefined {
+  return capturedAgents.get(pase);
+}
+
+function reviewsEssay(a: CustomAgent): boolean {
+  return a.does === "review" || a.does === "both";
 }
 
 /**
@@ -92,7 +124,7 @@ function isRunning(): boolean {
  * again for the failed passes only (Reintentar): coverage and fingerprints
  * are merged by `commitReview`.
  */
-export function startReview(pases: Pase[]): void {
+export function startReview(pases: Pase[], customAgents?: CustomAgent[]): void {
   const state = useStore.getState();
   const essay = state.current;
   if (!essay || pases.length === 0 || isRunning()) return;
@@ -107,20 +139,32 @@ export function startReview(pases: Pase[]): void {
   // A previous run's leftovers (settled panel state) are replaced.
   active?.unregister();
 
-  const wanted = ALL_PASES.filter((p) => pases.includes(p));
+  // Custom agents: the ones given, else the saved ones, else the ones a past
+  // run captured (a Reintentar after the agent was deleted).
+  const pool = customAgents ?? state.agents;
+  const agents = new Map<Pase, CustomAgent>();
+  for (const p of pases) {
+    if (!isCustomPase(p)) continue;
+    const id = customAgentOfPase(p);
+    const found = pool.find((a) => a.id === id && reviewsEssay(a)) ?? capturedAgents.get(p);
+    if (found) agents.set(p, structuredClone(found));
+  }
+  for (const [p, a] of agents) capturedAgents.set(p, a);
+
+  const builtIn = ALL_PASES.filter((p) => pases.includes(p));
+  const wanted: Pase[] = [...builtIn, ...pases.filter((p) => agents.has(p))];
+  if (wanted.length === 0) return;
   const requestIds: Partial<Record<Pase, string>> = {};
   const passes = {} as Record<Pase, ReviewPassState>;
-  for (const p of ALL_PASES) {
-    if (wanted.includes(p)) {
-      requestIds[p] = crypto.randomUUID();
-      passes[p] = { status: "running", progress: 0, requestId: requestIds[p] ?? null };
-    } else {
-      passes[p] = idlePass();
-    }
+  for (const p of ALL_PASES) passes[p] = idlePass();
+  for (const p of wanted) {
+    requestIds[p] = crypto.randomUUID();
+    passes[p] = { status: "running", progress: 0, requestId: requestIds[p] ?? null };
   }
 
   const fingerprint = reviewFingerprint(essay);
   const run: ActiveRun = {
+    agents,
     essayId: essay.id,
     restoreNonce: state.restoreNonce,
     canceled: false,
@@ -163,8 +207,10 @@ export function startReview(pases: Pase[]): void {
         if (active === run) useStore.getState().patchReviewPass(pase, { progress });
       };
       try {
+        const custom = agents.get(pase);
         const { result, provenance, fuentesOmitidas } = await critique({
           sage: sageForPase(pase, mode),
+          ...(custom ? { custom } : {}),
           pase,
           text,
           rubrica: rubrica?.criterios,
@@ -239,8 +285,11 @@ export function dismissReview(): void {
 
 /** Pases a Volver a revisar runs: the defaults for the open essay's type. */
 export function defaultReviewPases(): Pase[] {
-  const mode = useStore.getState().current?.mode ?? "academico";
-  return defaultPasesForMode(mode);
+  const { current, agents } = useStore.getState();
+  const custom = agents
+    .filter((a) => reviewsEssay(a) && a.defaultOn)
+    .map((a): Pase => `custom:${a.id}`);
+  return [...defaultPasesForMode(current?.mode ?? "academico"), ...custom];
 }
 
 function abortRequests(run: ActiveRun): void {
@@ -305,7 +354,7 @@ async function settle(run: ActiveRun, results: Map<Pase, PassResult>): Promise<v
     return;
   }
   const editor = getDocumentEditor(run.essayId);
-  applyReview(editor, results, returned);
+  applyReview(editor, results, returned, run.agents);
   const after = useStore.getState();
   // Every pass reads the same text and sources, so the first one that
   // returned says which sources were left out.
@@ -379,6 +428,8 @@ export type PassFindings = {
   /** Lines the reviewer returned that could not be read. A pass with any is partial. */
   invalid: number;
   provenance?: ReviewProvenance;
+  /** Custom agents only: name and color as of the run, saved on each finding. */
+  agent?: { name: string; color: AgentColorKey };
 };
 
 /**
@@ -394,12 +445,15 @@ export function prepareAnotaciones(args: {
   provenance?: ReviewProvenance;
   corpus: string;
   generadoEn: string;
+  /** A custom pass keeps its replacements only when the agent may paste text. */
+  canPaste?: boolean;
 }): Anotacion[] {
   const sage = sageForPase(args.pase, args.mode);
   return args.raw.map((raw) => {
     const a = buildAnotacion(raw, sage, args.pase, args.generadoEn, args.criterios, args.provenance);
-    if (NO_REEMPLAZO_PASES.has(args.pase)) a.reemplazo = undefined;
-    else if (a.reemplazo) {
+    if (NO_REEMPLAZO_PASES.has(args.pase) || (isCustomPase(args.pase) && !args.canPaste)) {
+      a.reemplazo = undefined;
+    } else if (a.reemplazo) {
       a.reemplazo = replacementIsGrounded(a.reemplazo, args.corpus)
         ? matchFirstLetterCase(a.reemplazo, a.cita)
         : undefined;
@@ -418,6 +472,7 @@ function applyReview(
   editor: Editor,
   results: Map<Pase, PassResult>,
   returned: Pase[],
+  agents: Map<Pase, CustomAgent>,
 ): void {
   const store = useStore.getState();
   const cur = store.current;
@@ -429,10 +484,12 @@ function applyReview(
   for (const pase of returned) {
     const r = results.get(pase);
     if (r?.kind !== "ok") continue;
+    const agent = agents.get(pase);
     passes.push({
       pase,
       invalid: r.invalid,
       provenance: r.provenance,
+      ...(agent ? { agent: { name: agent.name, color: agent.color } } : {}),
       anotaciones: prepareAnotaciones({
         raw: r.raw,
         pase,
@@ -441,6 +498,7 @@ function applyReview(
         provenance: r.provenance,
         corpus,
         generadoEn,
+        canPaste: agent?.canPaste === true,
       }),
     });
   }
@@ -486,7 +544,7 @@ export function writeReviewFindings(
   const seen = new Map<string, number>();
   const records: FindingRecord[] = [];
   const addMarks: { from: number; to: number; attrs: AnnotationAttrs }[] = [];
-  for (const { pase, anotaciones } of passes) {
+  for (const { pase, anotaciones, agent } of passes) {
     for (const a of anotaciones) {
       const sage = a.sage;
       const key = a.cita;
@@ -509,6 +567,7 @@ export function writeReviewFindings(
         ...(a.criterioId ? { criterioId: a.criterioId } : {}),
         ...(a.evidence ? { evidence: a.evidence } : {}),
         ...(a.provenance ? { provenance: a.provenance } : {}),
+        ...(agent ? { agentName: agent.name, agentColor: agent.color } : {}),
         generadoEn,
         status: "open",
         ...(range ? { occurrence: skip } : {}),
@@ -525,6 +584,7 @@ export function writeReviewFindings(
             mensaje: a.mensaje,
             reemplazo: a.reemplazo ?? null,
             criterioId: a.criterioId ?? null,
+            ...(agent ? { agentColor: agent.color } : {}),
             evidence: a.evidence ?? null,
             provenance: a.provenance ?? null,
           },

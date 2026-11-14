@@ -207,3 +207,70 @@ export function GlyphTu({ size }: GlyphProps) {
     </>,
   );
 }
+
+/* Glyphs for the agents the writer makes. Same 16 px grid and stroke as above. */
+
+/** Spelling: an A with a check. */
+export function GlyphOrtografia({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M2.4 11.2L5.6 3.6l3.2 7.6M3.5 8.8h4.2" />
+      <path d="M9.6 11.2l1.8 1.8 3-3.6" />
+    </>,
+  );
+}
+
+/** Pen. */
+export function GlyphPluma({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M10.8 2.8l2.4 2.4-7.4 7.4-3.2.8.8-3.2z" />
+      <path d="M9.2 4.4l2.4 2.4" />
+    </>,
+  );
+}
+
+/** Book. */
+export function GlyphLibro({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M8 4.2C6.8 3.2 5 2.8 2.6 3v8.8c2.4-.2 4.2.2 5.4 1.2 1.2-1 3-1.4 5.4-1.2V3c-2.4-.2-4.2.2-5.4 1.2z" />
+      <path d="M8 4.2V13" />
+    </>,
+  );
+}
+
+/** Quote marks. */
+export function GlyphCita({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M3 9.6V8c0-2.2 1-3.4 2.8-3.8M3 9.6h2.8V12H3z" />
+      <path d="M9.2 9.6V8c0-2.2 1-3.4 2.8-3.8M9.2 9.6H12V12H9.2z" />
+    </>,
+  );
+}
+
+/** List. */
+export function GlyphLista({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M6.2 4.4h7M6.2 8h7M6.2 11.6h7" />
+      <path d="M2.8 4.4h.01M2.8 8h.01M2.8 11.6h.01" />
+    </>,
+  );
+}
+
+/** Spark. */
+export function GlyphChispa({ size }: GlyphProps) {
+  return glyph(
+    size,
+    <>
+      <path d="M8 2.2c.5 3.4 1.6 4.5 5 5-3.4.5-4.5 1.6-5 5-.5-3.4-1.6-4.5-5-5 3.4-.5 4.5-1.6 5-5z" />
+    </>,
+  );
+}

@@ -5,16 +5,21 @@ import type { JSONContent } from "@tiptap/core";
 import {
   appendSnapshot,
   deleteEssay,
+  listAgents,
   loadLibrary,
   listHistory,
   readEssay,
   readSnapshot,
+  saveAgents,
   writeEssay,
 } from "@/lib/storage";
+import { setLoadedAgents } from "@/lib/agent-identity";
 import { reviewFingerprint } from "@/lib/review/fingerprint";
 import { REVIEWER_PROFILES } from "../../sidecar/src/model-profiles";
 import type {
   BoardSnapshot,
+  CustomAgent,
+  CustomAgentId,
   Essay,
   FindingRecord,
   EssayLanguage,
@@ -191,6 +196,16 @@ export type CommitReviewArgs = {
 };
 
 type State = {
+  /** Agents the writer made in Ajustes. */
+  agents: CustomAgent[];
+  loadAgents: () => Promise<void>;
+  /** Insert or replace by id, then persist. Rejects (and rolls back) when the save fails. */
+  saveAgent: (agent: CustomAgent) => Promise<void>;
+  deleteAgent: (id: CustomAgentId) => Promise<void>;
+  settingsOpen: boolean;
+  settingsInstant: boolean;
+  openSettings: (opts?: { instant?: boolean }) => void;
+  closeSettings: () => void;
   view: View;
   list: LibraryEntry[];
   listStatus: ListStatus;
@@ -395,6 +410,9 @@ let navigationGeneration = 0;
 const deletingEssayIds = new Set<string>();
 
 export const useStore = create<State>((set, get) => ({
+  agents: [],
+  settingsOpen: false,
+  settingsInstant: false,
   view: "list",
   list: [],
   listStatus: "loading",
@@ -422,6 +440,54 @@ export const useStore = create<State>((set, get) => ({
 
   setLibrary(patch) {
     set((s) => ({ library: { ...s.library, ...patch } }));
+  },
+
+  async loadAgents() {
+    try {
+      const agents = await listAgents();
+      setLoadedAgents(agents);
+      set({ agents });
+    } catch (err) {
+      // Keep whatever is loaded; built-in agents work without the file.
+      console.error("loadAgents failed", err);
+    }
+  },
+
+  async saveAgent(agent) {
+    const before = get().agents;
+    const exists = before.some((a) => a.id === agent.id);
+    const next = exists ? before.map((a) => (a.id === agent.id ? agent : a)) : [...before, agent];
+    setLoadedAgents(next);
+    set({ agents: next });
+    try {
+      await saveAgents(next);
+    } catch (err) {
+      setLoadedAgents(before);
+      set({ agents: before });
+      throw err;
+    }
+  },
+
+  async deleteAgent(id) {
+    const before = get().agents;
+    const next = before.filter((a) => a.id !== id);
+    setLoadedAgents(next);
+    set({ agents: next });
+    try {
+      await saveAgents(next);
+    } catch (err) {
+      setLoadedAgents(before);
+      set({ agents: before });
+      throw err;
+    }
+  },
+
+  openSettings(opts) {
+    set({ settingsOpen: true, settingsInstant: opts?.instant === true });
+  },
+
+  closeSettings() {
+    set({ settingsOpen: false });
   },
 
   async loadList() {

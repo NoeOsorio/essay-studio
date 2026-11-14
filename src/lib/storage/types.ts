@@ -10,7 +10,27 @@ export type EssayMode = "academico" | "blog";
  *  model translates the disposition into the target language. */
 export type EssayLanguage = "es" | "en";
 
-export type Sage = "em" | "sis" | "pra" | "cri";
+export type BuiltinSage = "em" | "sis" | "pra" | "cri";
+/** Id of an agent the writer made in Ajustes. */
+export type CustomAgentId = `c_${string}`;
+export type Sage = BuiltinSage | CustomAgentId;
+
+export type AgentColorKey = "rosa" | "durazno" | "lima" | "cielo" | "arena" | "gris";
+export type AgentIconKey = "ortografia" | "pluma" | "libro" | "cita" | "lista" | "chispa";
+
+/** An agent the writer made. Persisted in agents.json by the native side. */
+export type CustomAgent = {
+  id: CustomAgentId;
+  name: string;
+  instructions: string;
+  does: "review" | "ask" | "both";
+  color: AgentColorKey;
+  icon: AgentIconKey;
+  /** Ignored when `does` is "ask". */
+  canPaste: boolean;
+  defaultOn: boolean;
+  createdAt: string;
+};
 
 /** One round of "interrogación inicial" by a sage. */
 export type Interrogatorio = {
@@ -36,7 +56,8 @@ export type Interrogatorio = {
  *  - argumento  : steelman, assumptions, rhetoric (CR)
  *  - apa        : APA citations + references format (EM, academico only)
  */
-export type Pase = "coherencia" | "estilo" | "argumento" | "apa";
+export type BuiltinPase = "coherencia" | "estilo" | "argumento" | "apa";
+export type Pase = BuiltinPase | `custom:${string}`;
 
 export type Severidad = "alta" | "media" | "baja";
 
@@ -149,6 +170,9 @@ export type FindingRecord = {
   closedAt?: string;
   closedBy?: "check" | "replacement";
   occurrence?: number;
+  /** Custom agents only: name and color key saved at creation, so the card survives deleting the agent. */
+  agentName?: string;
+  agentColor?: AgentColorKey;
 };
 
 /**

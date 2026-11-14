@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { query, type AccountInfo, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { buildExtractPrompt, extractSystemPrompt } from "./extract-prompts.js";
-import { buildAskPrompt, buildCritiquePrompt, buildInterrogationPrompt, loadSagePrompt } from "./prompts.js";
+import { buildAskPrompt, buildCritiquePrompt, buildInterrogationPrompt, customSystemPrompt, loadSagePrompt } from "./prompts.js";
 import { getReviewerProfile } from "./model-profiles.js";
 import { assertReviewRequest, type ReviewRequest, type ReviewProvenance } from "./review-contract.js";
 
@@ -49,7 +49,7 @@ export async function prepareReview(req: ReviewRequest) {
     default: { const unreachable: never = req; throw new Error(`Unknown request type: ${String(unreachable)}`); }
   }
   // Extraction has no persona: a fixed prompt per task, never a sage file.
-  const systemPrompt = req.type === "extract" ? extractSystemPrompt(req.task) : await loadSagePrompt(req.sage);
+  const systemPrompt = req.type === "extract" ? extractSystemPrompt(req.task) : req.sage === "custom" ? customSystemPrompt(req.custom!, req.language) : await loadSagePrompt(req.sage);
   const provenance: ReviewProvenance = {
     profileId: profile.id, ...(profile.model ? { requestedModel: profile.model } : {}),
     sdkVersion: await sdkVersion(), promptHash: sha256(JSON.stringify({ systemPrompt, userPrompt })),
