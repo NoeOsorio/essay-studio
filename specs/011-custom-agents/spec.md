@@ -50,7 +50,7 @@ Deleting or renaming an agent never breaks an essay that has its findings or not
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
-- **FR-001**: Ajustes MUST open from the app menu (Ajustes…, ⌘,).
+- **FR-001**: Ajustes MUST open from the Agentes menu (Configurar agentes…, ⌘,).
 - **FR-002**: The four built-in agents MUST be listed read-only with a lock. Selecting one MUST show its description, two fixed examples of corrections in the same look as a correction card, and when it takes part (Paper R8.2). Their instructions cannot be edited or deleted and are never shown.
 - **FR-003**: A custom agent MUST have a name, instructions, what it does (reviews, asks, or both), a color from six swatches different from the four agents' colors, an icon chosen from six by pressing its chip, «Puede proponer texto para pegar» (only when it reviews) and «Entra cada vez que revisas tu ensayo» (whether it starts on).
 - **FR-004**: Custom agents MUST be saved in the app, not in an essay, and survive restarts.

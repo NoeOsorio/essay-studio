@@ -2,7 +2,7 @@
 
 ## 0.6.0
 
-- Ajustes de agentes (menú Essay Studio, Ajustes, ⌘,): crea tus propios agentes con tus instrucciones, por ejemplo un corrector de ortografía que solo revisa.
+- Ajustes de agentes (menú Agentes, Configurar agentes…, ⌘,): crea tus propios agentes con tus instrucciones, por ejemplo un corrector de ortografía que solo revisa.
 - Los cuatro agentes de siempre tienen su vista con qué hacen, dos ejemplos de cómo corrigen y cuándo entran; su prompt no se puede editar.
 - Tus agentes entran en Revisar ensayo y en Hazme preguntas, con su nombre y color; sus correcciones cuentan en la nota y, si lo permites, proponen texto para pegar.
 - Borrar o renombrar un agente no rompe tus ensayos: lo que ya corrigió conserva su nombre y color.

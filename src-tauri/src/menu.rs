@@ -30,14 +30,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // SubmenuBuilder::new — convention for macOS is that the first
     // submenu's title is the app name, even though macOS replaces it
     // visually with the actual product name.
-    let app_settings = MenuItemBuilder::new("Ajustes…")
-        .id("app:settings")
-        .accelerator("CmdOrCtrl+Comma")
-        .build(app)?;
     let app_submenu = SubmenuBuilder::new(app, "Essay Studio")
         .about(None)
-        .separator()
-        .item(&app_settings)
         .separator()
         .services()
         .separator()
@@ -138,6 +132,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .id("sabios:limpiar")
         .accelerator("CmdOrCtrl+Shift+Backspace")
         .build(app)?;
+    // Settings live with the agents they configure (Noe, 2026-11-14), keeping Cmd+Comma.
+    let agents_settings = MenuItemBuilder::new("Configurar agentes…")
+        .id("app:settings")
+        .accelerator("CmdOrCtrl+Comma")
+        .build(app)?;
     let sabios_submenu = SubmenuBuilder::new(app, "Agentes")
         .item(&sabios_interrogar)
         .item(&sabios_evaluar)
@@ -146,6 +145,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&sabios_fuentes)
         .separator()
         .item(&sabios_limpiar)
+        .separator()
+        .item(&agents_settings)
         .build()?;
 
     // --- Window ---
