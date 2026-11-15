@@ -1,13 +1,12 @@
 <!--
 Sync Impact Report
-- Version change: 2.0.0 -> 3.0.0
-- Bump rationale: MAJOR. Noe rejected "Monochrome + Sages" (palette B, 82 Paper comments) on
-  2026-11-08 and approved the Paper redesign v3 ("R" screens). Principle IV is redefined.
-- Modified principles: "IV. Monochrome + Sages Visual System" -> "IV. Stationery Desk Visual System"
+- Version change: 3.0.0 -> 3.1.0
+- Bump rationale: MINOR. Principle IV gains a living design document: DESIGN.md at the repo root,
+  updated in the same commit as every visible change (Noe, 2026-11-15).
+- Modified principles: IV. Stationery Desk Visual System (expanded)
 - Added sections: none
 - Removed sections: none
 - Templates requiring updates: none (plan/spec/tasks templates read this file at runtime)
-- Superseded: specs/003-monochrome-visual-system (its Paper phase is the historical record)
 - Deferred TODOs: none
 -->
 
@@ -36,6 +35,9 @@ arbitrary execution, credential access or file access.
 
 Paper is the visual source of truth: UI redesigns MUST be designed and approved in Paper before code.
 The approved design is the "R" artboards of the Essay Studio Paper file.
+`DESIGN.md` at the repo root documents the approved, built system (tokens, components, motion, copy
+and the Paper screens). Every change that reaches git and touches what the user sees MUST update
+`DESIGN.md` in the same commit.
 
 The interface is a warm desk: paper `#FAF8F3`, white sheet `#FFFFFF`, shade `#F1EEE6`, dotted board
 `#F4F1E8` with dots `#CFC8B6`, ink `#1D1B18`, `#4A463F` and `#6B665C`. Four agents each own a note
@@ -91,4 +93,4 @@ approval, a version bump (semantic: MAJOR for redefined or removed principles, M
 ones, PATCH for wording) and an updated Sync Impact Report. Every `/speckit-analyze` run checks
 plans and tasks against these principles.
 
-**Version**: 3.0.0 | **Ratified**: 2026-11-07 | **Last Amended**: 2026-11-08
+**Version**: 3.1.0 | **Ratified**: 2026-11-07 | **Last Amended**: 2026-11-15

@@ -29,28 +29,11 @@ Noé la usa para aprender psicología organizacional mientras escribe ensayos.
 
 Persistencia: JSON files en app data dir para v1; migrar a SQLite cuando haya volumen.
 
-## Diseño (Pergamino + Atelier benchmarks)
+## Diseño (Stationery Desk)
 
-**Dirección elegida:** D2 Pergamino + benchmarks circulares de D3 Atelier + post-its con tape vintage.
+**Fuente de verdad: [DESIGN.md](DESIGN.md)** (sistema actual: papel cálido, Geist y Newsreader, los colores de los cuatro agentes, componentes, movimiento y reglas de texto), con Paper como diseño aprobado y el principio IV de la constitución como reglas obligatorias. Lo de Pergamino, Inter, JetBrains Mono y el rojo sello de las sesiones 1 a 18 ya no aplica.
 
-**Source of truth:** prototipos HTML exportados de claude.ai/design (ya no se usan; el diseño vive en el código). Tratar los HTML como spec pixel-perfect, NO como código de producción — recrear el output visual, no copiar la estructura del prototipo.
-
-**Paleta** (todos los tokens viven en [src/app/globals.css](src/app/globals.css) bajo `@theme`):
-- Paper: `paper #F6F1E7` / `paper-2 #FBF7EE` / `paper-3 #EFE8DA` / `paper-4 #E6DDC9`
-- Ink: `ink-1 #1F1B14` → `ink-4 #A89E89`
-- Rules: `rule-1/2/3` warm beiges
-- Sello rojo: `seal #B23A2A` (acento primario)
-- **Sabios** (cada uno carga voz semántica — no sustituir):
-  - **EM, Empirista** ámbar `#B07A1F` (datos, evidencia)
-  - **SI, Sistémico** teal `#2E7E72` (frameworks, conexiones)
-  - **PR, Práctico** coral `#B14B36` (aterrizar, aplicar)
-  - **CR, Crítico** morado `#6E4FA8` (objeciones, contras)
-
-**Tipografía:**
-- **Newsreader** serif para body y títulos (NO Crimson Pro)
-- **Inter** para UI
-- **JetBrains Mono** para metadata, kbd hints, tags
-- Configuradas en [src/app/layout.tsx](src/app/layout.tsx) con `next/font/google`.
+**Regla (Noé, 2026-11-15):** todo cambio final que se sube a git y toca lo que el usuario ve (pantalla, componente, color, texto, movimiento) actualiza DESIGN.md en el mismo commit.
 
 ## Estructura de carpetas
 
