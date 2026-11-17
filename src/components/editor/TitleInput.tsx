@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Document from "@tiptap/extension-document";
@@ -31,18 +31,19 @@ type TitleInputProps = {
 
 /** A plain title with an editor-local history, isolated from body and overlays. */
 export function TitleInput({ essayId, initialValue, onChange, placeholder = "Título" }: TitleInputProps) {
-  const [empty, setEmpty] = useState(initialValue.length === 0);
   const editor = useEditor({
     extensions: titleExtensions,
     content: { type: "doc", content: [{ type: "paragraph", ...(initialValue ? { content: [{ type: "text", text: singleLine(initialValue) }] } : {}) }] },
     immediatelyRender: false,
     editorProps: {
-      attributes: {
+      // A function, so ProseMirror recomputes it on every state change: the
+      // placeholder hides as soon as there is text (a static object froze it).
+      attributes: (state) => ({
         role: "textbox", "aria-label": "Título del ensayo", "aria-multiline": "false",
-        "data-placeholder": placeholder, "data-empty": String(empty),
+        "data-placeholder": placeholder, "data-empty": String(state.doc.textContent.length === 0),
         class: "title-input relative font-serif font-medium text-[40px] tracking-[-0.015em] text-ink-1 leading-[46px] outline-none caret-ink-1 [&_p]:m-0 before:absolute before:inset-0",
         style: "min-height: 46px",
-      },
+      }),
       handleKeyDown(view, event) {
         if (event.key !== "Enter" || event.isComposing || view.composing) return false;
         event.preventDefault();
@@ -69,7 +70,6 @@ export function TitleInput({ essayId, initialValue, onChange, placeholder = "Tí
     onUpdate({ editor }) {
       if (useStore.getState().current?.id !== essayId) return;
       const text = editor.state.doc.textContent;
-      setEmpty(text.length === 0);
       onChange(text);
     },
   }, [essayId]);

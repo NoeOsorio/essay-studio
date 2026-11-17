@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.7.1
+
+- El texto «Título» desaparece en cuanto escribes el título de un ensayo nuevo; antes se quedaba encima de tu texto.
+
 ## 0.7.0
 
 - Botón «Mejorar» en Configurar agentes: la IA reescribe tus instrucciones más claras y concretas, sin cambiar lo que pediste. «Volver a las tuyas» regresa tu texto.
