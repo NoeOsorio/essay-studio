@@ -29,6 +29,7 @@ Essay Studio es una app de escritorio para escritura aumentada con IA: un editor
 | | Feature | Qué hace |
 |---|---|---|
 | 🧑‍⚖️ | **Cuatro agentes** | Evidencia, Sistemas, Práctica y Objeciones. Cada uno tiene su voz en [`prompts/`](prompts/) y su color en todo el escritorio. |
+| 🧩 | **Tus propios agentes** | En Agentes, Configurar agentes (`⌘,`) creas agentes con tus instrucciones, por ejemplo un corrector de ortografía que solo revisa. «Mejorar» reescribe tus instrucciones más claras sin cambiar lo que pediste. Los cuatro de siempre no se editan, pero muestran qué hacen y dos ejemplos de cómo corrigen. |
 | ❓ | **Hazme preguntas** | Eliges una fuente (se busca por nombre, o sueltas una nueva) y los agentes activos te hacen 3 preguntas cada uno. Llegan una a una al tablero como notas, sin mover las tuyas, y también puedes añadir tu propia pregunta. |
 | 🖍️ | **Revisar ensayo** | Pasadas de coherencia, estilo, argumento y citas APA (esta última solo en modo académico). Los hallazgos quedan subrayados en el texto, sin paso de aplicar, y todos viven en Correcciones, ordenados como el ensayo y filtrables por criterio. |
 | 📐 | **Rúbrica** | Pegas la consigna o sueltas su PDF y los criterios aparecen solos con su peso, listos para ajustar. Nada se reemplaza sin que lo confirmes. |
@@ -54,15 +55,37 @@ Essay Studio es una app de escritorio para escritura aumentada con IA: un editor
 | `⌘⇧F` | Fuentes |
 | `⌘⇧⌫` | Limpiar revisión |
 | `⌘⇧H` | Historial de versiones |
+| `⌘,` | Configurar agentes |
 | `⌘\` | Mostrar / ocultar tablero |
 
 </details>
 
 ## 🖼️ Demo
 
-<!-- TODO: agregar docs/demo.gif (Hazme preguntas → notas → Revisar ensayo → aplicar reemplazo) y una captura actual de la app -->
 <p align="center">
-  <img src="docs/session-1-writing-view.png" alt="Vista de escritura: editor con correcciones subrayadas, tablero de notas y sello de puntaje" width="900">
+  <img src="docs/screenshots/editor.jpg" alt="El editor con las correcciones subrayadas por color de agente y el tablero con las preguntas de Evidencia, Sistemas y Objeciones" width="900">
+  <br><sub>El ensayo a la izquierda, subrayado por cada agente; a la derecha, las preguntas de Hazme preguntas como notas en el tablero.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/correcciones.jpg" alt="Panel de Correcciones con el puntaje por criterio y una tarjeta por frase" width="900">
+  <br><sub>Correcciones: el puntaje por criterio de tu rúbrica y una tarjeta por frase, con el texto listo para pegar cuando aplica.</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/configurar-agentes.jpg" alt="Configurar agentes con un agente propio de ortografía"></td>
+    <td width="50%"><img src="docs/screenshots/agente-evidencia.jpg" alt="La vista de Evidencia con su descripción y dos ejemplos de cómo corrige"></td>
+  </tr>
+  <tr>
+    <td><sub>Configurar agentes: crea los tuyos con tus instrucciones y mejóralas con un clic.</sub></td>
+    <td><sub>Los cuatro de siempre muestran qué hacen y cómo corrigen.</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/biblioteca.jpg" alt="La biblioteca de ensayos con su sello de puntaje" width="900">
+  <br><sub>La biblioteca: tus ensayos como hojas sobre el escritorio, con su sello de puntaje.</sub>
 </p>
 
 ## 🚀 Quickstart
@@ -267,11 +290,12 @@ essay-studio/
 │   ├── app/                 # layout, page, tokens de diseño (globals.css)
 │   ├── components/
 │   │   ├── editor/          # TipTap + mark Annotation + popover + slash menu
-│   │   ├── canvas/          # tldraw con NoteShapeUtil propio (post-its Pergamino)
+│   │   ├── canvas/          # tldraw con NoteShapeUtil propio (notas con cinta)
 │   │   ├── review/          # Revisar ensayo, Correcciones y sello de puntaje
 │   │   ├── questions/       # Hazme preguntas y su avance en el tablero
 │   │   ├── library/         # lista de ensayos y búsqueda
 │   │   ├── panels/          # Rúbrica, Fuentes e Historial
+│   │   ├── settings/        # Configurar agentes
 │   │   └── ui/              # primitivos propios (sin librerías de componentes)
 │   └── lib/
 │       ├── agents/          # preguntas, revisión, parseo de anotaciones
