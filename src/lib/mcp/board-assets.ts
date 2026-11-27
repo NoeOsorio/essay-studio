@@ -4,7 +4,7 @@ import { matches, page, textRange } from "./collections";
 import { prepareSvgImage } from "./svg-image";
 
 type Upload = {
-  editor: Editor; essayId: string; revision: string; type: "image" | "video";
+  editor: Editor; essayId: string; type: "image" | "video";
   assetId: TLAssetId;
   mimeType: string; fileName: string; total: number; received: number;
   chunks: Uint8Array<ArrayBuffer>[]; prepared?: TLAsset; preparing?: Promise<void>;
@@ -39,7 +39,6 @@ function asset(editor: Editor, id: unknown): TLAsset {
 function upload(editor: Editor, args: JsonObject): Upload {
   const entry = uploads.get(args.uploadId as string);
   if (!entry || entry.editor !== editor || entry.essayId !== args.essayId) throw new ToolError("UPLOAD_NOT_FOUND", "The upload expired or belongs to another board.");
-  if (args.operation !== "cancel" && entry.revision !== args.revision) throw new ToolError("STALE_UPLOAD", "The essay changed during the upload. Cancel it and begin again.");
   return entry;
 }
 
@@ -193,7 +192,7 @@ export function handleAssetTool(editor: Editor, name: string, args: JsonObject, 
     if ([...uploads.values()].reduce((sum, item) => sum + item.total, 0) + total > DEFAULT_MAX_ASSET_SIZE) throw new ToolError("UPLOAD_CAPACITY", "Finish or cancel pending uploads before starting another file.");
     const id = crypto.randomUUID();
     const assetId = AssetRecordType.createId();
-    uploads.set(id, { editor, essayId: args.essayId as string, revision: args.revision as string, assetId, type, mimeType, fileName, total, received: 0, chunks: [] });
+    uploads.set(id, { editor, essayId: args.essayId as string, assetId, type, mimeType, fileName, total, received: 0, chunks: [] });
     return { uploadId: id, assetId, receivedBytes: 0, totalBytes: total };
   }
   const entry = upload(editor, args);

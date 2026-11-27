@@ -161,8 +161,13 @@ y la ayuda de la CLI; no implican una instalación o prueba en esos clientes.
 - **Node o `server.js` no encontrados:** repite la preparación, comprueba las
   rutas absolutas y reconstruye el adaptador. Si actualizas Node mediante nvm o
   mueves el repositorio, actualiza las rutas en cada cliente.
-- **`STALE_REVISION`:** lee de nuevo antes de editar. No reenvíes la misma edición
-  con una revisión que ya cambió.
+- **`STALE_REVISION`:** pasó demasiado tiempo o cambió el ensayo abierto. Lee de
+  nuevo antes de editar. Mientras escribes, tu asistente ya no necesita releer: las
+  herramientas que apuntan por id (correcciones, notas, fuentes, rúbrica, tablero)
+  ignoran la revisión, y las ediciones por posición se mueven solas más allá de lo
+  que tecleaste.
+- **`RANGE_CHANGED`:** escribiste justo en el texto que tu asistente quería cambiar.
+  El error trae el texto como está ahora; no se cambió nada.
 - **Guardado fallido o resultado incierto:** lee el estado actual y reintenta
   `finish_work`; no repitas a ciegas una edición que pudo haberse aplicado.
 - **No cambies los permisos del socket a públicos:** la app y el adaptador

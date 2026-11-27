@@ -1,7 +1,7 @@
 import { useStore } from "@/lib/store";
 import { appendSnapshot, listEssays } from "@/lib/storage";
 import { CAPABILITY_VERSION, PROTOCOL_VERSION, MAX_REQUEST_BYTES, ToolError, TOOL_DEFINITIONS, validateArgs, type BridgeRequest, type BridgeResponse, type JsonObject } from "../../../shared/mcp";
-import { ensureDocument, ensureTitle, readTitleHistory, readDocument, readTextSelection, validateDocumentTool, handleDocumentTool } from "./document";
+import { ensureDocument, ensureTitle, getDocumentEditor, readTitleHistory, readDocument, readTextSelection, validateDocumentTool, handleDocumentTool } from "./document";
 import { ensureBoard, getBoardSelection, getBoardSummary, handleBoardTool, validateBoardTool, applyBoardHistory, prepareBoardAsset, resetBoardUploads } from "./board";
 import { editLibrary, readLibrary, validateLibraryEdit } from "./library";
 import { listEssaysTool } from "./essays";
@@ -13,10 +13,9 @@ import { editAgent, improveAgentInstructions, listAgents } from "./agents";
 import { controlRun, describeRuns } from "./runs";
 import type { Pase, Sage } from "@/lib/storage/types";
 import { REVIEWER_PROFILES } from "../../../sidecar/src/model-profiles";
+import { bumpRevision, mapRangeSince, revisionCounter, revisionEpoch, startRevisionLog } from "./revision-log";
 
 let sessionId: string | null = null;
-let revisionEpoch = "";
-let revisionNumber = 0;
 let stopRevisionTracking: (() => void) | null = null;
 let batchKey: string | null = null;
 let tail: Promise<unknown> = Promise.resolve();
@@ -32,9 +31,10 @@ function canonical(value: unknown): unknown {
 
 export function startRegistry(): () => void {
   if (stopRevisionTracking) return () => undefined;
-  revisionEpoch = crypto.randomUUID();
+  assertAllToolsClassified();
+  startRevisionLog();
   stopRevisionTracking = useStore.subscribe((state, previous) => {
-    if (state.current !== previous.current || state.restoreNonce !== previous.restoreNonce || state.view !== previous.view) revisionNumber += 1;
+    if (state.current !== previous.current || state.restoreNonce !== previous.restoreNonce || state.view !== previous.view) bumpRevision();
     if (state.current?.id !== previous.current?.id) batchKey = null;
   });
   return () => { stopRevisionTracking?.(); stopRevisionTracking = null; setBridgeSession(null); };
@@ -43,16 +43,73 @@ export function setBridgeSession(next: string | null): void {
   if (sessionId !== next) {
     resetBoardUploads(); resetMaterialUploads();
     if (sessionId) cancelReviewScope(sessionId);
-    batchKey = null; revisionNumber += 1;
+    batchKey = null; bumpRevision();
   }
   sessionId = next;
 }
-export function getRevision(): string { return `${revisionEpoch}:${useStore.getState().current?.id ?? "none"}:${revisionNumber}`; }
+export function getRevision(): string { return `${revisionEpoch()}:${useStore.getState().current?.id ?? "none"}:${revisionCounter()}`; }
 function assertContext(essayId: string): void {
   if (useStore.getState().current?.id !== essayId || useStore.getState().view !== "editor") throw new ToolError("ESSAY_CHANGED", "The requested essay is not open. Read app context before continuing.");
 }
-function checkRevision(expected: unknown): void {
-  if (expected !== getRevision()) throw new ToolError("STALE_REVISION", "The essay changed. Read it again before editing.");
+/**
+ * How each tool treats the revision the assistant sends. One row per tool, so a
+ * new tool cannot ship without choosing.
+ * - strict: the revision must equal the current one (navigation and anything that
+ *   replaces the whole essay).
+ * - positions: addressed by document position; a stale revision is mapped through
+ *   the writer's later edits (RANGE_CHANGED when they touched the same text).
+ * - anchored: addressed by id or literal quote; the revision is not compared.
+ * - none: reads and tools that need no essay revision.
+ */
+type RevisionClass = "strict" | "positions" | "anchored" | "none";
+const REVISION_CLASS: Record<string, RevisionClass> = {
+  get_basic_info: "none", list_essays: "none", get_document: "none", get_selection: "none", get_board: "none", list_board_pages: "none", get_node: "none",
+  get_asset: "none", list_assets: "none", get_board_image: "none", list_sources: "none", get_source: "none", get_rubric: "none", list_annotations: "none",
+  get_annotation: "none", list_versions: "none", get_version: "none", list_reviewer_profiles: "none", get_review_job: "none", cancel_review_job: "none",
+  list_agents: "none", edit_agent: "none", improve_agent_instructions: "none", control_run: "none", finish_work: "none",
+  open_essay: "strict", create_essay: "strict", close_essay: "strict", delete_essay: "strict", restore_version: "strict", editor_history: "strict",
+  set_text_selection: "positions", edit_document: "positions",
+  update_essay: "anchored", set_board_page: "anchored", set_board_view: "anchored", set_app_view: "anchored",
+  group_nodes: "anchored", edit_board_page: "anchored", create_asset: "anchored", import_board_asset: "anchored", delete_asset: "anchored",
+  create_note: "anchored", create_node: "anchored", update_nodes: "anchored", duplicate_nodes: "anchored", reorder_nodes: "anchored",
+  connect_notes: "anchored", update_connection: "anchored", delete_nodes: "anchored", organize_notes: "anchored",
+  edit_source: "anchored", import_source_file: "anchored", read_source_citation: "anchored", edit_rubric: "anchored", import_assignment: "anchored",
+  confirm_rubric_proposal: "anchored", create_version: "anchored", start_review: "anchored", start_interrogation: "anchored",
+  apply_review_results: "anchored", edit_annotations: "anchored", add_findings: "anchored", link_note: "anchored",
+};
+function revisionClass(name: string, args: JsonObject): RevisionClass {
+  if (name === "edit_annotations" && args.operation === "clear") return "strict";
+  if (name === "edit_document" && args.operation === "rename") return "anchored";
+  return REVISION_CLASS[name]!;
+}
+/** Fail loudly at start-up if a tool has no row in the table. */
+function assertAllToolsClassified(): void {
+  const missing = TOOL_DEFINITIONS.filter(tool => !(tool.name in REVISION_CLASS)).map(tool => tool.name);
+  if (missing.length) throw new Error(`Classify these tools in REVISION_CLASS: ${missing.join(", ")}`);
+}
+function checkStrict(expected: unknown): void {
+  if (typeof expected !== "string" || !expected) throw new ToolError("INVALID_ARGUMENTS", "This tool needs the revision from get_basic_info or the last result.");
+  if (expected !== getRevision()) throw new ToolError("STALE_REVISION", "The essay changed. Read it again (get_basic_info or get_document) before this change.");
+}
+const TEXT_PREVIEW = 1500;
+/** Carry from/to of a positional edit to where that text is now, or fail with RANGE_CHANGED / STALE_REVISION. */
+function mapPositions(args: JsonObject, essayId: string): JsonObject {
+  if (typeof args.revision !== "string" || !args.revision) throw new ToolError("INVALID_ARGUMENTS", "Edits by position need the revision of the get_document read they come from.");
+  if (typeof args.from !== "number") return args;
+  const insertion = args.operation === "insert" || args.operation === "rich_insert" || args.to === undefined;
+  const from = args.from; const to = insertion ? from : args.to as number;
+  const mapped = mapRangeSince(args.revision, essayId, from, to);
+  if (mapped.kind === "stale") throw new ToolError("STALE_REVISION", "Too much changed since that revision to place this edit. Call get_document again and use its positions.");
+  if (mapped.kind === "changed") {
+    let current = "";
+    try {
+      const doc = getDocumentEditor(essayId).state.doc; const size = doc.content.size;
+      current = doc.textBetween(Math.min(mapped.from, size), Math.min(Math.max(mapped.to, mapped.from), size), "\n\n").slice(0, TEXT_PREVIEW);
+    } catch { /* The editor was replaced; the message still tells the assistant to reread. */ }
+    throw new ToolError("RANGE_CHANGED", `The writer edited that text after your read. It is now at positions ${mapped.from} to ${mapped.to} and reads: ${JSON.stringify(current)}. Call get_document and decide again; nothing was changed.`);
+  }
+  if (!mapped.moved) return args;
+  return { ...args, from: mapped.from, ...(insertion || args.to === undefined ? {} : { to: mapped.to }) };
 }
 export async function flushDurable(essayId: string): Promise<void> {
   assertContext(essayId); await useStore.getState().flush(); assertContext(essayId);
@@ -71,15 +128,25 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   const definition = TOOL_DEFINITIONS.find(tool => tool.name === name)!;
   const effect = name === "import_board_asset" && args.operation !== "finish" ? "job" : name === "edit_board_page" && args.operation === "delete" ? "destructive" : definition.effect;
   const essayId = args.essayId as string;
+  const klass = revisionClass(name, args);
+  /** Strict tools compare revisions; position tools map the positions through later edits. */
+  const recheck = (): void => { if (klass === "strict") checkStrict(args.revision); else if (klass === "positions") mapPositions(args, essayId); };
+  const resolved = (): JsonObject => klass === "positions" ? mapPositions(args, essayId) : args;
+  /** A rename only cares that the title is still the one the assistant read. */
+  const checkTitle = (): void => {
+    if (name === "edit_document" && args.operation === "rename" && typeof args.expectedTitle === "string" && useStore.getState().current?.title !== args.expectedTitle) {
+      throw new ToolError("TITLE_CHANGED", `The title is now ${JSON.stringify(useStore.getState().current?.title ?? "")}. Nothing was renamed; decide again.`);
+    }
+  };
   /** The first edit of a batch saves a safety version; later edits of the same batch reuse it. */
   const safety = async (): Promise<void> => {
     const thisBatch = `${requestSession}:${essayId}`;
     if (batchKey === thisBatch) return;
-    await flushDurable(essayId); guard(); checkRevision(args.revision);
+    await flushDurable(essayId); guard(); recheck();
     const essay = structuredClone(useStore.getState().current!);
     try { await appendSnapshot({ takenAt: new Date().toISOString(), kind: "manual", essay }); }
     catch { throw new ToolError("SNAPSHOT_FAILED", "The safety version could not be saved. No edit was applied."); }
-    guard(); assertContext(essayId); checkRevision(args.revision); batchKey = thisBatch;
+    guard(); assertContext(essayId); recheck(); batchKey = thisBatch;
   };
   /** After a long model wait: the save, with a changed essay reported as an unknown outcome. */
   const saveAfterWait = async (): Promise<void> => {
@@ -121,13 +188,13 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   if (name === "set_app_view" && args.revision === undefined) throw new ToolError("INVALID_ARGUMENTS", "set_app_view needs the revision from get_basic_info.");
   if (name === "control_run") return envelope(controlRun(args as Parameters<typeof controlRun>[0]), essayId);
   if (["open_essay", "create_essay", "close_essay", "delete_essay"].includes(name)) {
-    if (args.revision !== undefined) checkRevision(args.revision);
+    if (args.revision !== undefined) checkStrict(args.revision);
     const state = useStore.getState(); const before = state.current;
     if (name === "create_essay" && typeof args.title === "string" && /[\r\n\u2028\u2029]/u.test(args.title)) throw new ToolError("INVALID_ARGUMENTS", "Essay titles must use a single line.");
     // delete_essay can also remove an essay that is not open; the open one stays untouched then.
     const deletingOther = name === "delete_essay" && before?.id !== essayId;
     if (name === "close_essay" || name === "delete_essay" && !deletingOther) assertContext(essayId);
-    if (before) { await flushDurable(before.id); guard(); if (args.revision !== undefined) checkRevision(args.revision); }
+    if (before) { await flushDurable(before.id); guard(); if (args.revision !== undefined) checkStrict(args.revision); }
     if (name === "open_essay") {
       await useStore.getState().openEssay(essayId, before?.id ?? null); guard(true); assertContext(essayId);
       await ensureDocument(essayId); guard(true);
@@ -166,27 +233,27 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   }
   assertContext(essayId);
   if (name === "finish_work") { await flushDurable(essayId); guard(true); batchKey = null; return envelope({ saved: true }, essayId); }
-  if (effect !== "read") checkRevision(args.revision);
+  if (effect !== "read") recheck();
   const boardSurface = definition.surface === "board" || name === "editor_history" && args.surface === "board" || name === "apply_review_results" && args.questionIds !== undefined;
   if (boardSurface) { await ensureBoard(essayId); guard(); assertContext(essayId); }
   if (definition.surface === "document" || definition.surface === "review") { await ensureDocument(essayId); guard(); assertContext(essayId); }
   if (name === "edit_document" && args.operation === "rename" || name === "editor_history" && args.surface === "title") { await ensureTitle(essayId); guard(); assertContext(essayId); }
-  if (effect !== "read") checkRevision(args.revision);
+  if (effect !== "read") recheck();
   if (name === "import_board_asset") {
     if (args.operation !== "finish") return envelope(handleBoardTool(name, args), essayId);
-    await prepareBoardAsset(args); guard(); assertContext(essayId); checkRevision(args.revision);
+    await prepareBoardAsset(args); guard(); assertContext(essayId); recheck();
   }
   if (name === "import_source_file") {
     if (args.operation !== "finish") return envelope(uploadStep("source", args), essayId);
-    await prepareUpload("source", args); guard(); assertContext(essayId); checkRevision(args.revision);
+    await prepareUpload("source", args); guard(); assertContext(essayId); recheck();
   }
   if (name === "import_assignment" || name === "read_source_citation") {
     const upload = name === "import_assignment" && ["begin", "append", "cancel"].includes(args.operation as string);
     if (upload) return envelope(uploadStep("assignment", args), essayId);
     // Refuse before saving anything: reading uses a model.
     if (args.userRequested !== true) throw new ToolError("EXPLICIT_REQUEST_REQUIRED", "This reads with a model and requires an explicit user request (userRequested=true).");
-    if (name === "import_assignment" && args.operation === "finish") { await prepareUpload("assignment", args); guard(); assertContext(essayId); checkRevision(args.revision); }
-    await safety(); guard(); assertContext(essayId); checkRevision(args.revision);
+    if (name === "import_assignment" && args.operation === "finish") { await prepareUpload("assignment", args); guard(); assertContext(essayId); recheck(); }
+    await safety(); guard(); assertContext(essayId); recheck();
     const value = name === "import_assignment" ? await importAssignmentTool(args) : await readSourceCitation(args);
     guard(true); assertContext(essayId);
     await saveAfterWait(); guard(true);
@@ -195,18 +262,18 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   if (name === "get_document") return envelope(readDocument(args), essayId);
   if (name === "get_selection") return envelope({ textSelection: readTextSelection(essayId), boardNodeIds: getBoardSelection() }, essayId);
   if (definition.effect === "read") {
-    const revision = getRevision();
     const value = definition.surface === "library" ? await readLibrary(name, args) : await handleBoardTool(name, args);
-    guard(); assertContext(essayId); checkRevision(revision); return envelope(value, essayId);
+    // Only the essay must still be the open one; the writer's typing does not invalidate a read.
+    guard(); assertContext(essayId); return envelope(value, essayId);
   }
   if (definition.effect === "model") {
-    guard(); checkRevision(args.revision);
+    guard();
     const common = { essayId, operationId: args.operationId as string, userRequested: args.userRequested === true, scope: requestSession };
     const result = name === "start_review" ? startReview({ ...common, pases: args.pases as Pase[] | undefined, reviewerProfile: args.reviewerProfile as string | undefined }) : startInterrogation({ ...common, sages: args.sages as Sage[] | undefined, text: args.text as string | undefined, sourceId: args.sourceId as string | undefined, ownQuestion: args.ownQuestion as string | undefined });
     return envelope(result, essayId);
   }
   if (definition.effect === "view") {
-    guard(); checkRevision(args.revision);
+    guard(); recheck();
     if (name === "set_app_view") {
       const state = useStore.getState();
       if (typeof args.boardOpen === "boolean" && state.boardOpen !== args.boardOpen) state.toggleBoard();
@@ -215,28 +282,30 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
       await openAppPanel(args); guard(); assertContext(essayId);
       return envelope({ changed: true }, essayId);
     }
-    const value = boardSurface ? handleBoardTool(name, args) : handleDocumentTool(name, args);
+    const value = boardSurface ? handleBoardTool(name, args) : handleDocumentTool(name, resolved());
     if (name === "set_board_page") {
       await flushDurable(essayId); guard(true);
       if (getBoardSummary().currentPageId !== args.pageId) throw new ToolError("VIEW_CHANGED", "The active page changed while saving. Read app context before continuing.");
     }
     return envelope(value, essayId);
   }
-  if (name === "edit_document" || name === "editor_history" && args.surface !== "board") validateDocumentTool(name, args);
+  if (name === "edit_document" || name === "editor_history" && args.surface !== "board") { checkTitle(); validateDocumentTool(name, resolved()); }
   else if (boardSurface && name !== "editor_history" && name !== "apply_review_results") validateBoardTool(name, args);
   else if (name === "edit_source" || name === "edit_rubric" || name === "update_essay") validateLibraryEdit(name, args);
   if (name === "apply_review_results") validateReviewApplication(args as Parameters<typeof validateReviewApplication>[0]);
   if (name === "update_essay" && args.reviewerProfile !== undefined && !REVIEWER_PROFILES.some(profile => profile.id === args.reviewerProfile)) throw new ToolError("INVALID_ARGUMENTS", "Unknown reviewer profile.");
-  checkRevision(args.revision);
+  recheck();
   await safety();
-  guard(); assertContext(essayId); checkRevision(args.revision);
+  guard(); assertContext(essayId); recheck(); checkTitle();
+  // Positions are mapped at the last synchronous moment before the edit.
+  const finalArgs = resolved();
   let result: unknown;
   if (name === "restore_version") {
-    const restored = await useStore.getState().restoreVersion(args.takenAt as string, () => { guard(); assertContext(essayId); checkRevision(args.revision); }); guard(true); assertContext(essayId); batchKey = null;
+    const restored = await useStore.getState().restoreVersion(args.takenAt as string, () => { guard(); assertContext(essayId); recheck(); }); guard(true); assertContext(essayId); batchKey = null;
     if (!restored) throw new ToolError("RESTORE_FAILED", "The safety save failed or the essay changed. No successful restore is confirmed; inspect current state.");
     result = { restored: true };
   } else if (name === "create_version") { const created = await useStore.getState().snapshotNow("manual"); guard(true); assertContext(essayId); if (!created) throw new ToolError("SNAPSHOT_FAILED", "The version could not be created or the essay changed."); result = { created: true, takenAt: created }; }
-  else if (name === "editor_history") result = args.surface === "board" ? applyBoardHistory(args.direction as "undo" | "redo") : handleDocumentTool(name, args);
+  else if (name === "editor_history") result = args.surface === "board" ? applyBoardHistory(args.direction as "undo" | "redo") : handleDocumentTool(name, finalArgs);
   else if (name === "confirm_rubric_proposal") result = await confirmProposalTool(args);
   else if (name === "apply_review_results") result = applyReviewResults(args as Parameters<typeof applyReviewResults>[0]);
   else if (name === "edit_annotations") result = editAnnotations(args as Parameters<typeof editAnnotations>[0]);
@@ -244,14 +313,16 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   else if (name === "add_findings") result = addFindings(args as Parameters<typeof addFindings>[0]);
   else if (definition.surface === "library") result = editLibrary(name, args);
   else if (boardSurface) result = handleBoardTool(name, args);
-  else result = handleDocumentTool(name, args);
+  else result = handleDocumentTool(name, finalArgs);
   if (result instanceof Promise) throw new ToolError("INTERNAL_ERROR", "A native edit must execute synchronously.");
   try { await flushDurable(essayId); }
   catch (error) {
     if (error instanceof ToolError && error.code === "ESSAY_CHANGED") throw new ToolError("OUTCOME_UNKNOWN", "The edit ran before navigation. Read saved state; do not repeat it.");
     throw error;
   }
-  guard(true); return envelope({ ...(result as JsonObject), saved: true }, essayId);
+  guard(true);
+  const remapped = finalArgs.from !== args.from || finalArgs.to !== args.to;
+  return envelope({ ...(result as JsonObject), ...(remapped ? { remapped: true, requestedFrom: args.from, ...(args.to === undefined ? {} : { requestedTo: args.to }) } : {}), saved: true }, essayId);
 }
 
 /** Serialize editor work; operation IDs reconcile retries without a second edit. */
@@ -293,7 +364,7 @@ export async function executeRequest(request: BridgeRequest, requestSession: str
     const entry = { signature, result: operation, bytes: 0 };
     operationResults.set(operationId, entry);
     void operation.then(response => {
-      if (!response.ok && ["STALE_REVISION", "REQUEST_EXPIRED"].includes(response.error?.code ?? "")) {
+      if (!response.ok && ["STALE_REVISION", "REQUEST_EXPIRED", "RANGE_CHANGED", "TITLE_CHANGED"].includes(response.error?.code ?? "")) {
         // These codes are issued only before the native operation. A fresh
         // revision can retry the same intent without risking a second edit.
         operationResults.delete(operationId);

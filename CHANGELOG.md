@@ -1,5 +1,13 @@
 # Cambios
 
+## 0.9.0
+
+- Tu asistente puede hacer por MCP todo lo que haces en la app: marcar correcciones como resueltas y reabrirlas, correr y configurar tus agentes, «Mejorar» instrucciones, hacer su propia pregunta sobre una fuente, subir PDFs de fuentes y de la consigna, sacar la rúbrica, completar citas, buscar en el texto de tus ensayos y abrir cualquier vista.
+- Tu asistente puede editar mientras tú escribes: sus cambios se acomodan a lo que tecleaste y solo se rechazan si tocan exactamente el mismo texto.
+- Editar la rúbrica por MCP ya no borra la consigna guardada.
+- Las correcciones de tu asistente piden el texto para pegar, así ofrecen «Usar este texto».
+- El menú «/» se abre arriba cuando no cabe abajo.
+
 ## 0.8.0
 
 - Tu asistente (Claude, Codex u otro conectado por MCP) puede escribir correcciones con subrayado y tarjeta, firmadas como «Tu asistente», y cuentan en la nota.

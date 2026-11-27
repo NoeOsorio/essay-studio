@@ -9,6 +9,7 @@ import { validateRichContent, validateFormatting, applyFormatting, nativeDocumen
 import { readEvaluation } from "./evaluation";
 import { textRange } from "./collections";
 import { deriveFindings } from "@/lib/review/findings";
+import { markDocumentBarrier, recordDocumentTransaction } from "./revision-log";
 
 let liveDocument: { editor: Editor; essayId: string } | null = null;
 let titleInput: { essayId: string; replace: (title: string) => boolean; editor?: Editor } | null = null;
@@ -29,8 +30,11 @@ export function registerDocument(editor: Editor, essayId: string): () => void {
     positions = next;
   };
   rememberBlocks();
+  markDocumentBarrier();
   const mapBlocks = ({ transaction }: { transaction: Transaction }) => {
     if (!transaction.docChanged) return;
+    // Before the store bump this change causes, so the log is keyed by the revision it follows.
+    recordDocumentTransaction(transaction.mapping.maps);
     const mapped = new Map<number, string>();
     for (const [position, id] of positions) {
       const result = transaction.mapping.mapResult(position, 1);
