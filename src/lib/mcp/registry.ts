@@ -6,7 +6,7 @@ import { ensureBoard, getBoardSelection, getBoardSummary, handleBoardTool, valid
 import { editLibrary, readLibrary, validateLibraryEdit } from "./library";
 import { matches, page } from "./collections";
 import { startReview, startInterrogation, getReviewJob, cancelReviewJob, cancelReviewScope, listReviewerProfiles, validateReviewApplication, applyReviewResults } from "@/lib/reviews/jobs";
-import { editAnnotations } from "@/lib/reviews/actions";
+import { addFindings, editAnnotations } from "@/lib/reviews/actions";
 import type { Pase, Sage } from "@/lib/storage/types";
 import { REVIEWER_PROFILES } from "../../../sidecar/src/model-profiles";
 
@@ -199,6 +199,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   else if (name === "editor_history") result = args.surface === "board" ? applyBoardHistory(args.direction as "undo" | "redo") : handleDocumentTool(name, args);
   else if (name === "apply_review_results") result = applyReviewResults(args as Parameters<typeof applyReviewResults>[0]);
   else if (name === "edit_annotations") result = editAnnotations(args as Parameters<typeof editAnnotations>[0]);
+  else if (name === "add_findings") result = addFindings(args as Parameters<typeof addFindings>[0]);
   else if (definition.surface === "library") result = editLibrary(name, args);
   else if (boardSurface) result = handleBoardTool(name, args);
   else result = handleDocumentTool(name, args);

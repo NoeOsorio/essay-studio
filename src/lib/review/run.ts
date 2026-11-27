@@ -60,6 +60,8 @@ export function sageForPase(pase: Pase, mode: EssayMode): Sage {
       return "cri";
     case "apa":
       return "em";
+    case "asistente":
+      return "as";
   }
 }
 
@@ -510,19 +512,36 @@ function applyReview(
  * client applied. The findings, their marks, the coverage and the stamp are
  * written the same way, so the score and the cards stay consistent.
  */
+export type WriteFindingsOptions = {
+  /**
+   * Passes whose open findings are removed before the new ones go in.
+   * Default: every pass being written (a review replaces what it reviewed
+   * before). An empty list appends.
+   */
+  replacePases?: Pase[];
+  /** Make the underlines one undo step (⌘Z removes the whole batch). A review run is not undoable. */
+  history?: boolean;
+  /** Occurrence of the quote to underline, by annotation id. Without it the next free one is used. */
+  occurrences?: ReadonlyMap<string, number>;
+};
+
 export function writeReviewFindings(
   editor: Editor,
   passes: PassFindings[],
   fingerprint: string,
   generadoEn: string = new Date().toISOString(),
-): void {
+  options: WriteFindingsOptions = {},
+): { id: string; located: boolean }[] {
   const store = useStore.getState();
   const cur = store.current;
-  if (!cur) return;
+  if (!cur) return [];
+  // The assistant's findings are not one of the checks: they never count as
+  // covered, never set a fingerprint and never leave a run behind.
+  const checks = passes.filter((p) => p.pase !== "asistente");
   const cleanPases: Pase[] = [];
   const partialPases: Pase[] = [];
-  for (const p of passes) (p.invalid > 0 ? partialPases : cleanPases).push(p.pase);
-  const replaced = new Set<Pase>([...cleanPases, ...partialPases]);
+  for (const p of checks) (p.invalid > 0 ? partialPases : cleanPases).push(p.pase);
+  const replaced = new Set<Pase>(options.replacePases ?? passes.map((p) => p.pase));
 
   // Step 2: open findings of clean and partial passes are replaced. Marks
   // and records go; failed passes, resolved and not applicable stay.
@@ -530,6 +549,8 @@ export function writeReviewFindings(
   const removeIds = new Set(
     views.filter((v) => v.status === "open" && replaced.has(v.pase)).map((v) => v.id),
   );
+  // Open records of a replaced pass with no mark (an undone batch) go too.
+  for (const r of cur.findings ?? []) if (r.status === "open" && replaced.has(r.pase)) removeIds.add(r.id);
   const closed: FindingRecord[] = (cur.findings ?? []).filter(
     (r) => r.status !== "open",
   );
@@ -542,15 +563,23 @@ export function writeReviewFindings(
   // Steps 3 to 5: locate each new finding, suppress what a closed one still
   // covers, keep the rest, located or not.
   const seen = new Map<string, number>();
+  // Open findings of these passes that stay (appending) already hold their occurrences.
+  const writing = new Set(passes.map((p) => p.pase));
+  for (const v of views) {
+    if (v.status === "open" && v.located && writing.has(v.pase) && !removeIds.has(v.id)) {
+      seen.set(v.cita, (seen.get(v.cita) ?? 0) + 1);
+    }
+  }
   const records: FindingRecord[] = [];
   const addMarks: { from: number; to: number; attrs: AnnotationAttrs }[] = [];
   for (const { pase, anotaciones, agent } of passes) {
     for (const a of anotaciones) {
       const sage = a.sage;
       const key = a.cita;
-      let skip = seen.get(key) ?? 0;
+      const asked = options.occurrences?.get(a.id);
+      let skip = asked ?? seen.get(key) ?? 0;
       let range = findCitaRange(editor, a.cita, skip);
-      if (!range && skip > 0) {
+      if (!range && skip > 0 && asked === undefined) {
         skip = 0;
         range = findCitaRange(editor, a.cita, 0);
       }
@@ -594,7 +623,7 @@ export function writeReviewFindings(
   }
 
   if (removeIds.size > 0 || addMarks.length > 0) {
-    editor.commands.applyReview({ remove: [...removeIds], add: addMarks });
+    editor.commands.applyReview({ remove: [...removeIds], add: addMarks, history: options.history });
   }
 
   // Step 6: commit meta, then flush. The editor's own update already
@@ -603,7 +632,8 @@ export function writeReviewFindings(
     fingerprint,
     cleanPases,
     partialPases,
-    reviewerRuns: passes.map((p) => ({ pase: p.pase, provenance: p.provenance })),
+    reviewerRuns: checks.map((p) => ({ pase: p.pase, provenance: p.provenance })),
     findings: (prev) => [...prev.filter((r) => !removeIds.has(r.id)), ...records],
   });
+  return records.map((r) => ({ id: r.id, located: r.occurrence !== undefined }));
 }

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/icons";
 
 export type AgentId = "em" | "sis" | "pra" | "cri";
-export type AuthorId = AgentId | "tu" | CustomAgentId;
+export type AuthorId = AgentId | "tu" | "as" | CustomAgentId;
 
 export type Identity = {
   id: AuthorId;
@@ -81,6 +81,22 @@ const TU: Identity = {
   dot: "transparent",
   line: "transparent",
   chipClass: "bg-tu-note",
+};
+
+/** The writer's outside assistant (MCP). Not a note author and not one of the four agents. */
+const ASISTENTE: Identity = {
+  id: "as",
+  name: "Tu asistente",
+  lens: "Las correcciones que te manda tu asistente.",
+  asks: "Las correcciones que te manda tu asistente.",
+  voiceLines: [],
+  Icon: GlyphChispa,
+  note: v("as-bg"),
+  ink: v("as-ink"),
+  text: v("as-text"),
+  dot: v("as-dot"),
+  line: v("as-line"),
+  chipClass: "bg-as-bg",
 };
 
 export const AGENTS: readonly Identity[] = [
@@ -142,7 +158,8 @@ export const AGENTS: readonly Identity[] = [
   },
 ];
 
-export const NOTE_AUTHORS: readonly Identity[] = [TU, ...AGENTS];
+/** The authors a board note can have; the assistant only writes findings. */
+export const NOTE_AUTHORS: readonly (Identity & { id: Exclude<AuthorId, "as"> })[] = [TU, ...AGENTS] as readonly (Identity & { id: Exclude<AuthorId, "as"> })[];
 
 export const AGENT_COPY: Record<AgentId, AgentCopy> = {
   em: {
@@ -303,6 +320,7 @@ export type AgentRecordHint = { agentName?: string; agentColor?: AgentColorKey }
  * «Agente» in gris. Anything else falls back to the writer.
  */
 export function identityOf(id: unknown, record?: AgentRecordHint): Identity {
+  if (id === "as") return ASISTENTE;
   const builtin = NOTE_AUTHORS.find((a) => a.id === id);
   if (builtin) return builtin;
   if (typeof id === "string" && id.startsWith("c_")) {

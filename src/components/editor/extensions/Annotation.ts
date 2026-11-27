@@ -88,6 +88,8 @@ declare module "@tiptap/core" {
       applyReview: (args: {
         remove: string[];
         add: { from: number; to: number; attrs: AnnotationAttrs }[];
+        /** One undo step for the whole batch. A review run is not undoable (default). */
+        history?: boolean;
       }) => ReturnType;
     };
   }
@@ -373,9 +375,10 @@ export const Annotation = Mark.create({
           return true;
         },
       applyReview:
-        ({ remove, add }) =>
+        ({ remove, add, history }) =>
         ({ tr, dispatch, state }) => {
           const ids = new Set(remove);
+          if (history && dispatch) closeHistory(tr);
           const max = state.doc.content.size;
           if (dispatch) {
             if (ids.size > 0) {
@@ -392,11 +395,11 @@ export const Annotation = Mark.create({
               if (a.from >= a.to || a.from < 0 || a.to > max) continue;
               tr.addMark(a.from, a.to, this.type.create(a.attrs));
             }
-            tr.setMeta("addToHistory", false);
+            if (!history) tr.setMeta("addToHistory", false);
             // The draw plays once, only for the underlines added here.
             const drawn = add.map((a) => a.attrs.id).filter((v): v is string => !!v);
             if (drawn.length > 0) tr.setMeta(fxKey, { draw: drawn } satisfies FxPatch);
-            dispatch(tr);
+            dispatch(history ? closeHistory(tr) : tr);
           }
           return true;
         },

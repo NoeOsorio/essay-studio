@@ -11,7 +11,7 @@ import { identityOf, NOTE_AUTHORS, type AuthorId } from "@/lib/agent-identity";
 import { peelNote } from "@/lib/canvas/note-motion";
 import { Popover } from "@/components/ui/Popover";
 import { Tooltip } from "@/components/ui/Tooltip";
-import type { PostItKind, PostItMeta } from "./note-shape";
+import type { PostItAuthor, PostItKind, PostItMeta } from "./note-shape";
 
 const KINDS: { key: PostItKind; label: string }[] = [
   { key: "concepto", label: "Concepto" },
@@ -103,7 +103,7 @@ function Bar({ editor, note, placement }: { editor: Editor; note: TLNoteShape; p
                 aria-label={a.name}
                 data-testid={`note-bar-author-${a.id}`}
                 data-active={on}
-                onClick={() => updateMeta({ author: a.id }, "note author")}
+                onClick={() => updateMeta({ author: a.id as PostItAuthor }, "note author")}
                 className="grid place-items-center flex-none h-[24px] w-[24px] rounded-[5px] cursor-pointer"
                 style={{
                   background: a.note,

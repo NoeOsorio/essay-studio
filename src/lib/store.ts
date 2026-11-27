@@ -814,7 +814,8 @@ export const useStore = create<State>((set, get) => ({
     ];
     const next = findings(cur.findings ?? []);
     const evaluacionMeta: EvaluacionMeta = {
-      evaluadoEn: cur.updatedAt,
+      // Only the assistant wrote (no check ran): the earlier review keeps its date.
+      evaluadoEn: inRun.size === 0 && prev ? prev.evaluadoEn : cur.updatedAt,
       pasadasCubiertas: [...covered],
       fingerprintsByPase,
       ...(!sameOne && prev?.appliedFingerprints?.length

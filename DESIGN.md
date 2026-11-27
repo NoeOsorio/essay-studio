@@ -31,6 +31,7 @@ Color means only one thing: which agent wrote something. Review is never red; re
 - **Práctica** (`pra`): `#CADDFF` / `#234A9C` / `#4C7EE0` / `#8FB1F0`.
 - **Objeciones** (`cri`): `#E3D5FF` / `#563397` / `#9670E0` / `#B79AF0`.
 - **Your notes** (`tu`): `#FFFDF8`.
+- **Tu asistente** (`as`, corrections an outside assistant writes through MCP, never a note author): chip `#E7E2D6`, ink `#3F3B34`, underline `#8F897C`, sparkle icon (the one of «Mejorar»). Neutral on purpose so color still means which agent wrote it. Its card shows no «en» plus check name. Paper R4.5.
 
 **Custom agents** (fill / ink / dot), chosen in Configurar agentes, never equal to the four:
 rosa `#FFC9D6`/`#8A2846`/`#E0567A`, durazno `#FFD3B5`/`#8A3D12`/`#E07A3A`, lima `#DDEFB0`/`#4A5E12`/`#7FA82A`, cielo `#C3E8F5`/`#11536B`/`#2E9AC4`, arena `#EADFC8`/`#5E4A22`/`#B0915A`, gris `#E2E2DE`/`#45453F`/`#8A8A82`.
@@ -60,7 +61,7 @@ rosa `#FFC9D6`/`#8A2846`/`#E0567A`, durazno `#FFD3B5`/`#8A3D12`/`#E07A3A`, lima 
 - **Correction card**: one card per sentence; one part per agent with its chip, name, «en» plus the check name (hidden when it repeats the name), importance bars and label, the message, and when it proposes text a replacement block with «Copiar» and «Usar este texto». Only Citas APA and custom agents that allow it propose text. A check mark means the whole card is done.
 - **Sticky note**: agent fill, translucent tape, slight tilt derived from its id, Newsreader text, a bold title line; shadow `0 1px 1px #3C2D0A14, 0 10px 20px -8px #3C2D0A4D`.
 - **Score stamp**: Geist Mono number inside a stamped frame in the top bar; goes out of date when the essay changes.
-- **Underlines** in the editor: 2 px in the agent underline color; custom agents use their dot color.
+- **Underlines** in the editor: 2 px in the agent underline color; custom agents use their dot color; Tu asistente uses `#8F897C`.
 - **Empty states** show, they do not explain (the board's ghost notes, the desk on first use).
 
 ## 5. Layout
@@ -86,7 +87,7 @@ rosa `#FFC9D6`/`#8A2846`/`#E0567A`, durazno `#FFD3B5`/`#8A3D12`/`#E07A3A`, lima 
 
 The approved screens are the «R» artboards. Pages in the file:
 - **01 Lista de ensayos**: library desk (R1.1), ruled ledger past 11 essays (R1.3), search (R1.4).
-- **02 Editor y tablero**, **03 Interrogar**, **04 Evaluar**: editor, board, Hazme preguntas, Revisar ensayo and Correcciones (R4.2b, one card per sentence).
+- **02 Editor y tablero**, **03 Interrogar**, **04 Evaluar**: editor, board, Hazme preguntas, Revisar ensayo and Correcciones (R4.2b, one card per sentence; R4.5, a correction from Tu asistente).
 - **06 Rúbrica, Fuentes e Historial**: material panels (R6.1 to R6.4, R6.6).
 - **07 Sistema**: tokens and motion storyboards (R7.3).
 - **08** and **09 Estados**: loading, empty, error and partial states.

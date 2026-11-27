@@ -51,6 +51,14 @@
   --color-em-dot:  #E8B421;
   --color-em-line: #F5C542;
 
+  /* Tu asistente: the writer's own outside assistant (MCP). Neutral on purpose. */
+  --color-as:      #3F3B34;
+  --color-as-bg:   #E7E2D6;
+  --color-as-ink:  #3F3B34;
+  --color-as-text: #2B2923;
+  --color-as-dot:  #8F897C;
+  --color-as-line: #8F897C;
+
   --color-sis:      #0D5E46;
   --color-sis-bg:   #BDEBD6;
   --color-sis-ink:  #0D5E46;
@@ -169,6 +177,7 @@ html, body {
 .anno[data-by="sis"] { --anno-line: var(--color-sis-line); }
 .anno[data-by="pra"] { --anno-line: var(--color-pra-line); }
 .anno[data-by="cri"] { --anno-line: var(--color-cri-line); }
+.anno[data-by="as"]  { --anno-line: var(--color-as-line); }
 /* Custom agents: the color key travels with the mark. */
 .anno[data-color="rosa"] { --anno-line: #E0567A; }
 .anno[data-color="durazno"] { --anno-line: #E07A3A; }

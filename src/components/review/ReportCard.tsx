@@ -11,7 +11,7 @@ import { identityOf } from "@/lib/agent-identity";
 import { reachableScore } from "@/lib/review/findings";
 import { startReview } from "@/lib/review/run";
 import { useStore } from "@/lib/store";
-import type { Pase } from "@/lib/storage/types";
+import type { BuiltinPase } from "@/lib/storage/types";
 
 type ReportCardProps = {
   open: boolean;
@@ -20,7 +20,7 @@ type ReportCardProps = {
   onOpenCorrections: (criterioId: string | null) => void;
 };
 
-const INVITE: Record<Pase, { title: string; action: string }> = {
+const INVITE: Record<BuiltinPase, { title: string; action: string }> = {
   coherencia: { title: "Revisa la coherencia", action: "Revisar coherencia" },
   estilo: { title: "Revisa tu estilo", action: "Revisar estilo" },
   argumento: { title: "Revisa tu argumentación", action: "Revisar argumentación" },
@@ -41,7 +41,7 @@ export function ReportCard({ open, onClose, onOpenCorrections }: ReportCardProps
   const result = reading?.result;
   const missing = result?.wasEvaluated ? result.missingPasadas[0] : undefined;
   const reach = reading && missing ? reachableScore(reading.args, [missing]) : null;
-  const invite = missing && reach !== null && result?.overall != null && reach > result.overall ? missing : null;
+  const invite = missing && reach !== null && result?.overall != null && reach > result.overall ? (missing as BuiltinPase) : null;
   const Icon = invite ? identityOf(agentOfPase(invite, mode)).Icon : null;
   const owner = invite ? identityOf(agentOfPase(invite, mode)) : null;
 

@@ -133,7 +133,7 @@ function Part({
             <id.Icon size={16} />
           </span>
           <span className="text-[13px] font-semibold leading-[16px] text-ink-1">{id.name}</span>
-          {surface !== "criterion" && where !== id.name ? (
+          {surface !== "criterion" && where !== id.name && finding.pase !== "asistente" ? (
             <span className="text-[13px] leading-[16px] text-ink-3" data-testid="finding-where">
               en {where}
             </span>

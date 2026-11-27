@@ -196,7 +196,7 @@ privadas.
 
 Actualiza y compila tanto la app como el adaptador. `get_basic_info` devuelve
 `capabilities.capabilityVersion` y la lista de herramientas con su efecto.
-La versión de capacidades debe ser al menos `3` para usar las operaciones nuevas.
+La versión de capacidades debe ser al menos `4` para usar las operaciones nuevas.
 Un cliente que conserva herramientas antiguas debe reconectarse antes de trabajar.
 
 El MCP permite editar objetos y encabezados, conexiones, formato del documento,
@@ -271,3 +271,29 @@ locales. Rechaza scripts, HTML, eventos, referencias externas, animación, filtr
 y grafos de referencias excesivos antes de guardar. No admite SVG activo ni HTML.
 `get_basic_info.titleHistory` indica si el título está listo y permite deshacer
 o rehacer. El título conserva su propio historial, aislado del cuerpo y las fuentes.
+
+## Revisar el ensayo con tu asistente
+
+Tu asistente puede hacer la revisión y escribirla en la app, sin que la app
+llame a ningún modelo y sin costo para ella. Las correcciones aparecen como las
+de los agentes (subrayado en el texto y tarjeta en Correcciones), bajo el nombre
+«Tu asistente», y cuentan en el sello.
+
+1. Lee el ensayo con `get_document`. Pide `includeAnnotations` si quieres ver lo
+   que ya está marcado y `includeRubric` si hay rúbrica.
+2. Envía las correcciones con `add_findings`: `essayId`, `revision`,
+   `operationId` y `findings`, hasta 100 por llamada. Cada una lleva `cita` (texto
+   literal del ensayo), `mensaje` (qué falla y por qué importa, sin el texto
+   nuevo), `severidad` (`alta`, `media` o `baja`) y, si quieres, `reemplazo`
+   (texto para pegar), `criterioId` (de la rúbrica) y `occurrence` (cuál
+   repetición de la cita subrayar, desde 0). Una corrección por problema.
+3. La respuesta trae `added` (cada `id` y si se subrayó, `located`), `rejected`
+   (índice y motivo de las que no entraron) y la nueva `revision`. Una cita que no
+   está en el texto queda como tarjeta sin subrayado.
+
+Lo que envías se suma a lo anterior. Con `replaceOwn: true` se reemplazan solo
+las correcciones abiertas de tu asistente. Un reemplazo con cifras o nombres que
+no están en el ensayo ni en sus fuentes se descarta (la corrección se queda).
+Un solo deshacer quita los subrayados de toda la llamada. Para consultar,
+aplicar, descartar o limpiar usa `list_annotations` (filtro `sage: "as"`) y
+`edit_annotations`.

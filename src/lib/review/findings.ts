@@ -247,6 +247,8 @@ export function deriveFindings(
   for (const r of records ?? []) {
     if (marks.has(r.id)) continue;
     if (r.status === "not_applicable") continue;
+    // The assistant's located finding whose mark is gone (undone, or its text deleted): hidden, and back with redo.
+    if (r.pase === "asistente" && r.status === "open" && r.occurrence !== undefined) continue;
     const view: FindingView = {
       id: r.id,
       sage: r.sage,

@@ -23,6 +23,7 @@ export type ReviewReading = {
 /** Who owns each pass: the agent shown for it. */
 export function agentOfPase(pase: Pase, mode: "academico" | "blog"): Sage {
   if (pase.startsWith("custom:")) return pase.slice("custom:".length) as CustomAgentId;
+  if (pase === "asistente") return "as";
   if (pase === "coherencia") return "sis";
   if (pase === "argumento") return "cri";
   if (pase === "apa") return "em";

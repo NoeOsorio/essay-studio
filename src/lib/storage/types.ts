@@ -13,7 +13,8 @@ export type EssayLanguage = "es" | "en";
 export type BuiltinSage = "em" | "sis" | "pra" | "cri";
 /** Id of an agent the writer made in Ajustes. */
 export type CustomAgentId = `c_${string}`;
-export type Sage = BuiltinSage | CustomAgentId;
+/** "as" is the writer's own outside assistant (MCP); it only authors findings. */
+export type Sage = BuiltinSage | "as" | CustomAgentId;
 
 export type AgentColorKey = "rosa" | "durazno" | "lima" | "cielo" | "arena" | "gris";
 export type AgentIconKey = "ortografia" | "pluma" | "libro" | "cita" | "lista" | "chispa";
@@ -57,7 +58,8 @@ export type Interrogatorio = {
  *  - apa        : APA citations + references format (EM, academico only)
  */
 export type BuiltinPase = "coherencia" | "estilo" | "argumento" | "apa";
-export type Pase = BuiltinPase | `custom:${string}`;
+/** "asistente" holds the findings an outside assistant added through MCP; it is not one of the four checks. */
+export type Pase = BuiltinPase | "asistente" | `custom:${string}`;
 
 export type Severidad = "alta" | "media" | "baja";
 

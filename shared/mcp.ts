@@ -1,6 +1,6 @@
 /** Shared wire contract: MCP adapter and live renderer use one tool registry. */
 export const PROTOCOL_VERSION = 1;
-export const CAPABILITY_VERSION = 3;
+export const CAPABILITY_VERSION = 4;
 export const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 export type JsonObject = Record<string, unknown>;
 export type BridgeRequest = { requestId: string; name: string; args: JsonObject };
@@ -26,6 +26,14 @@ const contextRequired = ["essayId"];
 const mutationRequired = ["essayId", "revision"];
 const authors = { enum: ["tu", "em", "sis", "pra", "cri"] };
 const kinds = { enum: ["concepto", "pregunta", "conexion", "cita", "critica"] };
+const findingItem = { type: "object", additionalProperties: true, properties: {
+  cita: { type: "string", description: "Literal text copied from the essay (1 to 2000 characters), exactly as get_document returns it. If it is not found the correction is kept as a card with no underline." },
+  mensaje: { type: "string", description: "What is wrong in the quoted text and why it matters (1 to 600 characters). Diagnosis only: put the new wording in reemplazo, never here." },
+  severidad: { type: "string", description: "Importance: alta, media or baja." },
+  reemplazo: { type: "string", description: "Optional. Literal text that would replace the quote when the writer presses Usar este texto. Plain prose with no prefix such as \"Rewrite:\". Dropped if it carries a number or a proper name found neither in the essay nor in its sources." },
+  criterioId: { type: "string", description: "Optional id of a rubric criterion (from get_rubric). An unknown id is ignored." },
+  occurrence: { type: "integer", minimum: 0, description: "Optional. Which repeated occurrence of the quote to underline, counting from 0. Default: the first one." },
+} };
 export type ToolEffect = "read" | "view" | "content" | "destructive" | "model" | "job" | "save";
 function tool(name: string, effect: ToolEffect, surface: "app" | "document" | "board" | "library" | "review", description: string, properties: JsonObject, required: string[] = []) {
   return { name, effect, surface, mutating: effect === "content" || effect === "destructive", description, inputSchema: object(properties, (effect === "content" || effect === "destructive") && !["edit_document", "create_note", "update_nodes", "connect_notes", "delete_nodes", "organize_notes"].includes(name) ? [...new Set([...required, "operationId"])] : required) };
@@ -70,7 +78,7 @@ export const TOOL_DEFINITIONS = [
   tool("get_source", "read", "library", "Read a saved source in bounded text chunks and inspect invalid references.", { ...context, id, ...textPaging }, [...contextRequired, "id"]),
   tool("edit_source", "content", "library", "Create, update, delete or import a TXT/Markdown source using literal content, never a filesystem path. Delete requires confirm=true.", { ...mutation, operation: { enum: ["create", "update", "delete", "import"] }, id, name: text, content: text, citation: text, fileName: text, confirm: bool }, [...mutationRequired, "operation"]),
   tool("get_rubric", "read", "library", "Search paginated rubric criteria and inspect invalid annotation references.", { ...context, ...paging }, contextRequired),
-  tool("list_annotations", "read", "library", "Search compact findings (underlined or not, open or resolved) with pagination and review-pass, author, severity and status filters.", { ...context, ...paging, pase: { enum: ["coherencia", "estilo", "argumento", "apa"] }, sage: { enum: ["em", "sis", "pra", "cri"] }, severity: { enum: ["alta", "media", "baja"] }, status: { enum: ["open", "resolved"] } }, contextRequired),
+  tool("list_annotations", "read", "library", "Search compact findings (underlined or not, open or resolved) with pagination and review-pass, author, severity and status filters.", { ...context, ...paging, pase: { enum: ["coherencia", "estilo", "argumento", "apa", "asistente"] }, sage: { enum: ["em", "sis", "pra", "cri", "as"] }, severity: { enum: ["alta", "media", "baja"] }, status: { enum: ["open", "resolved"] } }, contextRequired),
   tool("get_annotation", "read", "library", "Read one finding as JSON text in bounded chunks.", { ...context, id, ...textPaging }, [...contextRequired, "id"]),
   tool("edit_rubric", "content", "library", "Create, update or delete a rubric criterion while preserving stable IDs. Delete requires confirm=true.", { ...mutation, operation: { enum: ["create", "update", "delete"] }, id, name: text, description: text, weight: { type: "integer", minimum: 1, maximum: 5 }, confirm: bool }, [...mutationRequired, "operation"]),
   tool("list_versions", "read", "library", "Search paginated saved version metadata.", { ...context, ...paging, kind: { enum: ["auto", "close", "manual", "before-restore"] } }, contextRequired),
@@ -84,6 +92,7 @@ export const TOOL_DEFINITIONS = [
   tool("cancel_review_job", "job", "review", "Cancel a job and its underlying generation. Already consumed usage cannot be undone.", { ...context, jobId: id }, [...contextRequired, "jobId"]),
   tool("apply_review_results", "content", "review", "Write selected results: findings go through the same path as the review panel (cards, underlines, coverage and score), questions land as notes on the board. Reject obsolete inputs and never rerun inference.", { ...mutation, jobId: id, annotationIds: ids, questionIds: ids }, [...mutationRequired, "jobId"]),
   tool("edit_annotations", "content", "review", "Apply the replacement of selected open findings (closed as resolved), discard them (closed as not applicable), or clear the whole evaluation. Same actions as the finding cards, with the same undo.", { ...mutation, operation: { enum: ["apply", "discard", "clear"] }, ids }, [...mutationRequired, "operation"]),
+  tool("add_findings", "content", "review", "Add your own corrections to the open essay, shown as underlines and cards in Correcciones under the name Tu asistente, and counted in the score. Does not start any model run. Read the essay first with get_document, quote literal text from it, and send one finding per problem. Each item is checked on its own: invalid items come back in `rejected` with a reason and the rest are written. A quote not found in the text is kept as a card with no underline (located: false). Findings are added to what the assistant sent before; set replaceOwn to true to replace only the assistant's earlier open findings. Send at most 100 per call. One undo removes the whole call.", { ...mutation, findings: { type: "array", minItems: 1, maxItems: 100, items: findingItem }, replaceOwn: bool }, [...mutationRequired, "operationId", "findings"]),
   tool("finish_work", "save", "app", "Flush pending saves and end the editing batch. Never claim saved on errors.", context, contextRequired),
 ];
 export type ToolName = typeof TOOL_DEFINITIONS[number]["name"];

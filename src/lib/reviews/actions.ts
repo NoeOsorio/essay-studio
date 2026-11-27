@@ -6,6 +6,9 @@ import { liveBoardEditor } from "@/lib/mcp/board";
 import { openLanding, placeNote, endLanding } from "@/lib/questions/landing";
 import { markCardNotApplicable, useReplacement as replaceWithSuggestion } from "@/lib/review/actions";
 import { deriveFindings } from "@/lib/review/findings";
+import { reviewFingerprint } from "@/lib/review/fingerprint";
+import { matchFirstLetterCase, replacementIsGrounded, reviewCorpus, writeReviewFindings } from "@/lib/review/run";
+import { buildAnotacion } from "@/lib/agents";
 import { useStore } from "@/lib/store";
 import { ToolError } from "../../../shared/mcp";
 import type { Anotacion, Interrogatorio, Sage } from "@/lib/storage/types";
@@ -113,4 +116,71 @@ export function editAnnotations(args: { essayId: string; operation: "apply" | "d
     if (!done.ok) throw new ToolError("EDIT_REJECTED", "A suggestion could not be applied. Earlier ones in this request were applied; read the document before continuing.");
   }
   return { changed: true };
+}
+
+const FINDING_KEYS = new Set(["cita", "mensaje", "severidad", "reemplazo", "criterioId", "occurrence"]);
+
+/**
+ * Corrections written by the writer's own assistant: the same records,
+ * underlines, cards and score as the app's agents, under the identity «Tu
+ * asistente», with no model call. Each item is checked on its own; the rest
+ * go in. The batch is one transaction and one undo. Without `replaceOwn` it
+ * adds to what the assistant sent before; with it, only the assistant's own
+ * open findings are replaced.
+ */
+export function addFindings(args: { essayId: string; findings: unknown[]; replaceOwn?: boolean }): {
+  added: { id: string; located: boolean; replacementDropped?: boolean }[];
+  rejected: { index: number; reason: string }[];
+} {
+  const editor = getDocumentEditor(args.essayId);
+  assertReviewDocumentEditable(editor);
+  const essay = useStore.getState().current;
+  if (!essay || essay.id !== args.essayId) throw new ToolError("ESSAY_CHANGED", "The requested essay is not open.");
+  const generadoEn = new Date().toISOString();
+  const corpus = reviewCorpus(essay.content, essay.fuentes);
+  const rejected: { index: number; reason: string }[] = [];
+  const anotaciones: Anotacion[] = [];
+  const indexOf = new Map<string, number>();
+  const occurrences = new Map<string, number>();
+  const dropped = new Set<string>();
+  args.findings.forEach((item, index) => {
+    const reject = (reason: string) => { rejected.push({ index, reason }); };
+    if (!item || typeof item !== "object" || Array.isArray(item)) return reject("The finding must be an object.");
+    const f = item as Record<string, unknown>;
+    if (Object.keys(f).some((key) => !FINDING_KEYS.has(key))) return reject("Unknown field. Use cita, mensaje, severidad, reemplazo, criterioId and occurrence.");
+    if (typeof f.cita !== "string" || !f.cita.trim()) return reject("cita is required: literal text from the essay.");
+    if (f.cita.length > 2000) return reject("cita is longer than 2000 characters.");
+    if (typeof f.mensaje !== "string" || !f.mensaje.trim()) return reject("mensaje is required.");
+    if (f.mensaje.length > 600) return reject("mensaje is longer than 600 characters.");
+    if (f.severidad !== "alta" && f.severidad !== "media" && f.severidad !== "baja") return reject("severidad must be alta, media or baja.");
+    if (f.reemplazo !== undefined && (typeof f.reemplazo !== "string" || f.reemplazo.length > 2000)) return reject("reemplazo must be text of at most 2000 characters.");
+    if (f.criterioId !== undefined && typeof f.criterioId !== "string") return reject("criterioId must be a rubric criterion id.");
+    if (f.occurrence !== undefined && (typeof f.occurrence !== "number" || !Number.isSafeInteger(f.occurrence) || f.occurrence < 0)) return reject("occurrence must be an integer of 0 or more.");
+    const a = buildAnotacion(
+      { cita: f.cita, mensaje: f.mensaje.trim(), severidad: f.severidad, ...(typeof f.reemplazo === "string" && f.reemplazo.trim() ? { reemplazo: f.reemplazo.trim() } : {}), ...(typeof f.criterioId === "string" ? { criterioId: f.criterioId } : {}) },
+      "as", "asistente", generadoEn, essay.rubrica?.criterios,
+    );
+    // The same guards as the agents: the replacement keeps the first-letter case and brings nothing the essay and its sources do not have.
+    if (a.reemplazo) {
+      if (replacementIsGrounded(a.reemplazo, corpus)) a.reemplazo = matchFirstLetterCase(a.reemplazo, a.cita);
+      else { a.reemplazo = undefined; dropped.add(a.id); }
+    }
+    if (typeof f.occurrence === "number") occurrences.set(a.id, f.occurrence);
+    indexOf.set(a.id, index);
+    anotaciones.push(a);
+  });
+  if (anotaciones.length === 0) return { added: [], rejected };
+  const written = writeReviewFindings(
+    editor,
+    [{ pase: "asistente", invalid: 0, anotaciones }],
+    reviewFingerprint(essay),
+    generadoEn,
+    { replacePases: args.replaceOwn ? ["asistente"] : [], history: true, occurrences },
+  );
+  const writtenIds = new Set(written.map((w) => w.id));
+  for (const a of anotaciones) {
+    if (!writtenIds.has(a.id)) rejected.push({ index: indexOf.get(a.id)!, reason: "The writer already closed a correction of the assistant on this sentence." });
+  }
+  rejected.sort((x, y) => x.index - y.index);
+  return { added: written.map((w) => ({ ...w, ...(dropped.has(w.id) ? { replacementDropped: true } : {}) })), rejected };
 }
