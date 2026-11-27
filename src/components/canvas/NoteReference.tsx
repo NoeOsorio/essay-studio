@@ -83,14 +83,14 @@ export function ReferenceActions({
         <Copied />
       ) : (
         <button type="button" data-testid="reference-copy-apa" className={PRIMARY} onClick={() => copy("apa")}>
-          Copiar referencia
+          Copiar referencia completa
         </button>
       )}
       {copied === "inText" ? (
         <Copied />
       ) : (
         <button type="button" data-testid="reference-copy-intext" className={BUTTON} onClick={() => copy("inText")}>
-          Copiar cita
+          Copiar cita en el texto
         </button>
       )}
       {resolved.source && onOpenSource ? (

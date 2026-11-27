@@ -327,7 +327,7 @@ borra, la tarjeta deja de mostrar «Ver nota» y `noteId` vuelve como `null`.
 
 Una nota puede llevar su referencia en un apartado propio, sin ocupar espacio en
 el texto. El tablero muestra una sola línea (autor, año y página) y la referencia
-completa se abre desde ahí con «Copiar referencia», «Copiar cita» y «Ver en
+completa se abre desde ahí con «Copiar referencia completa», «Copiar cita en el texto» y «Ver en
 Fuentes».
 
 - `create_note` y `update_nodes` aceptan `reference`: `sourceId` (una fuente de

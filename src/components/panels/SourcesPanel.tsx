@@ -845,7 +845,7 @@ function SourceRow({
       <div className="flex min-w-0 grow flex-col gap-[4px]">
         <div className="truncate text-[15px] font-medium leading-[20px] text-ink-1">{titleOf(source)}</div>
         {cite ? (
-          <Tooltip label={copied ? "Copiada" : "Copiar cita"} side="bottom">
+          <Tooltip label={copied ? "Copiada" : "Copiar cita en el texto"} side="bottom">
             <button
               type="button"
               data-testid="fuente-copy-cite"
