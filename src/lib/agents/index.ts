@@ -221,6 +221,8 @@ export async function ask(args: {
   question: string;
   language?: EssayLanguage;
   onUpdate?: (update: InterrogateUpdate) => void;
+  /** Cancels the request when aborted (a client job that is cancelled). */
+  signal?: AbortSignal;
 }): Promise<{ result: string; costUsd?: number; provenance?: ReviewProvenance }> {
   const id = args.requestId ?? newId();
   return runSidecarCommand({
@@ -235,6 +237,7 @@ export async function ask(args: {
     },
     id,
     onUpdate: args.onUpdate,
+    signal: args.signal,
   });
 }
 

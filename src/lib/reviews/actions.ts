@@ -4,7 +4,7 @@ import { findCitaRange } from "@/lib/editor/findCita";
 import { getDocumentEditor } from "@/lib/mcp/document";
 import { liveBoardEditor } from "@/lib/mcp/board";
 import { openLanding, placeNote, endLanding } from "@/lib/questions/landing";
-import { linkFindingNote, markCardNotApplicable, useReplacement as replaceWithSuggestion } from "@/lib/review/actions";
+import { linkFindingNote, markCardNotApplicable, reopenCard, resolveCard, useReplacement as replaceWithSuggestion } from "@/lib/review/actions";
 import { deriveFindings } from "@/lib/review/findings";
 import { reviewFingerprint } from "@/lib/review/fingerprint";
 import { matchFirstLetterCase, replacementIsGrounded, reviewCorpus, writeReviewFindings } from "@/lib/review/run";
@@ -12,15 +12,21 @@ import { buildAnotacion } from "@/lib/agents";
 import { boardNoteIds } from "@/lib/board-notes";
 import { useStore } from "@/lib/store";
 import { ToolError } from "../../../shared/mcp";
-import type { Anotacion, Interrogatorio, Sage } from "@/lib/storage/types";
+import type { Anotacion, AgentColorKey, Interrogatorio, Sage } from "@/lib/storage/types";
 
-export type QuestionBatch = { sage: Sage; preguntas: string[]; costoUsd?: number };
+/**
+ * Questions of one agent for the board. `agent` is the name and color of a
+ * custom agent (shown on its notes); `own` marks the writer's own question,
+ * whose single entry in `preguntas` is the answer and whose note is titled
+ * with the question.
+ */
+export type QuestionBatch = { sage: Sage; preguntas: string[]; costoUsd?: number; agent?: { name: string; color: AgentColorKey }; own?: { question: string } };
 
 /** What an application of questions needs from the board, checked before anything is written. */
 export function requireReviewBoard(essayId: string, batches: QuestionBatch[] = []): BoardEditor {
   const editor = liveBoardEditor(essayId);
   if (editor.getIsReadonly()) throw new ToolError("READ_ONLY", "The board is read-only.");
-  if (!Array.isArray(batches) || batches.some((batch) => !batch || !["em", "sis", "pra", "cri"].includes(batch.sage) || !Array.isArray(batch.preguntas) || batch.preguntas.some((text) => typeof text !== "string" || !text.trim()))) throw new ToolError("INVALID_ARGUMENTS", "Provide valid selected questions.");
+  if (!Array.isArray(batches) || batches.some((batch) => !batch || !(["em", "sis", "pra", "cri"].includes(batch.sage) || /^c_./u.test(batch.sage)) || !Array.isArray(batch.preguntas) || batch.preguntas.some((text) => typeof text !== "string" || !text.trim()))) throw new ToolError("INVALID_ARGUMENTS", "Provide valid selected questions.");
   const count = batches.reduce((sum, batch) => sum + batch.preguntas.length, 0);
   if (editor.getCurrentPageShapeIds().size + count > editor.options.maxShapesPerPage) throw new ToolError("BOARD_CAPACITY", "The selected questions exceed the board capacity.");
   // A question run in the panel owns the landing region; a second one would collide with it.
@@ -40,11 +46,11 @@ export function materializeReviewQuestions(essayId: string, batches: QuestionBat
   const nonEmpty = batches.filter((batch) => batch.preguntas.length > 0);
   if (nonEmpty.length === 0) return;
   const generadoEn = new Date().toISOString();
-  const session = openLanding(editor, essayId, nonEmpty.map((batch) => batch.sage));
+  const session = openLanding(editor, essayId, [...new Set(nonEmpty.map((batch) => batch.sage))], nonEmpty.some((batch) => batch.own));
   const created: TLShapeId[] = [];
   try {
     for (const batch of nonEmpty) for (const text of batch.preguntas) {
-      created.push(placeNote(session, editor, { sage: batch.sage, text, ...(fuenteId ? { fuenteId } : {}) }));
+      created.push(placeNote(session, editor, { sage: batch.sage, text, ...(batch.agent ? { agentName: batch.agent.name, agentColor: batch.agent.color } : {}), ...(batch.own ? { title: batch.own.question } : {}), ...(fuenteId ? { fuenteId } : {}) }));
     }
     if (created.some((id) => !editor.getShape(id))) throw new ToolError("EDIT_REJECTED", "The board did not create every selected question.");
   } catch (error) {
@@ -55,7 +61,7 @@ export function materializeReviewQuestions(essayId: string, batches: QuestionBat
     endLanding(session);
   }
   const entries: Interrogatorio[] = nonEmpty.map((batch) => ({
-    sage: batch.sage, preguntas: batch.preguntas, generadoEn, runId,
+    sage: batch.sage, preguntas: batch.own ? [batch.own.question] : batch.preguntas, generadoEn, runId, ...(batch.own ? { propia: true as const } : {}),
     ...(batch.costoUsd ? { costoUsd: batch.costoUsd } : {}),
     ...(fuenteId ? { fuenteId } : {}),
   }));
@@ -86,7 +92,7 @@ export function assertReviewDocumentEditable(editor: Editor): void {
  *   resolved by replacement). Discard: close as not applicable. Clear: remove
  *   every finding and the evaluation, as Limpiar evaluación does.
  */
-export function editAnnotations(args: { essayId: string; operation: "apply" | "discard" | "clear"; ids?: string[] }): { changed: boolean } {
+export function editAnnotations(args: { essayId: string; operation: "apply" | "discard" | "clear" | "resolve" | "reopen"; ids?: string[] }): { changed: boolean } {
   const editor = getDocumentEditor(args.essayId);
   assertReviewDocumentEditable(editor);
   const essay = useStore.getState().current;
@@ -99,6 +105,12 @@ export function editAnnotations(args: { essayId: string; operation: "apply" | "d
   }
   const ids = args.ids;
   if (!ids || !ids.length || new Set(ids).size !== ids.length) throw new ToolError("INVALID_ARGUMENTS", "Provide explicit, distinct annotation IDs.");
+  if (args.operation === "reopen") {
+    // The card's Reabrir: only findings closed as resolved come back.
+    for (const id of ids) if (!views.some((item) => item.id === id && item.status === "resolved")) throw new ToolError("ANNOTATION_NOT_FOUND", "An annotation ID is not a resolved finding of the current document.");
+    reopenCard(ids);
+    return { changed: true };
+  }
   const selected = ids.map((id) => {
     const view = views.find((item) => item.id === id && item.status === "open");
     if (!view) throw new ToolError("ANNOTATION_NOT_FOUND", "An annotation ID is not an open finding of the current document.");
@@ -107,6 +119,11 @@ export function editAnnotations(args: { essayId: string; operation: "apply" | "d
   });
   if (args.operation === "discard") {
     markCardNotApplicable(ids);
+    return { changed: true };
+  }
+  if (args.operation === "resolve") {
+    // «Ya lo resolví»: closes the findings without touching the text.
+    resolveCard(ids);
     return { changed: true };
   }
   const sorted = selected.sort((a, b) => (b.from ?? 0) - (a.from ?? 0));

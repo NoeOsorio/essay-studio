@@ -316,5 +316,34 @@ tablero centrado en la nota y su vista de lectura.
    nota, o `null` para quitar el vínculo). Un solo deshacer revierte el cambio.
 
 `get_annotation` y `list_annotations` devuelven `noteId` (o `null`). Si la nota se
-borra, la tarjeta deja de mostrar «Ver nota» y `noteId` vuelve como `null`. La
-versión de capacidades es la 5.
+borra, la tarjeta deja de mostrar «Ver nota» y `noteId` vuelve como `null`.
+
+## Correcciones, agentes y preguntas (capacidades 6)
+
+La versión de capacidades es la 6.
+
+- `edit_annotations` ahora también cierra y reabre: `resolve` es «Ya lo resolví»
+  (cierra sin tocar el texto) y `reopen` devuelve una corrección resuelta; con
+  `apply`, `discard` y `clear` hace lo mismo que las tarjetas.
+- `list_agents` lista los cuatro agentes fijos (con descripción, ejemplos y cuándo
+  corren) y los agentes propios con todos sus campos. `edit_agent` crea, cambia o
+  borra un agente propio con las reglas del formulario de Ajustes (nombre de 1 a 40
+  caracteres, instrucciones de 1 a 2000); no necesita ensayo abierto.
+  `improve_agent_instructions` hace lo de «Mejorar»: devuelve la reescritura y solo
+  la guarda con `apply: true`. Usa un modelo, así que pídelo solo cuando el usuario
+  lo quiera.
+- Los agentes propios entran en las corridas: `start_review.pases` acepta
+  `custom:<id>` y `start_interrogation.sages` acepta `c_<id>`. Sin lista, usan los
+  mismos valores de la app, incluidos los agentes propios que están encendidos por
+  defecto. Cada pase o agente es una llamada al modelo. Las correcciones de un
+  agente propio llevan su nombre y color, y solo traen texto de reemplazo si el
+  agente puede pegar.
+- `start_interrogation.ownQuestion` hace una pregunta tuya sobre el texto; la
+  responde un agente y queda en una nota con la pregunta como título.
+- `list_annotations` filtra por `criterioId`, por `pase` (`asistente` o
+  `custom:<id>`) y por `sage` (`as` o `c_<id>`), y cada elemento trae `criterioId`,
+  `reemplazo` y `noteId`.
+- `get_basic_info` informa `reviewRun` y `questionRun`, aunque la corrida la haya
+  iniciado la persona desde los paneles. `control_run` cancela o reintenta esa
+  corrida (reintentar usa modelos y pide `userRequested: true`). `get_review_job`
+  devuelve `omittedSources`, las fuentes que no cupieron.

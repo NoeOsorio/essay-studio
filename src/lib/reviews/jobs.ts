@@ -1,18 +1,18 @@
-import { critique, interrogate, parseAnnotationsDetailed, SidecarRequestError } from "@/lib/agents";
+import { ask, critique, interrogate, parseAnnotationsDetailed, SidecarRequestError } from "@/lib/agents";
 import { useStore } from "@/lib/store";
 import { MAX_PAGE_SIZE } from "@/lib/mcp/collections";
 import { extractPlainText, reviewFingerprint as contentFingerprint } from "@/lib/review/fingerprint";
-import { prepareAnotaciones, reviewCorpus, sageForPase, writeReviewFindings, type PassFindings } from "@/lib/review/run";
+import { customAgentOfPase, defaultReviewPases, isCustomPase, prepareAnotaciones, reviewCorpus, sageForPase, writeReviewFindings, type PassFindings } from "@/lib/review/run";
 import { getDocumentEditor } from "@/lib/mcp/document";
 import { defaultPasesForMode, defaultSagesForMode, ALL_SAGES } from "@/lib/sages";
 import { REVIEWER_PROFILES, DEFAULT_REVIEWER_PROFILE } from "../../../sidecar/src/model-profiles";
-import { QUESTIONS_PER_AGENT, sourceFits } from "../../../sidecar/src/review-contract";
+import { MAX_QUESTION_CHARS, QUESTIONS_PER_AGENT, sourceFits } from "../../../sidecar/src/review-contract";
 import { ToolError } from "../../../shared/mcp";
-import type { Anotacion, Essay, Pase, ReviewProvenance, Sage } from "@/lib/storage/types";
-import { availableAnnotationIds, assertReviewDocumentEditable, materializeReviewQuestions, requireReviewBoard } from "./actions";
+import type { Anotacion, CustomAgent, Essay, Pase, ReviewProvenance, Sage } from "@/lib/storage/types";
+import { availableAnnotationIds, assertReviewDocumentEditable, materializeReviewQuestions, requireReviewBoard, type QuestionBatch } from "./actions";
 
-export type ReviewTask = { key: string; sage: Sage; pase?: Pase; status: "running" | "completed" | "failed"; raw: string; annotations: Anotacion[]; questions: { id: string; text: string; sage: Sage }[]; error?: string; costUsd?: number; provenance?: ReviewProvenance; invalidLines?: number; unavailableAnnotationIds?: string[]; omittedSources?: string[] };
-export type ReviewJob = { id: string; essayId: string; kind: "review" | "interrogation"; status: "running" | "completed" | "failed" | "cancelled"; tasks: ReviewTask[]; fingerprint: string; applied: boolean; controller: AbortController; scope?: string; operationId: string; requestKey: string; sourceId?: string };
+export type ReviewTask = { key: string; sage: Sage; pase?: Pase; status: "running" | "completed" | "failed"; raw: string; annotations: Anotacion[]; questions: { id: string; text: string; sage: Sage; title?: string }[]; error?: string; costUsd?: number; provenance?: ReviewProvenance; invalidLines?: number; unavailableAnnotationIds?: string[]; omittedSources?: string[]; /** The writer's own question (interrogation only): this task answers it. */ ownQuestion?: string };
+export type ReviewJob = { id: string; essayId: string; kind: "review" | "interrogation"; status: "running" | "completed" | "failed" | "cancelled"; tasks: ReviewTask[]; fingerprint: string; applied: boolean; controller: AbortController; scope?: string; operationId: string; requestKey: string; sourceId?: string; /** Custom agents of the job by task key, captured at start: editing or deleting one later changes nothing here. */ agents: Map<string, CustomAgent> };
 const jobs = new Map<string, ReviewJob>();
 const operations = new Map<string, string>();
 const listeners = new Set<() => void>();
@@ -46,7 +46,7 @@ export function getReviewJob(args: { essayId: string; jobId: string; offset?: nu
   const limit = args.limit ?? 50;
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > PAGE_LIMIT) throw new ToolError("INVALID_ARGUMENTS", `Use a nonnegative offset and limit from 1 to ${PAGE_LIMIT}.`);
   const query = (args.query ?? "").toLowerCase();
-  const all = job.kind === "review" ? job.tasks.flatMap((task) => task.annotations.map((a) => ({ kind: "annotation", ...a }))) : job.tasks.flatMap((task) => task.questions.map((q) => ({ kind: "question", ...q })));
+  const all = job.kind === "review" ? job.tasks.flatMap((task) => task.annotations.map((a) => ({ kind: "annotation", ...a, ...agentNameOf(job, task.key) }))) : job.tasks.flatMap((task) => task.questions.map((q) => ({ kind: "question", ...q, ...agentNameOf(job, task.key) })));
   const filtered = query ? all.filter((item) => JSON.stringify(item).toLowerCase().includes(query)) : all;
   const rawFrom = args.rawFrom ?? 0;
   const rawTo = args.rawTo ?? rawFrom;
@@ -63,9 +63,14 @@ export function getReviewJob(args: { essayId: string; jobId: string; offset?: nu
   }
   return { jobId: job.id, essayId: job.essayId, kind: job.kind, status: job.status, applied: job.applied,
     stale: job.fingerprint !== reviewFingerprint(useStore.getState().current),
-    tasks: job.tasks.map((task) => ({ key: task.key, sage: task.sage, pase: task.pase, status: task.status, error: task.error, costUsd: task.costUsd, provenance: task.provenance, invalidLines: task.invalidLines, unavailableAnnotationIds: task.unavailableAnnotationIds,
+    omittedSources: [...new Set(job.tasks.flatMap((task) => task.omittedSources ?? []))],
+    tasks: job.tasks.map((task) => ({ key: task.key, sage: task.sage, pase: task.pase, ...agentNameOf(job, task.key), ...(task.ownQuestion ? { ownQuestion: task.ownQuestion } : {}), status: task.status, error: task.error, costUsd: task.costUsd, provenance: task.provenance, invalidLines: task.invalidLines, unavailableAnnotationIds: task.unavailableAnnotationIds, omittedSources: task.omittedSources,
       ...(args.rawFrom !== undefined || args.rawTo !== undefined ? { raw: task.raw.slice(rawFrom, rawTo), rawLength: task.raw.length } : {}) })),
-    results: filtered.slice(offset, offset + limit).map((item) => ({ id: item.id, kind: item.kind, sage: item.sage, preview: ("mensaje" in item ? item.mensaje : item.text).slice(0, 240) })), detail, nextOffset: offset + limit < filtered.length ? offset + limit : null, total: filtered.length };
+    results: filtered.slice(offset, offset + limit).map((item) => ({ id: item.id, kind: item.kind, sage: item.sage, ...("agentName" in item ? { agentName: item.agentName } : {}), ...("title" in item && item.title ? { question: item.title } : {}), preview: ("mensaje" in item ? item.mensaje : item.text).slice(0, 240) })), detail, nextOffset: offset + limit < filtered.length ? offset + limit : null, total: filtered.length };
+}
+function agentNameOf(job: ReviewJob, key: string): { agentName?: string } {
+  const agent = job.agents.get(key);
+  return agent ? { agentName: agent.name } : {};
 }
 function reserve(args: { essayId: string; operationId: string; userRequested: boolean; scope?: string }, kind: ReviewJob["kind"], request: unknown): ReviewJob {
   if (args.userRequested !== true || !args.operationId || args.operationId.length > 256) throw new ToolError("EXPLICIT_REQUEST_REQUIRED", "Model execution requires an explicit user request and a stable operation ID.");
@@ -88,7 +93,7 @@ function reserve(args: { essayId: string; operationId: string; userRequested: bo
     if (error instanceof ToolError) throw error;
     throw new ToolError("OPERATION_LEDGER_FAILED", "The app could not record this operation safely. No model was started.");
   }
-  const job: ReviewJob = { id, essayId: essay.id, kind, status: "running", tasks: [], fingerprint: reviewFingerprint(essay), applied: false, controller: new AbortController(), scope: args.scope, operationId: args.operationId, requestKey };
+  const job: ReviewJob = { id, essayId: essay.id, kind, status: "running", tasks: [], fingerprint: reviewFingerprint(essay), applied: false, controller: new AbortController(), scope: args.scope, operationId: args.operationId, requestKey, agents: new Map() };
   jobs.set(id, job); operations.set(args.operationId, id);
   return job;
 }
@@ -109,22 +114,34 @@ function finalize(job: ReviewJob): void {
 }
 export function startReview(args: { essayId: string; operationId: string; userRequested: boolean; pases?: Pase[]; reviewerProfile?: string; scope?: string }) {
   const essay = current(args.essayId);
-  const passes = args.pases ?? defaultPasesForMode(essay.mode);
+  // Same defaults as the review panel: the checks for the essay type plus the custom agents that are on.
+  const passes = args.pases ?? defaultReviewPases();
   const allowed = defaultPasesForMode(essay.mode);
-  if (!passes.length || new Set(passes).size !== passes.length || passes.some((pase) => !allowed.includes(pase))) throw new ToolError("INVALID_ARGUMENTS", "Choose distinct review passes available for this essay mode.");
+  if (!passes.length || new Set(passes).size !== passes.length || passes.some((pase) => !isCustomPase(pase) && !allowed.includes(pase))) throw new ToolError("INVALID_ARGUMENTS", "Choose distinct review passes available for this essay mode, or custom:<agent id> for a reviewing agent.");
+  const saved = useStore.getState().agents;
+  const customs = new Map<string, CustomAgent>();
+  for (const pase of passes) {
+    if (!isCustomPase(pase)) continue;
+    const agent = saved.find((item) => item.id === customAgentOfPase(pase));
+    if (!agent) throw new ToolError("AGENT_NOT_FOUND", `No custom agent has the id in ${pase}. Read list_agents.`);
+    if (agent.does === "ask") throw new ToolError("INVALID_ARGUMENTS", `The agent ${agent.name} only asks questions; it cannot review. Change what it does with edit_agent or use start_interrogation.`);
+    customs.set(pase, structuredClone(agent));
+  }
   const profile = args.reviewerProfile ?? essay.reviewerProfile ?? DEFAULT_REVIEWER_PROFILE;
   if (!REVIEWER_PROFILES.some((item) => item.id === profile)) throw new ToolError("INVALID_ARGUMENTS", "Unknown reviewer profile. No fallback was attempted.");
   // The same text the review panel sends, so quotes locate the same way.
   getDocumentEditor(essay.id);
   const text = extractPlainText(essay.content);
   if (!text.trim()) throw new ToolError("INVALID_ARGUMENTS", "The essay is empty.");
-  const job = reserve(args, "review", { passes, profile });
+  const job = reserve(args, "review", { passes, profile, agents: [...customs.values()].map((agent) => [agent.id, agent.instructions, agent.does, agent.canPaste]) });
   if (job.tasks.length) return getReviewJob({ essayId: essay.id, jobId: job.id });
+  job.agents = customs;
   const captured = structuredClone(essay);
   job.tasks = passes.map((pase) => ({ key: pase, pase, sage: sageForPase(pase, essay.mode), status: "running", raw: "", annotations: [], questions: [] }));
   void Promise.all(job.tasks.map(async (task) => {
     try {
-      const result = await critique({ sage: task.sage, pase: task.pase!, text, rubrica: captured.rubrica?.criterios, fuentes: captured.fuentes, language: captured.language ?? "es", reviewerProfile: profile, signal: job.controller.signal,
+      const custom = job.agents.get(task.key);
+      const result = await critique({ sage: task.sage, pase: task.pase!, ...(custom ? { custom } : {}), text, rubrica: captured.rubrica?.criterios, fuentes: captured.fuentes, language: captured.language ?? "es", reviewerProfile: profile, signal: job.controller.signal,
         onUpdate: (update) => { if (job.status !== "cancelled" && update.kind === "token") { task.raw += update.delta; notify(); } } });
       if (job.status === "cancelled") return;
       const parsed = parseAnnotationsDetailed(result.result, captured.fuentes ?? []);
@@ -132,7 +149,7 @@ export function startReview(args: { essayId: string; operationId: string; userRe
       task.invalidLines = parsed.invalidLines.length;
       task.omittedSources = result.fuentesOmitidas.map((source) => source.nombre);
       // Replacements are checked against the essay and its sources now, so what a client sees is what would be written.
-      task.annotations = prepareAnotaciones({ raw: parsed.annotations, pase: task.pase!, mode: captured.mode, criterios: captured.rubrica?.criterios, provenance: result.provenance, corpus: reviewCorpus(captured.content, captured.fuentes), generadoEn: new Date().toISOString() });
+      task.annotations = prepareAnotaciones({ raw: parsed.annotations, pase: task.pase!, mode: captured.mode, criterios: captured.rubrica?.criterios, provenance: result.provenance, corpus: reviewCorpus(captured.content, captured.fuentes), generadoEn: new Date().toISOString(), canPaste: custom?.canPaste === true });
       task.status = "completed";
     } catch (error) {
       if (job.status !== "cancelled") {
@@ -145,7 +162,7 @@ export function startReview(args: { essayId: string; operationId: string; userRe
   notify();
   return getReviewJob({ essayId: essay.id, jobId: job.id });
 }
-export function startInterrogation(args: { essayId: string; operationId: string; userRequested: boolean; sages?: Sage[]; text?: string; sourceId?: string; scope?: string }) {
+export function startInterrogation(args: { essayId: string; operationId: string; userRequested: boolean; sages?: Sage[]; text?: string; sourceId?: string; ownQuestion?: string; scope?: string }) {
   const essay = current(args.essayId);
   if (args.text !== undefined && args.sourceId !== undefined) throw new ToolError("INVALID_ARGUMENTS", "Choose text or a saved source, not both.");
   const source = args.sourceId ? essay.fuentes?.find((item) => item.id === args.sourceId) : undefined;
@@ -153,17 +170,50 @@ export function startInterrogation(args: { essayId: string; operationId: string;
   const text = args.text ?? source?.contenido ?? getDocumentEditor(essay.id).state.doc.textContent;
   if (!text.trim()) throw new ToolError("INVALID_ARGUMENTS", "Provide text to interrogate.");
   if (!sourceFits(text)) throw new ToolError("INVALID_ARGUMENTS", "The text is too long to question at once. Provide a part of it.");
-  const sages = args.sages ?? defaultSagesForMode(essay.mode);
-  if (!sages.length || new Set(sages).size !== sages.length || sages.some((sage) => !ALL_SAGES.includes(sage))) throw new ToolError("INVALID_ARGUMENTS", "Choose distinct reviewers.");
-  const job = reserve(args, "interrogation", { sages, text, sourceId: args.sourceId });
+  const saved = useStore.getState().agents;
+  const asking = (agent: CustomAgent) => agent.does !== "review";
+  // Same defaults as the questions panel for the essay type, plus the custom agents that ask and are on.
+  const sages = args.sages ?? [...defaultSagesForMode(essay.mode), ...saved.filter((agent) => asking(agent) && agent.defaultOn).map((agent) => agent.id)];
+  if (!sages.length || new Set(sages).size !== sages.length || sages.some((sage) => !ALL_SAGES.includes(sage) && !(typeof sage === "string" && sage.startsWith("c_")))) throw new ToolError("INVALID_ARGUMENTS", "Choose distinct agents: em, sis, pra, cri or c_<agent id>.");
+  const customs = new Map<string, CustomAgent>();
+  for (const sage of sages) {
+    if (ALL_SAGES.includes(sage)) continue;
+    const agent = saved.find((item) => item.id === sage);
+    if (!agent) throw new ToolError("AGENT_NOT_FOUND", `No custom agent has the id ${sage}. Read list_agents.`);
+    if (!asking(agent)) throw new ToolError("INVALID_ARGUMENTS", `The agent ${agent.name} only reviews; it cannot ask questions. Change what it does with edit_agent or use start_review.`);
+    customs.set(sage, structuredClone(agent));
+  }
+  const ownQuestion = args.ownQuestion === undefined ? undefined : args.ownQuestion.trim();
+  if (ownQuestion !== undefined && (!ownQuestion || ownQuestion.length > MAX_QUESTION_CHARS)) throw new ToolError("INVALID_ARGUMENTS", `ownQuestion must be 1 to ${MAX_QUESTION_CHARS} characters.`);
+  // The own question is answered by Evidencia, or by the first agent chosen, as in the panel.
+  const answerer: Sage = sages.includes("em") ? "em" : sages[0]!;
+  const job = reserve(args, "interrogation", { sages, text, sourceId: args.sourceId, ownQuestion, agents: [...customs.values()].map((agent) => [agent.id, agent.instructions]) });
   job.sourceId = args.sourceId;
   if (job.tasks.length) return getReviewJob({ essayId: essay.id, jobId: job.id });
+  job.agents = customs;
   job.tasks = sages.map((sage) => ({ key: sage, sage, status: "running", raw: "", annotations: [], questions: [] }));
+  if (ownQuestion) {
+    job.tasks.push({ key: "own", sage: answerer, status: "running", raw: "", annotations: [], questions: [], ownQuestion });
+    if (customs.has(answerer)) job.agents.set("own", customs.get(answerer)!);
+  }
   void Promise.all(job.tasks.map(async (task) => {
     try {
       // The sidecar is the only reader of model text: finished questions arrive as events.
       const heard: string[] = [];
-      const result = await interrogate({ sage: task.sage, text, language: essay.language ?? "es", signal: job.controller.signal,
+      const custom = job.agents.get(task.key);
+      if (task.ownQuestion) {
+        // The writer's own question: one answer, kept whole, on a note titled with the question.
+        const answered = await ask({ sage: task.sage, ...(custom ? { custom } : {}), text, question: task.ownQuestion, language: essay.language ?? "es", signal: job.controller.signal });
+        if (job.status === "cancelled") return;
+        const answer = answered.result.trim();
+        if (!answer) throw new ToolError("NO_ANSWER", "The agent returned no answer.");
+        task.raw = answered.result; task.costUsd = answered.costUsd; task.provenance = answered.provenance;
+        task.questions = [{ id: crypto.randomUUID(), text: answer, sage: task.sage, title: task.ownQuestion }];
+        task.status = "completed";
+        notify();
+        return;
+      }
+      const result = await interrogate({ sage: task.sage, ...(custom ? { custom } : {}), text, language: essay.language ?? "es", signal: job.controller.signal,
         onUpdate: (update) => {
           if (job.status === "cancelled") return;
           if (update.kind === "token") { task.raw += update.delta; notify(); }
@@ -188,6 +238,15 @@ export function cancelReviewJob(args: { essayId: string; jobId: string }) {
   return getReviewJob(args);
 }
 export function cancelReviewScope(scope: string): void { for (const job of jobs.values()) if (job.scope === scope && job.status === "running") cancelReviewJob({ essayId: job.essayId, jobId: job.id }); }
+/** The selected questions of one task as a board batch: its agent's name and color for custom agents, and the writer's own question as the note title. */
+function questionBatch(job: ReviewJob, task: ReviewTask, selected: Set<string>): QuestionBatch {
+  const agent = job.agents.get(task.key);
+  return {
+    sage: task.sage, preguntas: task.questions.filter((q) => selected.has(q.id)).map((q) => q.text), costoUsd: task.costUsd,
+    ...(agent ? { agent: { name: agent.name, color: agent.color } } : {}),
+    ...(task.ownQuestion ? { own: { question: task.ownQuestion } } : {}),
+  };
+}
 export type ApplyReviewArgs = { essayId: string; jobId: string; annotationIds?: string[]; questionIds?: string[] };
 export function validateReviewApplication(args: ApplyReviewArgs): void {
   const job = lookup(args);
@@ -204,7 +263,7 @@ export function validateReviewApplication(args: ApplyReviewArgs): void {
     // A quote that no longer locates is kept as a finding with no underline, as the review panel does.
     assertReviewDocumentEditable(editor);
   }
-  else requireReviewBoard(args.essayId, job.tasks.map((task) => ({ sage: task.sage, preguntas: task.questions.filter((q) => selected.includes(q.id)).map((q) => q.text) })));
+  else requireReviewBoard(args.essayId, job.tasks.map((task) => questionBatch(job, task, new Set(selected))));
 }
 export function applyReviewResults(args: ApplyReviewArgs) {
   validateReviewApplication(args);
@@ -215,11 +274,12 @@ export function applyReviewResults(args: ApplyReviewArgs) {
     const passes: PassFindings[] = job.tasks.filter((task) => task.status === "completed").map((task) => ({
       pase: task.pase!, invalid: task.invalidLines ?? 0, provenance: task.provenance,
       anotaciones: task.annotations.filter((a) => selected.has(a.id)),
+      ...(job.agents.has(task.key) ? { agent: { name: job.agents.get(task.key)!.name, color: job.agents.get(task.key)!.color } } : {}),
     }));
     writeReviewFindings(getDocumentEditor(args.essayId), passes, contentFingerprint(useStore.getState().current!));
   } else {
     const selected = new Set(args.questionIds);
-    const batches = job.tasks.map((task) => ({ sage: task.sage, preguntas: task.questions.filter((q) => selected.has(q.id)).map((q) => q.text), costoUsd: task.costUsd })).filter((batch) => batch.preguntas.length);
+    const batches = job.tasks.map((task) => questionBatch(job, task, selected)).filter((batch) => batch.preguntas.length);
     materializeReviewQuestions(args.essayId, batches, job.id, job.sourceId);
   }
   job.applied = true; notify();

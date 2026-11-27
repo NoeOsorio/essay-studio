@@ -38,14 +38,16 @@ export function referenceWarnings(): JsonObject {
 export function readLibrary(name: string, args: JsonObject): JsonObject | Promise<JsonObject> {
   const essay = current();
   if (name === "list_annotations" || name === "get_annotation") {
+    if (typeof args.pase === "string" && !/^(coherencia|estilo|argumento|apa|asistente|custom:.+)$/u.test(args.pase)) throw new ToolError("INVALID_ARGUMENTS", "pase must be coherencia, estilo, argumento, apa, asistente or custom:<agent id>.");
+    if (typeof args.sage === "string" && !/^(em|sis|pra|cri|as|c_.+)$/u.test(args.sage)) throw new ToolError("INVALID_ARGUMENTS", "sage must be em, sis, pra, cri, as or c_<agent id>.");
     const all = findings();
     if (name === "get_annotation") {
       const found = all.find(item => item.id === args.id);
       if (!found) throw new ToolError("NOT_FOUND", "The annotation does not exist.");
       return { id: found.id, noteId: liveNoteId(essay.board, found.noteId) ?? null, ...textRange(JSON.stringify(found), args), ...referenceWarnings() };
     }
-    const result = page(all.filter(item => matches(args.query, item.mensaje, item.quote) && (!args.pase || item.pase === args.pase) && (!args.sage || item.sage === args.sage) && (!args.severity || item.severidad === args.severity) && (!args.status || item.status === args.status)), args);
-    return { ...result, items: result.items.map(item => ({ id: item.id, from: item.from, to: item.to, located: item.located, status: item.status, pase: item.pase, sage: item.sage, severity: item.severidad, message: item.mensaje.slice(0, 512), quote: item.quote.slice(0, 512), noteId: liveNoteId(essay.board, item.noteId) ?? null })), ...referenceWarnings() };
+    const result = page(all.filter(item => matches(args.query, item.mensaje, item.quote) && (!args.pase || item.pase === args.pase) && (!args.sage || item.sage === args.sage) && (!args.criterioId || item.criterioId === args.criterioId) && (!args.severity || item.severidad === args.severity) && (!args.status || item.status === args.status)), args);
+    return { ...result, items: result.items.map(item => ({ id: item.id, from: item.from, to: item.to, located: item.located, status: item.status, pase: item.pase, sage: item.sage, ...(item.agentName ? { agentName: item.agentName } : {}), severity: item.severidad, message: item.mensaje.slice(0, 512), quote: item.quote.slice(0, 512), criterioId: item.criterioId ?? null, reemplazo: item.reemplazo?.slice(0, 512) ?? null, noteId: liveNoteId(essay.board, item.noteId) ?? null })), ...referenceWarnings() };
   }
   if (name === "list_sources") {
     const result = page((essay.fuentes ?? []).filter(source => matches(args.query, source.nombre, source.cita) && (!args.origin || source.origen === args.origin)), args);

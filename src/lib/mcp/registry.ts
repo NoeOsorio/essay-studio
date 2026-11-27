@@ -7,6 +7,8 @@ import { editLibrary, readLibrary, validateLibraryEdit } from "./library";
 import { matches, page } from "./collections";
 import { startReview, startInterrogation, getReviewJob, cancelReviewJob, cancelReviewScope, listReviewerProfiles, validateReviewApplication, applyReviewResults } from "@/lib/reviews/jobs";
 import { addFindings, editAnnotations, linkNote } from "@/lib/reviews/actions";
+import { editAgent, improveAgentInstructions, listAgents } from "./agents";
+import { controlRun, describeRuns } from "./runs";
 import type { Pase, Sage } from "@/lib/storage/types";
 import { REVIEWER_PROFILES } from "../../../sidecar/src/model-profiles";
 
@@ -79,6 +81,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
       titleHistory, activePanel: state.overlay ? panelNames[state.overlay] : null, scorebarDismissed: state.scorebarDismissed,
       essay: state.current ? { id: state.current.id, title: state.current.title, mode: state.current.mode, language: state.current.language ?? "es", wordCount: state.current.wordCount } : null,
       board: { open: state.boardOpen, ...getBoardSummary() },
+      ...describeRuns(),
       capabilities: { protocolVersion: PROTOCOL_VERSION, capabilityVersion: CAPABILITY_VERSION, platform: "macos", tools: TOOL_DEFINITIONS.map(tool => ({ name: tool.name, effect: tool.effect })) } });
   }
   if (name === "list_essays") {
@@ -87,6 +90,11 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
     return envelope({ ...result, essays: result.items });
   }
   if (name === "list_reviewer_profiles") return envelope(listReviewerProfiles());
+  // Agents belong to the app, not to an essay: no open essay or revision is needed.
+  if (name === "list_agents") return envelope(listAgents());
+  if (name === "edit_agent") { const result = await editAgent(args); guard(true); return envelope(result); }
+  if (name === "improve_agent_instructions") { const result = await improveAgentInstructions(args); guard(true); return envelope(result); }
+  if (name === "control_run") return envelope(controlRun(args as Parameters<typeof controlRun>[0]), essayId);
   if (["open_essay", "create_essay", "close_essay", "delete_essay"].includes(name)) {
     if (args.revision !== undefined) checkRevision(args.revision);
     const state = useStore.getState(); const before = state.current;
@@ -148,7 +156,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   if (definition.effect === "model") {
     guard(); checkRevision(args.revision);
     const common = { essayId, operationId: args.operationId as string, userRequested: args.userRequested === true, scope: requestSession };
-    const result = name === "start_review" ? startReview({ ...common, pases: args.pases as Pase[] | undefined, reviewerProfile: args.reviewerProfile as string | undefined }) : startInterrogation({ ...common, sages: args.sages as Sage[] | undefined, text: args.text as string | undefined, sourceId: args.sourceId as string | undefined });
+    const result = name === "start_review" ? startReview({ ...common, pases: args.pases as Pase[] | undefined, reviewerProfile: args.reviewerProfile as string | undefined }) : startInterrogation({ ...common, sages: args.sages as Sage[] | undefined, text: args.text as string | undefined, sourceId: args.sourceId as string | undefined, ownQuestion: args.ownQuestion as string | undefined });
     return envelope(result, essayId);
   }
   if (definition.effect === "view") {
