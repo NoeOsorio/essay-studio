@@ -85,13 +85,35 @@ function TipTapEditor({
 
   const slashRenderer = useMemo(
     () => () => {
+      // Opens below the caret when it fits, otherwise above, so the menu is
+      // never cut by the bottom of the window; it scrolls inside the space left.
+      function place(rect: { top: number; left: number; bottom: number }) {
+        const el = slashRef.current.el;
+        if (!el) return;
+        const menu = el.firstElementChild as HTMLElement | null;
+        const gap = 6;
+        const margin = 12;
+        const below = window.innerHeight - rect.bottom - gap - margin;
+        const above = rect.top - gap - margin;
+        if (menu) menu.style.maxHeight = "";
+        const natural = menu?.offsetHeight ?? 0;
+        const openUp = natural > below && above > below;
+        const room = Math.max(120, openUp ? above : below);
+        if (menu) menu.style.maxHeight = `${Math.min(420, room)}px`;
+        const height = Math.min(natural, room);
+        el.style.top = openUp ? `${rect.top - gap - height}px` : `${rect.bottom + gap}px`;
+        const width = menu?.offsetWidth ?? 272;
+        el.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`;
+      }
       function position(rect: { top: number; left: number; bottom: number }) {
         const el = slashRef.current.el;
         if (!el) return;
         el.style.position = "fixed";
+        el.style.zIndex = "50";
         el.style.top = `${rect.bottom + 6}px`;
         el.style.left = `${rect.left}px`;
-        el.style.zIndex = "50";
+        // Measure after React has rendered the rows.
+        requestAnimationFrame(() => place(rect));
       }
 
       return {
