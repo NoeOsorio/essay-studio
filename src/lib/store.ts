@@ -334,6 +334,9 @@ type State = {
   updateRubrica: (rubrica: Rubrica | undefined) => void;
   /** Open the fuentes (sources library) overlay. */
   openFuentes: (opts?: OverlayOpenArg) => void;
+  /** Open the sources panel with one source opened (a note's reference). `nonce` re-applies it when the panel is already open. */
+  fuenteRequest: { id: string; nonce: number } | null;
+  showFuente: (id: string) => void;
   /** Append a fuente to the current essay; flush. */
   addFuente: (fuente: Fuente) => void;
   /** Patch an existing fuente by id; flush. */
@@ -924,7 +927,7 @@ export const useStore = create<State>((set, get) => ({
     // Clear any pending prefill when the overlay closes, so the next
     // manual "Interrogar" starts on an empty textarea.
     if (overlay === null) {
-      set({ overlay, lecturaPrefill: "", lecturaPreset: null, historyRequest: null, overlayInstant: false });
+      set({ overlay, lecturaPrefill: "", lecturaPreset: null, historyRequest: null, fuenteRequest: null, overlayInstant: false });
     } else {
       set({ overlay });
     }
@@ -957,6 +960,15 @@ export const useStore = create<State>((set, get) => ({
 
   openFuentes(opts) {
     set({ overlay: "fuentes", overlayInstant: isInstant(opts) });
+  },
+
+  fuenteRequest: null,
+  showFuente(id) {
+    set((s) => ({
+      overlay: "fuentes",
+      overlayInstant: s.overlay === "fuentes",
+      fuenteRequest: { id, nonce: (s.fuenteRequest?.nonce ?? 0) + 1 },
+    }));
   },
 
   addFuente(fuente) {

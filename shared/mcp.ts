@@ -1,6 +1,6 @@
 /** Shared wire contract: MCP adapter and live renderer use one tool registry. */
 export const PROTOCOL_VERSION = 1;
-export const CAPABILITY_VERSION = 8;
+export const CAPABILITY_VERSION = 9;
 export const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 export type JsonObject = Record<string, unknown>;
 export type BridgeRequest = { requestId: string; name: string; args: JsonObject };
@@ -44,6 +44,14 @@ const findingItem = { type: "object", additionalProperties: true, properties: {
   noteId: { type: "string", description: "Optional id of a note on this essay's board (from create_note or get_board). The card then offers Ver nota. A missing or non-note id rejects the item." },
   occurrence: { type: "integer", minimum: 0, description: "Optional. Which repeated occurrence of the quote to underline, counting from 0. Default: the first one." },
 } };
+const referenceFields = {
+  sourceId: { ...id, description: "Id of a source in Fuentes (from list_sources). The note then shows the source's reference and follows it. Prefer this whenever the work is in Fuentes: create it with edit_source first if it is not there." },
+  apa: { type: "string", minLength: 1, maxLength: 2000, description: "Full APA reference as plain text, only when the work is not in Fuentes. Ignored when sourceId is given." },
+  inText: { type: "string", minLength: 1, maxLength: 300, description: "Optional in-text citation, with parentheses. Built from the source's authors and year when omitted." },
+  locator: { type: "string", minLength: 1, maxLength: 80, description: "Optional place in the work, for example \"p. 12\"." },
+};
+const referenceInput = { ...object(referenceFields), description: "Where the note's idea comes from. Put references here, never in the note text: the board shows one short line (author, year, locator) and the full reference opens from it. Give sourceId or apa." };
+const referenceUpdate = { ...referenceInput, type: ["object", "null"], description: `${referenceInput.description} null removes the reference.` };
 const authorsInput = { type: "array", maxItems: 50, items: object({ lastName: { type: "string", minLength: 1, maxLength: 200 }, firstNames: text }, ["lastName"]), description: "Authors as printed in the document, in order. Replaces the whole list; an empty array clears it." };
 const publicationInput = object({ journal: text, volume: text, issue: text, pages: text, publisher: text, doi: text });
 const upload = { uploadId: id, fileName: text, totalBytes: { type: "integer", minimum: 1 }, offset: integer, data: { type: "string", description: "Base64 of the next chunk (at most 1 MiB of encoded text), starting at offset." } };
@@ -75,9 +83,9 @@ export const TOOL_DEFINITIONS = [
   tool("get_asset", "read", "board", "Read native asset metadata. Use fields:[data] and bounded text ranges to inspect inline source data.", { ...context, id, fields: { type: "array", items: id }, ...textPaging }, [...contextRequired, "id"]),
   tool("list_assets", "read", "board", "Search paginated native asset metadata without returning inline bytes. Use this to reconcile uncertain asset creation.", { ...context, ...paging, type: { enum: ["image", "video", "bookmark"] } }, contextRequired),
   tool("delete_asset", "destructive", "board", "Delete an explicitly requested asset only when no shape references it.", { ...mutation, id }, [...mutationRequired, "id"]),
-  tool("create_note", "content", "board", "Create a native sticky note. Optional title is plain text shown above the text; omit it for no title. Addressed by ids and board position, so the revision is optional and an old one never fails.", { ...mutation, text, title: text, x: number, y: number, author: authors, kind: kinds }, [...mutationRequired, "text", "x", "y"]),
+  tool("create_note", "content", "board", "Create a native sticky note. Put the work it comes from in reference (a sourceId from Fuentes, or apa), never in text. Optional title is plain text shown above the text; omit it for no title. Addressed by ids and board position, so the revision is optional and an old one never fails.", { ...mutation, text, title: text, x: number, y: number, author: authors, kind: kinds, reference: referenceInput }, [...mutationRequired, "text", "x", "y"]),
   tool("create_node", "content", "board", "Create a native board object, including text headings. Properties must match the active native shape schema.", { ...mutation, type: id, text, x: number, y: number, rotation: number, isLocked: bool, props: nativeObject, meta: object({ author: authors, kind: kinds }) }, [...mutationRequired, "type", "x", "y"]),
-  tool("update_nodes", "content", "board", "Atomically edit explicitly named native shapes. Locked objects require an explicit unlock; author, kind and title apply to notes (an empty title removes it).", { ...mutation, nodes: { type: "array", minItems: 1, maxItems: 1000, items: object({ id, text, title: text, x: number, y: number, rotation: number, isLocked: bool, props: nativeObject, author: authors, kind: kinds }, ["id"]) } }, [...mutationRequired, "nodes"]),
+  tool("update_nodes", "content", "board", "Atomically edit explicitly named native shapes. Locked objects require an explicit unlock; author, kind, title and reference apply to notes (an empty title removes the title; reference null removes the reference). To clean a note, move the reference out of its text into reference.", { ...mutation, nodes: { type: "array", minItems: 1, maxItems: 1000, items: object({ id, text, title: text, x: number, y: number, rotation: number, isLocked: bool, props: nativeObject, author: authors, kind: kinds, reference: referenceUpdate }, ["id"]) } }, [...mutationRequired, "nodes"]),
   tool("duplicate_nodes", "content", "board", "Duplicate named objects using native cloning; preserve internal connections.", { ...mutation, ids, offsetX: number, offsetY: number }, [...mutationRequired, "ids"]),
   tool("reorder_nodes", "content", "board", "Change the visual stacking order of named objects.", { ...mutation, ids, position: { enum: ["front", "back", "forward", "backward"] } }, [...mutationRequired, "ids", "position"]),
   tool("connect_notes", "content", "board", "Connect existing notes with a native bound arrow.", { ...mutation, fromId: id, toId: id }, [...mutationRequired, "fromId", "toId"]),

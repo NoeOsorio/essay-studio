@@ -1,5 +1,10 @@
 # Cambios
 
+## 0.10.0
+
+- Cada nota tiene su apartado de referencia: en el tablero solo se ve la cita corta al pie, y al pasar el mouse aparecen la referencia APA completa, «Copiar referencia», «Copiar cita» y «Ver en Fuentes». Las notas quedan mucho más cortas.
+- La referencia se elige de tus fuentes o se pega a mano, con página opcional. Tu asistente también la pone por MCP.
+
 ## 0.9.0
 
 - Tu asistente puede hacer por MCP todo lo que haces en la app: marcar correcciones como resueltas y reabrirlas, correr y configurar tus agentes, «Mejorar» instrucciones, hacer su propia pregunta sobre una fuente, subir PDFs de fuentes y de la consigna, sacar la rúbrica, completar citas, buscar en el texto de tus ensayos y abrir cualquier vista.

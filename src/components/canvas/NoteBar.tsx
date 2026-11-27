@@ -11,6 +11,9 @@ import { identityOf, NOTE_AUTHORS, type AuthorId } from "@/lib/agent-identity";
 import { peelNote } from "@/lib/canvas/note-motion";
 import { Popover } from "@/components/ui/Popover";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { GlyphLibro } from "@/components/ui/icons";
+import { referenceOf } from "@/lib/canvas/note-reference";
+import { ReferencePicker } from "./NoteReference";
 import type { PostItAuthor, PostItKind, PostItMeta } from "./note-shape";
 
 const KINDS: { key: PostItKind; label: string }[] = [
@@ -22,7 +25,7 @@ const KINDS: { key: PostItKind; label: string }[] = [
 ];
 
 /** Rough width, only used to keep the bar inside the board. */
-const BAR_WIDTH = 330;
+const BAR_WIDTH = 366;
 const BAR_HEIGHT = 40;
 
 type Placement = { left: number; top: number };
@@ -66,6 +69,8 @@ export function NoteBar({ editor }: { editor: Editor }) {
 function Bar({ editor, note, placement }: { editor: Editor; note: TLNoteShape; placement: Placement }) {
   const kindRef = useRef<HTMLButtonElement | null>(null);
   const [kindOpen, setKindOpen] = useState(false);
+  const refButton = useRef<HTMLButtonElement | null>(null);
+  const [refOpen, setRefOpen] = useState(false);
 
   const meta = (note.meta ?? {}) as PostItMeta;
   const current = identityOf(meta.author, meta);
@@ -166,6 +171,25 @@ function Bar({ editor, note, placement }: { editor: Editor; note: TLNoteShape; p
           ))}
         </div>
       </Popover>
+
+      <Tooltip label="Referencia" side="top">
+        <button
+          ref={refButton}
+          type="button"
+          aria-label="Referencia"
+          aria-haspopup="dialog"
+          aria-expanded={refOpen}
+          data-testid="note-bar-reference"
+          data-active={referenceOf(note.meta) !== null}
+          onClick={() => setRefOpen((v) => !v)}
+          className={`grid place-items-center flex-none h-[28px] w-[28px] rounded-[8px] hover:bg-shade cursor-pointer ${
+            refOpen || referenceOf(note.meta) ? "bg-shade text-ink-1" : "text-ink-2"
+          }`}
+        >
+          <GlyphLibro size={16} />
+        </button>
+      </Tooltip>
+      <ReferencePicker editor={editor} note={note} anchor={refButton} open={refOpen} onClose={() => setRefOpen(false)} />
 
       <Tooltip label="Quitar nota" shortcut="⌫" side="top">
         <button

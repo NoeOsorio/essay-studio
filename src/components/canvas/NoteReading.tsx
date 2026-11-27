@@ -19,7 +19,9 @@ import { identityOf } from "@/lib/agent-identity";
 import { deriveFindings } from "@/lib/review/findings";
 import { linkFindingNote, revealFinding } from "@/lib/review/actions";
 import { useStore } from "@/lib/store";
+import { referenceOf } from "@/lib/canvas/note-reference";
 import type { PostItMeta } from "./note-shape";
+import { ReferenceSection } from "./NoteReference";
 
 const ACTION =
   "cursor-pointer text-[14px] font-medium leading-[20px] text-ink-2 transition-colors duration-[120ms] hover:text-ink-1";
@@ -62,6 +64,7 @@ function Sheet({ editor, note }: { editor: Editor; note: TLNoteShape }) {
   const meta = note.meta as PostItMeta;
   const id = identityOf(meta.author, meta);
   const title = typeof meta.title === "string" ? meta.title : "";
+  const reference = referenceOf(meta);
   const text = renderPlaintextFromRichText(editor, note.props.richText);
 
   const edit = () => {
@@ -98,6 +101,16 @@ function Sheet({ editor, note }: { editor: Editor; note: TLNoteShape }) {
             <div className="whitespace-pre-wrap" data-testid="note-reading-text">
               {text}
             </div>
+            {reference ? (
+              <ReferenceSection
+                reference={reference}
+                onOpenSource={() => {
+                  const sourceId = reference.sourceId;
+                  close();
+                  if (sourceId) useStore.getState().showFuente(sourceId);
+                }}
+              />
+            ) : null}
           </StickyNote>
         </div>
         <div className="flex flex-none items-center justify-center gap-[20px] rounded-[12px] bg-sheet px-[16px] py-[10px] shadow-(--shadow-sheet-compact)">

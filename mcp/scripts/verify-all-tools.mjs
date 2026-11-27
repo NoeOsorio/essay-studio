@@ -125,7 +125,7 @@ try {
     const expected = [...(await readFile(root + '/shared/mcp.ts', 'utf8')).matchAll(/tool\("([a-z_]+)"/g)].map(m => m[1]).sort();
     assert(equal(tools.map(t => t.name).sort(), expected), 'Expected registered tool inventory');
     const initial = await info();
-    assert(initial.capabilities.capabilityVersion === 8 && initial.view === 'list', 'Native app context and capability');
+    assert(initial.capabilities.capabilityVersion === 9 && initial.view === 'list', 'Native app context and capability');
     const empty = await read('list_essays');
     assert(empty.total === 0, 'Isolated library initially empty');
     const profiles = await read('list_reviewer_profiles');

@@ -23,7 +23,11 @@ import {
 import { identityOf } from "@/lib/agent-identity";
 import type { AgentColorKey, CustomAgentId } from "@/lib/storage/types";
 import { NOTE_WIDTH, StickyNote, tiltOf } from "@/components/ui/StickyNote";
+import { GlyphLibro } from "@/components/ui/icons";
 import { consumeLanding, isLanding } from "@/lib/canvas/note-motion";
+import { hasReference, referenceOf, resolveReference, type NoteReference } from "@/lib/canvas/note-reference";
+import { useStore } from "@/lib/store";
+import { ReferenceLine, REFERENCE_LINE } from "./NoteReference";
 
 export type PostItAuthor = "tu" | "em" | "sis" | "pra" | "cri" | CustomAgentId;
 export type PostItKind =
@@ -49,6 +53,8 @@ export type PostItMeta = {
   /** Custom agents only: name and color key saved at creation. */
   agentName?: string;
   agentColor?: AgentColorKey;
+  /** Where the note's idea comes from. The full reference is never printed on the board. */
+  reference?: NoteReference;
 };
 
 // Paper R2.1: 22 top padding, 16 header, 10 gap, 20 bottom padding; 18 sides.
@@ -106,8 +112,10 @@ export function measureNote(editor: Editor, shape: TLNoteShape) {
   const editing = editor.getEditingShapeId() === shape.id;
   const title = measured.title > 0 ? measured.title : editing ? LINE : 0;
   const text = title + (title > 0 ? TITLE_GAP : 0) + measured.body;
-  const height = Math.max(MIN_HEIGHT, PAD_TOP + HEADER + GAP + text + PAD_BOTTOM);
-  return { header: HEADER, title, body: measured.body, height };
+  // One quiet line under the text when the note has a reference.
+  const reference = hasReference(shape.meta) ? GAP + REFERENCE_LINE : 0;
+  const height = Math.max(MIN_HEIGHT, PAD_TOP + HEADER + GAP + text + reference + PAD_BOTTOM);
+  return { header: HEADER, title, body: measured.body, reference, height };
 }
 
 /** The tilted outline of a note, in shape space. */
@@ -127,6 +135,19 @@ function tiltedPath(width: number, height: number, degrees: number): Path2D {
   });
   path.closePath();
   return path;
+}
+
+/** The label cut with an ellipsis to fit one line in the exported image. */
+function fitLine(editor: Editor, text: string, width: number, fontFamily: string): string {
+  const measure = (value: string) =>
+    editor.textMeasure.measureText(value, {
+      fontStyle: "normal", fontFamily, fontSize: 12, fontWeight: "400", lineHeight: 16 / 12,
+      maxWidth: null, padding: "0px",
+    }).w;
+  if (measure(text) <= width) return text;
+  let end = text.length;
+  while (end > 1 && measure(`${text.slice(0, end)}…`) > width) end -= 1;
+  return `${text.slice(0, end).trimEnd()}…`;
 }
 
 function boldRichText(text: string): TLRichText {
@@ -237,7 +258,9 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
     };
     const serif = style.getPropertyValue("--font-serif").trim() || "serif";
     const sans = style.getPropertyValue("--font-sans").trim() || "sans-serif";
-    const { title: titleHeight, body, height } = measureNote(this.editor, shape);
+    const { title: titleHeight, body, height, reference } = measureNote(this.editor, shape);
+    const ref = referenceOf(shape.meta);
+    const refLabel = ref ? resolveReference(ref, useStore.getState().current?.fuentes).label : "";
     const tilt = shape.rotation === 0 ? tiltOf(shape.id) : 0;
     const filterId = `note-shadow-${shape.id.replace(/:/g, "_")}`;
     ctx.addExportDef({
@@ -269,6 +292,14 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
           labelColor={resolve(id.text)} padding={0} showTextOutline={false}
           bounds={new Box(PAD_SIDE, textTop + (titleHeight > 0 ? titleHeight + TITLE_GAP : 0), TEXT_WIDTH, body)}
         />
+        {reference > 0 ? (
+          <g transform={`translate(${PAD_SIDE} ${height - PAD_BOTTOM - REFERENCE_LINE})`} color={resolve("var(--color-ink-3)")}>
+            <GlyphLibro size={14} />
+            <text x={20} y={12} fontFamily={sans} fontSize={12} fill={resolve("var(--color-ink-3)")}>
+              {fitLine(this.editor, refLabel, TEXT_WIDTH - 20, sans)}
+            </text>
+          </g>
+        ) : null}
         <g transform="translate(68 -11) rotate(-4)">
           <rect width={76} height={22} fill="#FFFDF5" fillOpacity={0.74} />
         </g>
@@ -313,6 +344,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
   const title = titleOf(shape);
   const tilt = shape.rotation === 0 ? tiltOf(shape.id) : 0;
   const { richText } = shape.props;
+  const reference = referenceOf(shape.meta);
   const bodyVisible = isSelected || isEditing || !richTextIsEmpty(richText);
 
   const bodyKeyDown = (e: KeyboardEvent) => {
@@ -386,6 +418,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
                 style={{ position: "relative", inset: "auto", width: "100%", height: "auto" }}
               />
             ) : null}
+            {reference ? <ReferenceLine editor={editor} reference={reference} /> : null}
           </div>
         </StickyNote>
         </div>

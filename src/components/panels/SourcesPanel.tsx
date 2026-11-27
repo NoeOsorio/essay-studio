@@ -44,6 +44,8 @@ import {
 import { useStore, type RemovedFuente } from "@/lib/store";
 import type { Fuente } from "@/lib/storage/types";
 import { canonical } from "../../../sidecar/src/extract-parser";
+import { copyText } from "@/lib/clipboard";
+import { haystack } from "@/lib/materials/source-search";
 
 // ---------------------------------------------------------------- copy
 
@@ -216,26 +218,6 @@ function titleOf(f: Fuente): string {
   return f.nombre.trim() || filenameStem(f.archivoNombre) || "Sin título";
 }
 
-const haystacks = new WeakMap<Fuente, string>();
-/** Title, authors and reference, folded once per source object. */
-function haystack(f: Fuente): string {
-  let value = haystacks.get(f);
-  if (value === undefined) {
-    const authors = (f.autores ?? []).map((a) => `${a.nombres ?? ""} ${a.apellidos}`).join(" ");
-    value = canonical(`${f.nombre} ${authors} ${f.cita ?? ""} ${f.archivoNombre ?? ""}`);
-    haystacks.set(f, value);
-  }
-  return value;
-}
-
-async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // Copying is a convenience; a refusal changes nothing.
-  }
-}
-
 const isTextTarget = (t: EventTarget | null): boolean =>
   t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 
@@ -276,7 +258,18 @@ function PanelBody() {
   const list = useMemo(() => fuentes ?? [], [fuentes]);
 
   const [query, setQuery] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(() => {
+    // A note's reference asks for one source; a request left from before never reopens it.
+    const request = useStore.getState().fuenteRequest;
+    return request && (useStore.getState().current?.fuentes ?? []).some((f) => f.id === request.id) ? request.id : null;
+  });
+  const fuenteRequest = useStore((s) => s.fuenteRequest);
+  const [seenRequest, setSeenRequest] = useState(fuenteRequest?.nonce ?? 0);
+  if (fuenteRequest && fuenteRequest.nonce !== seenRequest) {
+    // A request made while the panel is already open.
+    setSeenRequest(fuenteRequest.nonce);
+    setOpenId(fuenteRequest.id);
+  }
   const [notice, setNotice] = useState<Rejection | null>(null);
   const [failed, setFailed] = useState<FailedRow[]>([]);
   const [highlight, setHighlight] = useState<string | null>(null);

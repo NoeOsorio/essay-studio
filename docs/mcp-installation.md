@@ -323,6 +323,25 @@ tablero centrado en la nota y su vista de lectura.
 `get_annotation` y `list_annotations` devuelven `noteId` (o `null`). Si la nota se
 borra, la tarjeta deja de mostrar «Ver nota» y `noteId` vuelve como `null`.
 
+### Referencias de una nota (capacidades 9)
+
+Una nota puede llevar su referencia en un apartado propio, sin ocupar espacio en
+el texto. El tablero muestra una sola línea (autor, año y página) y la referencia
+completa se abre desde ahí con «Copiar referencia», «Copiar cita» y «Ver en
+Fuentes».
+
+- `create_note` y `update_nodes` aceptan `reference`: `sourceId` (una fuente de
+  Fuentes, de `list_sources`) o `apa` (texto completo, solo si la obra no está en
+  Fuentes), más `inText` y `locator` («p. 12») si quieres. `reference: null`
+  en `update_nodes` la quita. Si la obra no está en Fuentes, créala antes con
+  `edit_source` y usa su `sourceId`: así la nota se mantiene al día con la fuente.
+- Nunca pongas la referencia en el texto de la nota. Para limpiar una nota que ya
+  la tiene en el texto, usa `update_nodes` con `text` sin la referencia y
+  `reference` con ella.
+- `get_node` y `get_board` devuelven `reference` en cada nota (`null` si no tiene),
+  con `label` (la línea corta) y `apaText` (la referencia completa).
+- Si borras la fuente, la nota conserva una copia de la referencia.
+
 ## Correcciones, agentes y preguntas (capacidades 6)
 
 La versión de capacidades es la 6.

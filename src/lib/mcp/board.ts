@@ -7,6 +7,7 @@ import {
   toRichText,
   tipTapDefaultExtensions,
   type Editor,
+  type JsonValue,
   type TLArrowShape,
   type TLNoteShape,
   type TLShape,
@@ -17,6 +18,7 @@ import {
 } from "tldraw";
 import { getSchema } from "@tiptap/core";
 import { useStore } from "@/lib/store";
+import { metaWithReference, referenceFromSource, referenceOf, resolveReference, type NoteReference } from "@/lib/canvas/note-reference";
 import { ToolError, MAX_REQUEST_BYTES, type JsonObject } from "../../../shared/mcp";
 import { page, textRange } from "./collections";
 import { handleAssetTool, prepareBoardAsset as prepareAsset, resetBoardUploads, validateAssetTool } from "./board-assets";
@@ -176,6 +178,38 @@ function boundedResult<T>(value: T): T {
   return value;
 }
 
+/** The stored reference with the short label and the full text as the app shows them; null when the note has none. */
+function describeReference(meta: JsonObject): JsonObject | null {
+  const ref = referenceOf(meta);
+  if (!ref) return null;
+  const resolved = resolveReference(ref, useStore.getState().current?.fuentes);
+  return { ...ref, label: resolved.label, apaText: resolved.apa, sourceFound: ref.sourceId ? resolved.source !== null : null };
+}
+
+/** reference from a tool call: a sourceId from Fuentes or a literal apa. */
+function parseReference(value: unknown): NoteReference {
+  const raw = (value && typeof value === "object" && !Array.isArray(value) ? value : null) as JsonObject | null;
+  if (!raw) throw new ToolError("INVALID_ARGUMENTS", "reference must be an object (or null to remove it).");
+  const str = (key: string, max: number): string | undefined => {
+    const v = raw[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "string" || v.trim() === "" || v.length > max) throw new ToolError("INVALID_ARGUMENTS", `reference.${key} must be 1 to ${max} characters.`);
+    return v.trim();
+  };
+  const sourceId = str("sourceId", 256);
+  const apa = str("apa", 2000);
+  const inText = str("inText", 300);
+  const locator = str("locator", 80);
+  let ref: NoteReference;
+  if (sourceId) {
+    const source = (useStore.getState().current?.fuentes ?? []).find((f) => f.id === sourceId);
+    if (!source) throw new ToolError("SOURCE_NOT_FOUND", "reference.sourceId is not a source of this essay. Create it with edit_source first.");
+    ref = referenceFromSource(source, locator);
+  } else if (apa) ref = { apa, ...(locator ? { locator } : {}) };
+  else throw new ToolError("INVALID_ARGUMENTS", "reference needs a sourceId or an apa.");
+  return inText ? { ...ref, inText } : ref;
+}
+
 function describe(editor: Editor, shape: TLShape, options: JsonObject = {}, compact = false): JsonObject {
   const bounds = editor.getShapePageBounds(shape);
   const text = nodeText(editor, shape);
@@ -188,7 +222,7 @@ function describe(editor: Editor, shape: TLShape, options: JsonObject = {}, comp
     bounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h } : null,
     ...rangedText,
     ...(!compact ? { props: shape.props } : {}),
-    ...(shape.type === "note" ? { title: typeof shape.meta.title === "string" && shape.meta.title !== "" ? shape.meta.title : null } : {}),
+    ...(shape.type === "note" ? { title: typeof shape.meta.title === "string" && shape.meta.title !== "" ? shape.meta.title : null, reference: describeReference(shape.meta) } : {}),
     ...(shape.type === "arrow" ? { bindings: editor.getBindingsFromShape(shape, "arrow").map((b) => ({ id: b.id, toId: b.toId, ...b.props })) } : {}),
     meta: shape.meta,
   };
@@ -473,6 +507,12 @@ function titled(meta: JsonObject, title: unknown): JsonObject {
   return typeof title === "string" && title !== "" ? { ...rest, title } : rest;
 }
 
+/** No reference keeps what the note has; null drops it here and update_nodes removes it for real (tldraw merges meta). */
+function referenced(meta: JsonObject, reference: unknown): JsonObject {
+  if (reference === undefined) return meta;
+  return metaWithReference(meta, reference === null ? null : parseReference(reference));
+}
+
 function updates(editor: Editor, args: JsonObject): TLShapePartial[] {
   const nodes = args.nodes as JsonObject[];
   if (!nodes.length || new Set(nodes.map((node) => node.id)).size !== nodes.length) throw new ToolError("INVALID_ARGUMENTS", "Each update must reference a different node.");
@@ -489,13 +529,14 @@ function updates(editor: Editor, args: JsonObject): TLShapePartial[] {
     }
     if (Object.keys(patch).every((key) => key === "id")) throw new ToolError("INVALID_ARGUMENTS", "Supply at least one property to update.");
     if ((patch.author !== undefined || patch.kind !== undefined) && shape.type !== "note") throw new ToolError("INVALID_NODE_TYPE", "Author and kind apply to notes.");
+    if (patch.reference !== undefined && shape.type !== "note") throw new ToolError("INVALID_NODE_TYPE", "A reference applies to notes.");
     if (patch.title !== undefined && (shape.type !== "note" || typeof patch.title !== "string")) throw new ToolError("INVALID_NODE_TYPE", "A title applies to notes.");
     if ((patch.author !== undefined && !AUTHORS.has(patch.author as string)) || (patch.kind !== undefined && !KINDS.has(patch.kind as string))) throw new ToolError("INVALID_ARGUMENTS", "Unsupported note metadata.");
     const props = propsWithText(editor, shape.type, { ...shape.props, ...(patch.props as object ?? {}) }, patch.text);
     const next = { ...shape, props,
       ...(patch.x !== undefined ? { x: patch.x } : {}), ...(patch.y !== undefined ? { y: patch.y } : {}),
       ...(patch.rotation !== undefined ? { rotation: patch.rotation } : {}), ...(patch.isLocked !== undefined ? { isLocked: patch.isLocked } : {}),
-      meta: titled({ ...shape.meta, ...(patch.author !== undefined ? { author: patch.author } : {}), ...(patch.kind !== undefined ? { kind: patch.kind } : {}) }, patch.title),
+      meta: referenced(titled({ ...shape.meta, ...(patch.author !== undefined ? { author: patch.author } : {}), ...(patch.kind !== undefined ? { kind: patch.kind } : {}) }, patch.title), patch.reference),
     } as TLShape;
     nativeValidate(editor, next);
     return { id: next.id, type: next.type, x: next.x, y: next.y, rotation: next.rotation, isLocked: next.isLocked, props: next.props, meta: next.meta } as TLShapePartial;
@@ -576,6 +617,7 @@ export function handleBoardTool(name: string, args: JsonObject): unknown | Promi
     case "create_note": {
       if (editor.getIsReadonly()) throw new ToolError("READ_ONLY", "The board is read-only.");
       const id = createShapeId();
+      const reference = args.reference !== undefined ? parseReference(args.reference) : null;
       if (!editor.canCreateShapes([{ id, type: "note" }])) throw new ToolError("SHAPE_LIMIT", "The board cannot create another note.");
       transaction(editor, "create-note", () => editor.createShape<TLNoteShape>({
         id, type: "note", x: args.x as number, y: args.y as number,
@@ -583,13 +625,22 @@ export function handleBoardTool(name: string, args: JsonObject): unknown | Promi
         meta: {
           author: args.author as string ?? "tu", kind: args.kind as string ?? "concepto", createdAt: Date.now(),
           ...(typeof args.title === "string" && args.title !== "" ? { title: args.title } : {}),
+          ...(reference ? { reference: reference as unknown as JsonValue } : {}),
         },
       }));
       return { changedIds: [id], node: describe(editor, noteById(editor, id)) };
     }
     case "update_nodes": {
       const changes = updates(editor, args);
-      transaction(editor, "update-nodes", () => editor.updateShapes(changes));
+      const removing = (args.nodes as JsonObject[]).filter((node) => node.reference === null).map((node) => node.id as TLShapeId);
+      transaction(editor, "update-nodes", () => {
+        editor.updateShapes(changes);
+        // tldraw merges meta, so a removed reference needs the record put back without it.
+        for (const id of removing) {
+          const live = editor.getShape(id);
+          if (live) editor.store.put([{ ...live, meta: metaWithReference(live.meta, null) }]);
+        }
+      });
       return { changedIds: changes.map((node) => node.id) };
     }
     case "duplicate_nodes": {
