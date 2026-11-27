@@ -51,6 +51,7 @@ rosa `#FFC9D6`/`#8A2846`/`#E0567A`, durazno `#FFD3B5`/`#8A3D12`/`#E07A3A`, lima 
 - **Top bar**: 64 px tall, window controls centered in it (traffic lights at x 20, y 34). Left: back to essays. Right: view toggle, score stamp, «Revisar ensayo», «Más». Shortcuts only in tooltips.
 - **Primary button**: ink fill, white text, radius 10, height 36, padding 0 18, Geist 13/16 500. One primary action per surface. Disabled: gray fill.
 - **Soft button**: shade fill, ink text, radius 8 to 10. **Text button**: no fill, ink 2.
+- **Action hierarchy**: every group of actions has one primary (ink fill), quieter secondaries (shade fill), navigation as a text link with an arrow, and destructive or rare actions as quiet text set apart. Never style siblings the same. A confirmation such as «Copiada» is a state (check icon and ink-3 text), never a button.
 - **Press feedback**: scale 0.97 on every pressable element.
 - **Inputs**: white, radius 10, 1 px ring `#1D1B181F`, label above in Geist 13/16 500 ink 2. Errors as one plain line, never a red box.
 - **Segmented control**: shade track, radius 10, padding 3; selected segment white with a soft shadow.

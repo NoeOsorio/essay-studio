@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.10.1
+
+- Los botones de la referencia y de la nota en grande tienen jerarquía: una acción principal, las demás más discretas, y «Copiada» aparece como estado, no como botón.
+
 ## 0.10.0
 
 - Cada nota tiene su apartado de referencia: en el tablero solo se ve la cita corta al pie, y al pasar el mouse aparecen la referencia APA completa, «Copiar referencia», «Copiar cita» y «Ver en Fuentes». Las notas quedan mucho más cortas.

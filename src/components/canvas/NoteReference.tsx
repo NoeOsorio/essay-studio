@@ -30,8 +30,23 @@ const HOVER_CLOSE_MS = 220;
 const CONFIRM_MS = 1500;
 const MAX_ROWS = 40;
 
+// One primary (ink), quieter secondaries (shade), navigation as a text link,
+// and a confirmation that is a state, never a button (DESIGN.md, Components).
 const BUTTON =
-  "h-[28px] px-[10px] rounded-[8px] bg-shade font-sans text-[13px] font-medium leading-[16px] text-ink-1 cursor-pointer whitespace-nowrap transition-colors duration-[120ms] hover:bg-[#1D1B181A]";
+  "h-[28px] px-[10px] rounded-[8px] bg-shade font-sans text-[13px] font-medium leading-[16px] text-ink-1 cursor-pointer whitespace-nowrap transition-colors duration-[120ms] hover:bg-[#1D1B181A] press";
+const PRIMARY =
+  "h-[28px] px-[12px] rounded-[8px] bg-ink-1 font-sans text-[13px] font-medium leading-[16px] text-white cursor-pointer whitespace-nowrap transition-colors duration-[120ms] hover:bg-[#3A3631] disabled:cursor-default disabled:bg-[#B9B3A8] press";
+const LINK =
+  "ml-auto flex h-[28px] items-center gap-[4px] font-sans text-[13px] font-medium leading-[16px] text-ink-2 cursor-pointer whitespace-nowrap hover:text-ink-1";
+
+function Copied() {
+  return (
+    <span role="status" className="flex h-[28px] items-center gap-[5px] px-[2px] font-sans text-[13px] leading-[16px] text-ink-3 whitespace-nowrap">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4l2.6 2.6L11 4.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      Copiada
+    </span>
+  );
+}
 
 export function useResolvedReference(reference: NoteReference): ResolvedReference {
   const fuentes = useStore((s) => s.current?.fuentes);
@@ -64,15 +79,24 @@ export function ReferenceActions({
   };
   return (
     <div className="flex flex-wrap items-center gap-[6px]">
-      <button type="button" data-testid="reference-copy-apa" className={BUTTON} onClick={() => copy("apa")}>
-        {copied === "apa" ? "Copiada" : "Copiar referencia"}
-      </button>
-      <button type="button" data-testid="reference-copy-intext" className={BUTTON} onClick={() => copy("inText")}>
-        {copied === "inText" ? "Copiada" : "Copiar cita"}
-      </button>
+      {copied === "apa" ? (
+        <Copied />
+      ) : (
+        <button type="button" data-testid="reference-copy-apa" className={PRIMARY} onClick={() => copy("apa")}>
+          Copiar referencia
+        </button>
+      )}
+      {copied === "inText" ? (
+        <Copied />
+      ) : (
+        <button type="button" data-testid="reference-copy-intext" className={BUTTON} onClick={() => copy("inText")}>
+          Copiar cita
+        </button>
+      )}
       {resolved.source && onOpenSource ? (
-        <button type="button" data-testid="reference-open-source" className={BUTTON} onClick={onOpenSource}>
+        <button type="button" data-testid="reference-open-source" className={LINK} onClick={onOpenSource}>
           Ver en Fuentes
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       ) : null}
     </div>
@@ -398,7 +422,7 @@ function PickerBody({ editor, note, onClose }: { editor: Editor; note: TLNoteSha
           <span />
         )}
         {mode === "paste" ? (
-          <button type="button" data-testid="reference-paste-save" className={BUTTON} onClick={savePaste} disabled={draft.trim() === ""}>
+          <button type="button" data-testid="reference-paste-save" className={PRIMARY} onClick={savePaste} disabled={draft.trim() === ""}>
             Guardar
           </button>
         ) : null}
