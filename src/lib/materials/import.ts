@@ -102,6 +102,8 @@ export type AddSourceInput = {
   archivoNombre?: string;
   /** Add even though an identical source exists (after the writer chose to). */
   allowDuplicate?: boolean;
+  /** Save the source without the automatic citation reading (the writer asked for no model call). */
+  skipReading?: boolean;
 };
 
 export type AddSourceOutcome =
@@ -138,15 +140,15 @@ export function addSource(input: AddSourceInput): AddSourceOutcome {
     agregadoEn: new Date().toISOString(),
   };
   state.addFuente(source);
-  void readCitation(essay.id, source.id);
+  if (!input.skipReading) void readCitation(essay.id, source.id);
   return { kind: "added", sourceId: source.id };
 }
 
 /** A dropped or chosen file becomes a source. */
-export async function importSourceFile(file: File, opts: { allowDuplicate?: boolean } = {}): Promise<AddSourceOutcome> {
+export async function importSourceFile(file: File, opts: { allowDuplicate?: boolean; skipReading?: boolean; nombre?: string } = {}): Promise<AddSourceOutcome> {
   const read = await readMaterialFile(file);
   if (!read.ok) return { kind: "rejected", reason: read.reason };
-  return addSource({ text: read.text, archivoNombre: read.archivoNombre, allowDuplicate: opts.allowDuplicate });
+  return addSource({ text: read.text, archivoNombre: read.archivoNombre, allowDuplicate: opts.allowDuplicate, skipReading: opts.skipReading, nombre: opts.nombre });
 }
 
 /** Rules for applying a citation to a source as it is now. Exported so the order of rules is one place. */
@@ -195,9 +197,9 @@ async function readCitation(essayId: string, sourceId: string): Promise<void> {
 }
 
 /** Reintentar after a failed reading. */
-export function retrySourceReading(sourceId: string): void {
+export function retrySourceReading(sourceId: string): Promise<void> {
   const essayId = useStore.getState().current?.id;
-  if (essayId) void readCitation(essayId, sourceId);
+  return essayId ? readCitation(essayId, sourceId) : Promise.resolve();
 }
 
 // --------- Rubric ---------

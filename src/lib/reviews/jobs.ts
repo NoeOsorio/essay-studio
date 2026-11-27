@@ -172,8 +172,8 @@ export function startInterrogation(args: { essayId: string; operationId: string;
   if (!sourceFits(text)) throw new ToolError("INVALID_ARGUMENTS", "The text is too long to question at once. Provide a part of it.");
   const saved = useStore.getState().agents;
   const asking = (agent: CustomAgent) => agent.does !== "review";
-  // Same defaults as the questions panel for the essay type, plus the custom agents that ask and are on.
-  const sages = args.sages ?? [...defaultSagesForMode(essay.mode), ...saved.filter((agent) => asking(agent) && agent.defaultOn).map((agent) => agent.id)];
+  // Same defaults as the questions panel: the built-ins for the essay type only. Custom agents start off there, so they are named explicitly here too.
+  const sages = args.sages ?? [...defaultSagesForMode(essay.mode)];
   if (!sages.length || new Set(sages).size !== sages.length || sages.some((sage) => !ALL_SAGES.includes(sage) && !(typeof sage === "string" && sage.startsWith("c_")))) throw new ToolError("INVALID_ARGUMENTS", "Choose distinct agents: em, sis, pra, cri or c_<agent id>.");
   const customs = new Map<string, CustomAgent>();
   for (const sage of sages) {

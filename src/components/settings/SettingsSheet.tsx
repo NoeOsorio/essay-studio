@@ -16,8 +16,9 @@ const EASE = "cubic-bezier(0.23, 1, 0.32, 1)";
 export function SettingsSheet() {
   const open = useStore((s) => s.settingsOpen);
   const instant = useStore((s) => s.settingsInstant);
+  const asked = useStore((s) => s.settingsAgentId);
   if (!open || typeof document === "undefined") return null;
-  return <SheetInner instant={instant} />;
+  return <SheetInner key={asked ?? ""} instant={instant} />;
 }
 
 function SheetInner({ instant }: { instant: boolean }) {
@@ -26,7 +27,10 @@ function SheetInner({ instant }: { instant: boolean }) {
   const sheet = useRef<HTMLDivElement | null>(null);
   const veil = useRef<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<Selection>(() => {
-    const first = useStore.getState().agents[0];
+    const { agents: list, settingsAgentId: asked } = useStore.getState();
+    // A client can ask for one agent: a built-in or one of the writer's own.
+    if (asked && (["em", "sis", "pra", "cri"].includes(asked) || list.some((a) => a.id === asked))) return asked as Selection;
+    const first = list[0];
     return first ? first.id : "em";
   });
 

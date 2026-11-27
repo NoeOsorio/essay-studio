@@ -29,6 +29,7 @@ export function QuestionsPanel() {
   const setOverlay = useStore((s) => s.setOverlay);
   const essayId = useStore((s) => s.current?.id ?? null);
   const anchor = useAnchor("hazme");
+  const preset = useStore((s) => s.lecturaPreset);
   const close = () => setOverlay(null);
 
   return (
@@ -42,7 +43,7 @@ export function QuestionsPanel() {
       instant={instant}
       testId="lectura-overlay"
     >
-      {open && essayId ? <PanelBody key={essayId} onClose={close} /> : null}
+      {open && essayId ? <PanelBody key={`${essayId}:${preset?.nonce ?? 0}`} onClose={close} /> : null}
     </Popover>
   );
 }
@@ -96,9 +97,14 @@ function PanelBody({ onClose }: { onClose: () => void }) {
   // A selection from the essay is a transient source: never saved to the library.
   const [selection] = useState(() => useStore.getState().lecturaPrefill);
   const hasSelection = selection.trim().length > 0;
-  const [choice, setChoice] = useState<Choice>(hasSelection ? { kind: "selection" } : null);
+  // A client can open the panel with agents and a saved source already chosen.
+  const [preset] = useState(() => useStore.getState().lecturaPreset);
+  const presetSource = preset?.sourceId && (fuentes ?? []).some((f) => f.id === preset.sourceId) ? preset.sourceId : null;
+  const [choice, setChoice] = useState<Choice>(
+    presetSource ? { kind: "fuente", id: presetSource } : hasSelection ? { kind: "selection" } : null,
+  );
   // Starting from an agent means only that agent is on; otherwise the essay type decides.
-  const [on, setOn] = useState<Sage[]>(() => (only ? [only] : defaultSagesForMode(mode)));
+  const [on, setOn] = useState<Sage[]>(() => (preset?.sages?.length ? preset.sages : only ? [only] : defaultSagesForMode(mode)));
   const [notice, setNotice] = useState<string | null>(null);
   // His own question about the chosen source (Paper R3.3).
   const [own, setOwn] = useState("");

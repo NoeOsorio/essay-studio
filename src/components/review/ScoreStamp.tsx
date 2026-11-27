@@ -4,7 +4,7 @@
 // shows the right state and opens the report card (or the review panel while
 // a run is active). The only component with the scorebar test ids.
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { CorrectionsPanel } from "@/components/review/CorrectionsPanel";
 import { ReportCard } from "@/components/review/ReportCard";
@@ -13,9 +13,7 @@ import { useReviewReading } from "@/components/review/useReviewResult";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useRegisterAnchor } from "@/components/ui/useAnchor";
 import { defaultReviewPases, startReview } from "@/lib/review/run";
-import { useStore } from "@/lib/store";
-
-type View = null | { kind: "report" } | { kind: "corrections"; criterioId: string | null };
+import { useStore, type ReviewView } from "@/lib/store";
 
 export function ScoreStamp() {
   const reading = useReviewReading();
@@ -29,7 +27,16 @@ export function ScoreStamp() {
   const openReview = useStore((s) => s.openReview);
   // A client can hide the stamp for the session; a new review or another essay brings it back.
   const hidden = useStore((s) => s.scorebarDismissed);
-  const [view, setView] = useState<View>(null);
+  // Lives in the store so a client can open the same surfaces; it belongs to one essay.
+  const stored = useStore((s) => s.reviewView);
+  const setStored = useStore((s) => s.setReviewView);
+  const view = stored && stored.essayId === essayId ? stored : null;
+  type View = null | { kind: "report" } | { kind: "corrections"; criterioId: string | null };
+  const setView = (next: View | ((current: ReviewView | null) => View)) => {
+    if (!essayId) return;
+    const value = typeof next === "function" ? next(view) : next;
+    setStored(value ? { ...value, essayId } : null);
+  };
   const registerAnchor = useRegisterAnchor("stamp");
   const bump = useStore((s) => s.bumpReviewSurfaces);
   const surfaceOpen = view !== null;

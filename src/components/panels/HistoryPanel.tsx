@@ -6,7 +6,7 @@
 // shell behavior (Esc, motion) is the shared one from ui/Popover. Outside
 // clicks do not close it, because the preview bar lives on the sheet.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { SHEET_CLASS, useSheetBehavior } from "@/components/ui/Popover";
@@ -73,7 +73,11 @@ function PanelBody({ onClose }: { onClose: () => void }) {
     return [{ kind: "now" }, ...sorted.map((meta): Item => ({ kind: "version", meta }))];
   }, [history]);
 
-  const choose = async (takenAt: string | null) => {
+  // A client asked for a version: show it once the list has loaded.
+  const request = useStore((s) => s.historyRequest);
+  const setRequest = useStore((s) => s.setHistoryRequest);
+
+  const choose = useCallback(async (takenAt: string | null) => {
     const ticket = ++latest.current;
     setSelected(takenAt);
     setUnreadable(false);
@@ -92,7 +96,14 @@ function PanelBody({ onClose }: { onClose: () => void }) {
       return;
     }
     setHistoryPreview(snapshot);
-  };
+  }, [flush, previewSnapshot]);
+
+  useEffect(() => {
+    if (!request || !history.some((meta) => meta.takenAt === request)) return;
+    setRequest(null);
+    // Deferred: choosing sets the panel's own state.
+    queueMicrotask(() => void choose(request));
+  }, [request, history, setRequest, choose]);
 
   return (
     <>

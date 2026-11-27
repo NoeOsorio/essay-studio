@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 
 import { computeBenchmark, type BenchmarkResult } from "@/lib/benchmark/score";
-import type { CustomAgentId, Pase, Sage } from "@/lib/storage/types";
+import type { CustomAgentId, Essay, Pase, Sage } from "@/lib/storage/types";
 import { deriveFindings, openForScore, type FindingView } from "@/lib/review/findings";
 import { reviewFingerprint } from "@/lib/review/fingerprint";
 import { useStore } from "@/lib/store";
@@ -30,19 +30,21 @@ export function agentOfPase(pase: Pase, mode: "academico" | "blog"): Sage {
   return mode === "blog" ? "pra" : "em";
 }
 
+/** The reading of one essay: the same figures the stamp shows, for the hook and for a client asking what is on screen. */
+export function readReview(current: Essay): ReviewReading {
+  const views = deriveFindings(current.content, current.findings);
+  const args: BenchmarkArgs = {
+    anotaciones: openForScore(views),
+    contentFingerprint: current.evaluacionMeta ? reviewFingerprint(current) : undefined,
+    rubrica: current.rubrica,
+    evaluacionMeta: current.evaluacionMeta,
+    essayMode: current.mode,
+    essayUpdatedAt: current.updatedAt,
+  };
+  return { views, result: computeBenchmark(args), args };
+}
+
 export function useReviewReading(): ReviewReading | null {
   const current = useStore((s) => s.current);
-  return useMemo<ReviewReading | null>(() => {
-    if (!current) return null;
-    const views = deriveFindings(current.content, current.findings);
-    const args: BenchmarkArgs = {
-      anotaciones: openForScore(views),
-      contentFingerprint: current.evaluacionMeta ? reviewFingerprint(current) : undefined,
-      rubrica: current.rubrica,
-      evaluacionMeta: current.evaluacionMeta,
-      essayMode: current.mode,
-      essayUpdatedAt: current.updatedAt,
-    };
-    return { views, result: computeBenchmark(args), args };
-  }, [current]);
+  return useMemo<ReviewReading | null>(() => (current ? readReview(current) : null), [current]);
 }

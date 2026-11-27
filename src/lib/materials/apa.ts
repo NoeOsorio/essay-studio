@@ -82,3 +82,24 @@ export function missingFields(f: CitedFields): Missing[] {
   if (!title || title === filenameStem(f.archivoNombre)) out.push("título");
   return out;
 }
+
+/** Back from «Mayer, Davis y Schoorman»; first names already known are kept for a surname that stays. */
+export function parseAuthors(text: string, previous: Fuente["autores"]): Author[] {
+  return text
+    .split(/\s*(?:,|;|&|\sy\s)\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((apellidos) => {
+      const known = (previous ?? []).find((a) => a.apellidos.toLowerCase() === apellidos.toLowerCase());
+      return known?.nombres ? { apellidos, nombres: known.nombres } : { apellidos };
+    });
+}
+
+/** The reference follows the fields while it is empty or still what the builder wrote; once he edits it, it is his. */
+export function withReference(current: Fuente, patch: Partial<Omit<Fuente, "id">>): Partial<Omit<Fuente, "id">> {
+  if ("cita" in patch) return patch;
+  const next = { ...current, ...patch };
+  const untouched = !current.cita || current.cita === buildReference(current);
+  if (untouched && (next.autores?.length || next.anio)) return { ...patch, cita: buildReference(next) };
+  return patch;
+}

@@ -1,10 +1,12 @@
 import { useStore } from "@/lib/store";
 import { listHistory, readSnapshot } from "@/lib/storage";
+import { withReference } from "@/lib/materials/apa";
 import type { Criterio, Fuente } from "@/lib/storage/types";
 import { liveNoteId } from "@/lib/board-notes";
 import { deriveFindings, type FindingView } from "@/lib/review/findings";
 import { ToolError, type JsonObject } from "../../../shared/mcp";
 import { matches, page, textRange } from "./collections";
+import { citationPatchFromArgs, finishSourceUpload, forgetRemoved, pendingProposal, rememberRemoved, removedSource, saveSource, sourceFields } from "./materials";
 
 function current() {
   const essay = useStore.getState().current;
@@ -51,15 +53,19 @@ export function readLibrary(name: string, args: JsonObject): JsonObject | Promis
   }
   if (name === "list_sources") {
     const result = page((essay.fuentes ?? []).filter(source => matches(args.query, source.nombre, source.cita) && (!args.origin || source.origen === args.origin)), args);
-    return { ...result, items: result.items.map(source => ({ id: source.id, name: source.nombre, citation: source.cita, origin: source.origen, fileName: source.archivoNombre })), ...referenceWarnings() };
+    return { ...result, items: result.items.map(source => sourceFields(source)), ...referenceWarnings() };
   }
   if (name === "get_source") {
     const source = essay.fuentes?.find(item => item.id === args.id);
     if (!source) throw new ToolError("NOT_FOUND", "The source does not exist.");
-    return { id: source.id, name: source.nombre, citation: source.cita, origin: source.origen, fileName: source.archivoNombre, ...textRange(source.contenido, args), ...referenceWarnings() };
+    return { ...sourceFields(source), ...textRange(source.contenido, args), ...referenceWarnings() };
   }
   if (name === "get_rubric") {
-    return { ...page((essay.rubrica?.criterios ?? []).filter(criterion => matches(args.query, criterion.nombre, criterion.descripcion)), args), ...referenceWarnings() };
+    const consigna = essay.rubrica?.consigna;
+    const reading = useStore.getState().lecturaRubrica;
+    return { ...page((essay.rubrica?.criterios ?? []).filter(criterion => matches(args.query, criterion.nombre, criterion.descripcion)), args),
+      assignment: consigna ? { ...(consigna.archivoNombre ? { fileName: consigna.archivoNombre } : {}), addedAt: consigna.agregadoEn, ...textRange(consigna.texto, args) } : null,
+      reading: reading ?? null, proposal: pendingProposal(essay.id), ...referenceWarnings() };
   }
   if (name === "list_versions") return listHistory(essay.id).then(items => page(items.filter(item => matches(args.query, item.title) && (!args.kind || item.kind === args.kind)), args));
   if (name === "get_version") return readSnapshot(essay.id, args.takenAt as string).then(snapshot => {
@@ -81,7 +87,13 @@ export function readLibrary(name: string, args: JsonObject): JsonObject | Promis
 export function validateLibraryEdit(name: string, args: JsonObject): void {
   const essay = current();
   if ((name === "edit_source" || name === "edit_rubric") && args.operation === "delete" && args.confirm !== true) throw new ToolError("CONFIRMATION_REQUIRED", "Deleting a saved item requires an explicit user request and confirm=true.");
+  if (name === "import_source_file") return;
   if (name === "edit_source") {
+    if (args.operation === "restore") {
+      if (!removedSource(args.id, essay.id)) throw new ToolError("NOT_FOUND", "That source was not deleted with this tool in this essay, so there is nothing to restore.");
+      if (essay.fuentes?.some(source => source.id === args.id)) throw new ToolError("INVALID_ARGUMENTS", "That source is already back in the library.");
+      return;
+    }
     if ((args.operation === "update" || args.operation === "delete") && !essay.fuentes?.some(source => source.id === args.id)) throw new ToolError("NOT_FOUND", "The source does not exist.");
     if (args.operation !== "delete" && args.operation !== "update" && (typeof args.name !== "string" || typeof args.content !== "string")) throw new ToolError("INVALID_ARGUMENTS", "A source needs a name and content.");
     if (args.operation === "import" && (typeof args.fileName !== "string" || !/^[^/\\\x00]+\.(txt|md)$/iu.test(args.fileName))) throw new ToolError("INVALID_ARGUMENTS", "Import accepts a TXT or Markdown filename, not a path.");
@@ -94,20 +106,33 @@ export function validateLibraryEdit(name: string, args: JsonObject): void {
 export function editLibrary(name: string, args: JsonObject): JsonObject {
   validateLibraryEdit(name, args);
   const state = useStore.getState();
+  if (name === "import_source_file") return finishSourceUpload(args);
   if (name === "edit_source") {
-    let id = args.id as string;
-    if (args.operation === "delete") state.removeFuente(id);
-    else if (args.operation === "update") {
-      const patch: Partial<Omit<Fuente, "id">> = {};
+    const id = args.id as string;
+    const essay = current();
+    if (args.operation === "delete") {
+      const taken = state.removeFuente(id);
+      if (taken) rememberRemoved(taken);
+      return { id, deleted: true, restorable: !!taken, ...referenceWarnings() };
+    }
+    if (args.operation === "restore") {
+      const taken = removedSource(id, essay.id)!;
+      state.restoreFuente(taken);
+      forgetRemoved(id);
+      return { id, restored: true, ...referenceWarnings() };
+    }
+    if (args.operation === "update") {
+      const source = essay.fuentes!.find(item => item.id === id)!;
+      const patch: Partial<Omit<Fuente, "id">> = citationPatchFromArgs(source, args);
       if (args.name !== undefined) patch.nombre = args.name as string;
       if (args.content !== undefined) patch.contenido = args.content as string;
-      if (args.citation !== undefined) patch.cita = args.citation as string;
-      state.updateFuente(id, patch);
-    } else {
-      id = crypto.randomUUID();
-      state.addFuente({ id, nombre: args.name as string, contenido: args.content as string, ...(typeof args.citation === "string" ? { cita: args.citation } : {}), origen: args.operation === "import" ? "archivo" : "texto", ...(args.operation === "import" ? { archivoNombre: args.fileName as string } : {}), agregadoEn: new Date().toISOString() });
+      // The reference follows authors and year while it is still the one the app built, as in the detail view.
+      state.updateFuente(id, withReference(source, patch));
+      return { id, ...referenceWarnings() };
     }
-    return { id, ...referenceWarnings() };
+    // create and import: the Fuentes panel's own door (duplicates, limits, citation reading).
+    const saved = saveSource({ text: args.content as string, nombre: args.name as string, ...(args.operation === "import" ? { archivoNombre: args.fileName as string } : {}), allowDuplicate: args.allowDuplicate === true, skipReading: args.readCitation === false }, args);
+    return { ...saved, ...referenceWarnings() };
   }
   if (name === "edit_rubric") {
     let id = args.id as string;
@@ -115,7 +140,9 @@ export function editLibrary(name: string, args: JsonObject): JsonObject {
     if (args.operation === "delete") criteria = criteria.filter(item => item.id !== id);
     else if (args.operation === "update") criteria = criteria.map(item => item.id === id ? { ...item, ...(typeof args.name === "string" ? { nombre: args.name } : {}), ...(typeof args.description === "string" ? { descripcion: args.description } : {}), ...(typeof args.weight === "number" ? { peso: args.weight } : {}) } : item);
     else { id = crypto.randomUUID(); criteria.push({ id, nombre: args.name as string, descripcion: args.description as string, peso: args.weight as number } satisfies Criterio); }
-    state.updateRubrica({ criterios: criteria });
+    // The saved assignment stays, as in the panel.
+    const consigna = current().rubrica?.consigna;
+    state.updateRubrica({ criterios: criteria, ...(consigna ? { consigna } : {}) });
     return { id, ...referenceWarnings() };
   }
   if (name === "update_essay") {

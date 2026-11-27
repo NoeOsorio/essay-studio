@@ -30,7 +30,9 @@ import {
   buildReference,
   filenameStem,
   missingFields,
+  parseAuthors,
   shortCitation,
+  withReference,
 } from "@/lib/materials/apa";
 import {
   addSource,
@@ -195,25 +197,11 @@ function Spinner() {
 
 // ---------------------------------------------------------------- helpers
 
-type Author = NonNullable<Fuente["autores"]>[number];
-
 /** «Mayer», «Mayer y Davis», «Mayer, Davis y Schoorman». */
 function formatAuthors(autores: Fuente["autores"]): string {
   const names = (autores ?? []).map((a) => a.apellidos);
   if (names.length <= 1) return names.join("");
   return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
-}
-
-/** Back from the text above; first names already known are kept for a surname that stays. */
-function parseAuthors(text: string, previous: Fuente["autores"]): Author[] {
-  return text
-    .split(/\s*(?:,|;|&|\sy\s)\s*/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((apellidos) => {
-      const known = (previous ?? []).find((a) => a.apellidos.toLowerCase() === apellidos.toLowerCase());
-      return known?.nombres ? { apellidos, nombres: known.nombres } : { apellidos };
-    });
 }
 
 /** «Falta el año», «Faltan autor y año». */
@@ -616,15 +604,6 @@ function PanelBody() {
     </div>,
     document.body,
   );
-}
-
-/** A change to name, authors or year also rewrites the reference while it is still the builder's own. */
-function withReference(current: Fuente, patch: Partial<Omit<Fuente, "id">>): Partial<Omit<Fuente, "id">> {
-  if ("cita" in patch) return patch;
-  const next = { ...current, ...patch };
-  const untouched = !current.cita || current.cita === buildReference(current);
-  if (untouched && (next.autores?.length || next.anio)) return { ...patch, cita: buildReference(next) };
-  return patch;
 }
 
 // ---------------------------------------------------------------- pieces

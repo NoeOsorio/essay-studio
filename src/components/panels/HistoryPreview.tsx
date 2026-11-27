@@ -25,6 +25,11 @@ export function setHistoryPreview(snapshot: Snapshot | null): void {
   listeners.forEach((l) => l());
 }
 
+/** The version being shown over the sheet right now, or null. */
+export function currentHistoryPreview(): Snapshot | null {
+  return shown;
+}
+
 export function useHistoryPreview(): Snapshot | null {
   return useSyncExternalStore(
     (cb) => {

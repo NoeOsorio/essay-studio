@@ -63,7 +63,7 @@ export function isDateOrder(orden: Orden): boolean {
 
 const titleCollator = new Intl.Collator("es", { sensitivity: "base", numeric: true });
 
-function sortRows(rows: LibraryRow[], orden: Orden): LibraryRow[] {
+export function sortRows(rows: LibraryRow[], orden: Orden): LibraryRow[] {
   const out = rows.slice();
   switch (orden) {
     case "antiguos":

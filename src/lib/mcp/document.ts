@@ -7,6 +7,7 @@ import { useStore } from "@/lib/store";
 import { ToolError, MAX_REQUEST_BYTES, type JsonObject } from "../../../shared/mcp";
 import { validateRichContent, validateFormatting, applyFormatting, nativeDocumentTransaction, type Formatting } from "./document-content";
 import { readEvaluation } from "./evaluation";
+import { textRange } from "./collections";
 import { deriveFindings } from "@/lib/review/findings";
 
 let liveDocument: { editor: Editor; essayId: string } | null = null;
@@ -211,6 +212,8 @@ export function readDocument(args: JsonObject): JsonObject {
     ...(args.includeSources ? { sources: sourcesFit ? sources : sources.slice(0, MAX_PAGE_BLOCKS).map(({ id, nombre, cita, origen }) => ({ id, nombre, cita, origen })),
       sourcesTruncated: !sourcesFit, totalSources: sources.length } : {}),
     ...(args.includeRubric ? { rubric: essay.rubrica ? { criterios: criteria.slice(0, MAX_PAGE_BLOCKS) } : null,
+      // The saved assignment, first 16,384 characters; get_rubric pages through the rest.
+      assignment: essay.rubrica?.consigna ? { ...(essay.rubrica.consigna.archivoNombre ? { fileName: essay.rubrica.consigna.archivoNombre } : {}), addedAt: essay.rubrica.consigna.agregadoEn, ...textRange(essay.rubrica.consigna.texto, {}) } : null,
       rubricTruncated: criteria.length > MAX_PAGE_BLOCKS } : {}),
     ...(args.includeAnnotations ? { annotations, findings } : {}),
     ...(args.includeEvaluation ? { evaluation: readEvaluation(essay, args, useStore.getState().scorebarDismissed) } : {}),

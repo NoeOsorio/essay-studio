@@ -61,7 +61,7 @@ export function newRemoteAsset(editor: Editor, args: JsonObject): TLAsset {
   return value;
 }
 
-function decode(value: unknown): Uint8Array<ArrayBuffer> {
+export function decode(value: unknown): Uint8Array<ArrayBuffer> {
   // A chunk remains well below the existing frame even after JSON encoding.
   if (typeof value !== "string" || !value.length || value.length > MAX_REQUEST_BYTES / 2 || value.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)) throw new ToolError("INVALID_UPLOAD", "Provide a nonempty base64 chunk of at most 1 MiB encoded text.");
   let binary: string;

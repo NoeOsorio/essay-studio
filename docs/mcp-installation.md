@@ -333,9 +333,11 @@ La versión de capacidades es la 6.
   la guarda con `apply: true`. Usa un modelo, así que pídelo solo cuando el usuario
   lo quiera.
 - Los agentes propios entran en las corridas: `start_review.pases` acepta
-  `custom:<id>` y `start_interrogation.sages` acepta `c_<id>`. Sin lista, usan los
-  mismos valores de la app, incluidos los agentes propios que están encendidos por
-  defecto. Cada pase o agente es una llamada al modelo. Las correcciones de un
+  `custom:<id>` y `start_interrogation.sages` acepta `c_<id>`. Sin lista,
+  `start_review` usa los pases de la app (con los agentes propios encendidos por
+  defecto) y `start_interrogation` usa solo los agentes fijos del tipo de ensayo, igual
+  que arranca el panel de preguntas; los agentes propios se piden por nombre. Cada
+  pase o agente es una llamada al modelo. Las correcciones de un
   agente propio llevan su nombre y color, y solo traen texto de reemplazo si el
   agente puede pegar.
 - `start_interrogation.ownQuestion` hace una pregunta tuya sobre el texto; la
@@ -347,3 +349,32 @@ La versión de capacidades es la 6.
   iniciado la persona desde los paneles. `control_run` cancela o reintenta esa
   corrida (reintentar usa modelos y pide `userRequested: true`). `get_review_job`
   devuelve `omittedSources`, las fuentes que no cupieron.
+
+## Fuentes, rúbrica, biblioteca y vistas (capacidad 7)
+
+- `edit_rubric` conserva la consigna guardada. `get_rubric` y `get_document` con
+  `includeRubric` la devuelven en `assignment` (por trozos con `textOffset` y
+  `textLimit`).
+- `import_assignment` guarda la consigna (texto, o un PDF, TXT o Markdown en trozos
+  base64 con `begin`, `append` y `finish`) y la IA lee los criterios. Usa un modelo:
+  pide `userRequested: true`. Con la rúbrica vacía los criterios se aplican (`applied`);
+  si ya tiene criterios devuelve `proposal` con un `proposalId` y no cambia nada hasta
+  que la persona acepta y llamas a `confirm_rubric_proposal`, que guarda una versión y
+  reemplaza la rúbrica. `retry` vuelve a leer la consigna guardada.
+- `edit_source` `create` e `import` pasan por la misma puerta que el panel Fuentes:
+  rechazan un texto idéntico (`DUPLICATE_SOURCE`, salvo `allowDuplicate`), respetan los
+  límites y la IA lee la cita en segundo plano (un modelo; `readCitation: false` lo
+  evita). `update` acepta `authors`, `year` (cuatro dígitos) y `publication`, y
+  `restore` devuelve una fuente borrada con la herramienta. `import_source_file` sube un
+  PDF, TXT o Markdown en trozos. `read_source_citation` repite la lectura de la cita
+  (`userRequested: true`). `get_source` y `list_sources` traen `authors`, `year`,
+  `publication`, `citationReadAt` y `reading`.
+- `list_essays` busca en título y cuerpo (con `snippet`), filtra por `reviewState`
+  (`revisado`, `sin_revisar`, `desactualizado`), ordena con `sort` (`recientes`,
+  `antiguos`, `nota`, `titulo`, `relevantes`) y trae `score` por ensayo. `delete_essay`
+  borra también un ensayo que no está abierto (`confirm: true`); no toca el abierto.
+- `set_app_view.panel` abre además: `settings` (Ajustes, con `agentId`; sin ensayo),
+  `report` (la tarjeta de la nota), `corrections` (con `criterioId` opcional), `note`
+  (`noteId`, lectura grande), `version` (`takenAt`, vista previa en Historial) e
+  `interrogation` con `sages`, `sourceId` o `text` ya elegidos. `get_basic_info.appView`
+  dice cuáles están abiertas.

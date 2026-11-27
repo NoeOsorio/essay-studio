@@ -151,6 +151,11 @@ export type ReviewOutcome =
   | { kind: "discarded"; essayId: string }
   | { kind: "done"; essayId: string; fuentesOmitidas?: string[] };
 
+/** What hangs from the stamp: the report card, or Correcciones (all or narrowed to a criterion). */
+export type ReviewView =
+  | { essayId: string; kind: "report" }
+  | { essayId: string; kind: "corrections"; criterioId: string | null };
+
 /** A source taken out of the library, with where it was, so it can be put back. */
 export type RemovedFuente = { essayId: string; fuente: Fuente; index: number };
 
@@ -204,7 +209,9 @@ type State = {
   deleteAgent: (id: CustomAgentId) => Promise<void>;
   settingsOpen: boolean;
   settingsInstant: boolean;
-  openSettings: (opts?: { instant?: boolean }) => void;
+  /** The agent Ajustes opens on (a built-in id or c_<uuid>), or null for the first one. Session only. */
+  settingsAgentId: string | null;
+  openSettings: (opts?: { instant?: boolean; agentId?: string }) => void;
   closeSettings: () => void;
   view: View;
   list: LibraryEntry[];
@@ -212,6 +219,15 @@ type State = {
   library: LibraryView;
   current: Essay | null;
   saveStatus: SaveStatus;
+  /** The surface hanging from the stamp (report card or Correcciones) for one essay, or null. Session only. */
+  reviewView: ReviewView | null;
+  setReviewView: (view: ReviewView | null) => void;
+  /** Agents and source the questions panel opens with when a client asks, or null. `nonce` remounts an open panel. */
+  lecturaPreset: { nonce: number; sages?: Sage[]; sourceId?: string } | null;
+  setLecturaPreset: (preset: { sages?: Sage[]; sourceId?: string } | null) => void;
+  /** A version Historial should show as soon as it has loaded, or null. */
+  historyRequest: string | null;
+  setHistoryRequest: (takenAt: string | null) => void;
   /** Modal overlay shown above the editor (Lectura nueva, etc.). */
   overlay: Overlay;
   /** Whether the right-hand board pane is visible. Hidden = editor
@@ -428,6 +444,10 @@ export const useStore = create<State>((set, get) => ({
   library: INITIAL_LIBRARY_VIEW,
   current: null,
   saveStatus: { kind: "idle" },
+  reviewView: null,
+  lecturaPreset: null,
+  historyRequest: null,
+  settingsAgentId: null,
   overlay: null,
   overlayInstant: false,
   boardOpen: true,
@@ -494,7 +514,19 @@ export const useStore = create<State>((set, get) => ({
   },
 
   openSettings(opts) {
-    set({ settingsOpen: true, settingsInstant: opts?.instant === true });
+    set({ settingsOpen: true, settingsInstant: opts?.instant === true, settingsAgentId: opts?.agentId ?? null });
+  },
+
+  setReviewView(view) {
+    set({ reviewView: view });
+  },
+
+  setLecturaPreset(preset) {
+    set({ lecturaPreset: preset ? { ...preset, nonce: (get().lecturaPreset?.nonce ?? 0) + 1 } : null });
+  },
+
+  setHistoryRequest(takenAt) {
+    set({ historyRequest: takenAt });
   },
 
   closeSettings() {
@@ -582,6 +614,7 @@ export const useStore = create<State>((set, get) => ({
         // recién abierto para que el count del topbar sea honesto.
         history: [],
         lecturas: {},
+        reviewView: null,
         lecturaRubrica: null,
         scorebarDismissed: false,
       });
@@ -632,6 +665,7 @@ export const useStore = create<State>((set, get) => ({
       saveStatus: { kind: "idle" },
       history: [],
       lecturas: {},
+      reviewView: null,
       lecturaRubrica: null,
       _autosaveTimer: null,
     });
@@ -890,7 +924,7 @@ export const useStore = create<State>((set, get) => ({
     // Clear any pending prefill when the overlay closes, so the next
     // manual "Interrogar" starts on an empty textarea.
     if (overlay === null) {
-      set({ overlay, lecturaPrefill: "", overlayInstant: false });
+      set({ overlay, lecturaPrefill: "", lecturaPreset: null, historyRequest: null, overlayInstant: false });
     } else {
       set({ overlay });
     }

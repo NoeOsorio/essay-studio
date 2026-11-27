@@ -4,7 +4,9 @@ import { CAPABILITY_VERSION, PROTOCOL_VERSION, MAX_REQUEST_BYTES, ToolError, TOO
 import { ensureDocument, ensureTitle, readTitleHistory, readDocument, readTextSelection, validateDocumentTool, handleDocumentTool } from "./document";
 import { ensureBoard, getBoardSelection, getBoardSummary, handleBoardTool, validateBoardTool, applyBoardHistory, prepareBoardAsset, resetBoardUploads } from "./board";
 import { editLibrary, readLibrary, validateLibraryEdit } from "./library";
-import { matches, page } from "./collections";
+import { listEssaysTool } from "./essays";
+import { confirmProposalTool, importAssignmentTool, prepareUpload, readSourceCitation, resetMaterialUploads, uploadStep } from "./materials";
+import { describeView, openAppPanel, openSettingsView } from "./views";
 import { startReview, startInterrogation, getReviewJob, cancelReviewJob, cancelReviewScope, listReviewerProfiles, validateReviewApplication, applyReviewResults } from "@/lib/reviews/jobs";
 import { addFindings, editAnnotations, linkNote } from "@/lib/reviews/actions";
 import { editAgent, improveAgentInstructions, listAgents } from "./agents";
@@ -39,7 +41,7 @@ export function startRegistry(): () => void {
 }
 export function setBridgeSession(next: string | null): void {
   if (sessionId !== next) {
-    resetBoardUploads();
+    resetBoardUploads(); resetMaterialUploads();
     if (sessionId) cancelReviewScope(sessionId);
     batchKey = null; revisionNumber += 1;
   }
@@ -69,6 +71,24 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   const definition = TOOL_DEFINITIONS.find(tool => tool.name === name)!;
   const effect = name === "import_board_asset" && args.operation !== "finish" ? "job" : name === "edit_board_page" && args.operation === "delete" ? "destructive" : definition.effect;
   const essayId = args.essayId as string;
+  /** The first edit of a batch saves a safety version; later edits of the same batch reuse it. */
+  const safety = async (): Promise<void> => {
+    const thisBatch = `${requestSession}:${essayId}`;
+    if (batchKey === thisBatch) return;
+    await flushDurable(essayId); guard(); checkRevision(args.revision);
+    const essay = structuredClone(useStore.getState().current!);
+    try { await appendSnapshot({ takenAt: new Date().toISOString(), kind: "manual", essay }); }
+    catch { throw new ToolError("SNAPSHOT_FAILED", "The safety version could not be saved. No edit was applied."); }
+    guard(); assertContext(essayId); checkRevision(args.revision); batchKey = thisBatch;
+  };
+  /** After a long model wait: the save, with a changed essay reported as an unknown outcome. */
+  const saveAfterWait = async (): Promise<void> => {
+    try { await flushDurable(essayId); }
+    catch (error) {
+      if (error instanceof ToolError && error.code === "ESSAY_CHANGED") throw new ToolError("OUTCOME_UNKNOWN", "The essay changed while waiting. Read saved state; do not repeat the operation.");
+      throw error;
+    }
+  };
   if (name === "get_basic_info") {
     const state = useStore.getState();
     let titleHistory: JsonObject = { ready: false };
@@ -78,28 +98,35 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
     }
     const panelNames = { fuentes: "sources", rubrica: "rubric", history: "history", review: "review", lectura: "interrogation" } as const;
     return envelope({ app: "Essay Studio", view: state.view, saveStatus: state.saveStatus.kind,
-      titleHistory, activePanel: state.overlay ? panelNames[state.overlay] : null, scorebarDismissed: state.scorebarDismissed,
+      titleHistory, activePanel: state.overlay ? panelNames[state.overlay] : null, scorebarDismissed: state.scorebarDismissed, appView: describeView(),
       essay: state.current ? { id: state.current.id, title: state.current.title, mode: state.current.mode, language: state.current.language ?? "es", wordCount: state.current.wordCount } : null,
       board: { open: state.boardOpen, ...getBoardSummary() },
       ...describeRuns(),
       capabilities: { protocolVersion: PROTOCOL_VERSION, capabilityVersion: CAPABILITY_VERSION, platform: "macos", tools: TOOL_DEFINITIONS.map(tool => ({ name: tool.name, effect: tool.effect })) } });
   }
   if (name === "list_essays") {
-    const items = await listEssays(); guard();
-    const result = page(items.filter(item => matches(args.query, item.title) && (!args.mode || item.mode === args.mode) && (!args.language || (item.language ?? "es") === args.language)), args);
-    return envelope({ ...result, essays: result.items });
+    const listed = await listEssaysTool(args); guard();
+    return envelope(listed);
   }
   if (name === "list_reviewer_profiles") return envelope(listReviewerProfiles());
   // Agents belong to the app, not to an essay: no open essay or revision is needed.
   if (name === "list_agents") return envelope(listAgents());
   if (name === "edit_agent") { const result = await editAgent(args); guard(true); return envelope(result); }
   if (name === "improve_agent_instructions") { const result = await improveAgentInstructions(args); guard(true); return envelope(result); }
+  if (name === "set_app_view" && args.essayId === undefined) {
+    if (args.panel !== "settings") throw new ToolError("INVALID_ARGUMENTS", "essayId and revision are required, except to open settings.");
+    openSettingsView(args);
+    return envelope({ changed: true });
+  }
+  if (name === "set_app_view" && args.revision === undefined) throw new ToolError("INVALID_ARGUMENTS", "set_app_view needs the revision from get_basic_info.");
   if (name === "control_run") return envelope(controlRun(args as Parameters<typeof controlRun>[0]), essayId);
   if (["open_essay", "create_essay", "close_essay", "delete_essay"].includes(name)) {
     if (args.revision !== undefined) checkRevision(args.revision);
     const state = useStore.getState(); const before = state.current;
     if (name === "create_essay" && typeof args.title === "string" && /[\r\n\u2028\u2029]/u.test(args.title)) throw new ToolError("INVALID_ARGUMENTS", "Essay titles must use a single line.");
-    if (name === "close_essay" || name === "delete_essay") assertContext(essayId);
+    // delete_essay can also remove an essay that is not open; the open one stays untouched then.
+    const deletingOther = name === "delete_essay" && before?.id !== essayId;
+    if (name === "close_essay" || name === "delete_essay" && !deletingOther) assertContext(essayId);
     if (before) { await flushDurable(before.id); guard(); if (args.revision !== undefined) checkRevision(args.revision); }
     if (name === "open_essay") {
       await useStore.getState().openEssay(essayId, before?.id ?? null); guard(true); assertContext(essayId);
@@ -118,15 +145,18 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
       await flushDurable(created.id); guard(true);
       return envelope({ created: true, title: useStore.getState().current!.title, saved: true }, created.id);
     } else {
-      await useStore.getState().closeEssay(); guard(true);
-      if (useStore.getState().current !== null || useStore.getState().view !== "list") throw new ToolError("OUTCOME_UNKNOWN", "Closing was interrupted. Inspect current state before continuing.");
+      if (!deletingOther) {
+        await useStore.getState().closeEssay(); guard(true);
+        if (useStore.getState().current !== null || useStore.getState().view !== "list") throw new ToolError("OUTCOME_UNKNOWN", "Closing was interrupted. Inspect current state before continuing.");
+      } else if (!(await listEssays()).some(item => item.id === essayId)) throw new ToolError("NOT_FOUND", "That essay does not exist. Read list_essays.");
+      guard(true);
       if (name === "delete_essay") {
         await useStore.getState().removeEssay(essayId); guard(true);
         const listed = await listEssays(); guard(true);
         if (listed.some(item => item.id === essayId)) throw new ToolError("DELETE_FAILED", "The essay could not be deleted.");
         if (useStore.getState().current?.id === essayId) throw new ToolError("OUTCOME_UNKNOWN", "The essay was reopened while deletion was dispatched. Inspect current state before continuing.");
       }
-      return envelope({ closed: true, deleted: name === "delete_essay", saved: true });
+      return envelope({ closed: !deletingOther, deleted: name === "delete_essay", saved: true });
     }
     return envelope({ title: useStore.getState().current?.title, saved: true }, essayId);
   }
@@ -145,6 +175,22 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   if (name === "import_board_asset") {
     if (args.operation !== "finish") return envelope(handleBoardTool(name, args), essayId);
     await prepareBoardAsset(args); guard(); assertContext(essayId); checkRevision(args.revision);
+  }
+  if (name === "import_source_file") {
+    if (args.operation !== "finish") return envelope(uploadStep("source", args), essayId);
+    await prepareUpload("source", args); guard(); assertContext(essayId); checkRevision(args.revision);
+  }
+  if (name === "import_assignment" || name === "read_source_citation") {
+    const upload = name === "import_assignment" && ["begin", "append", "cancel"].includes(args.operation as string);
+    if (upload) return envelope(uploadStep("assignment", args), essayId);
+    // Refuse before saving anything: reading uses a model.
+    if (args.userRequested !== true) throw new ToolError("EXPLICIT_REQUEST_REQUIRED", "This reads with a model and requires an explicit user request (userRequested=true).");
+    if (name === "import_assignment" && args.operation === "finish") { await prepareUpload("assignment", args); guard(); assertContext(essayId); checkRevision(args.revision); }
+    await safety(); guard(); assertContext(essayId); checkRevision(args.revision);
+    const value = name === "import_assignment" ? await importAssignmentTool(args) : await readSourceCitation(args);
+    guard(true); assertContext(essayId);
+    await saveAfterWait(); guard(true);
+    return envelope(value, essayId);
   }
   if (name === "get_document") return envelope(readDocument(args), essayId);
   if (name === "get_selection") return envelope({ textSelection: readTextSelection(essayId), boardNodeIds: getBoardSelection() }, essayId);
@@ -166,14 +212,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
       if (typeof args.boardOpen === "boolean" && state.boardOpen !== args.boardOpen) state.toggleBoard();
       if (args.scorebarVisible === false) useStore.getState().dismissScorebar();
       else if (args.scorebarVisible === true) useStore.getState().showScorebar();
-      const panel = args.panel as string | undefined;
-      const store = useStore.getState();
-      if (panel === "history") store.openHistory();
-      else if (panel === "review") store.openReview();
-      else if (panel === "interrogation") store.openLectura();
-      else if (panel === "sources") store.openFuentes();
-      else if (panel === "rubric") store.openRubrica();
-      else if (panel === "none") store.setOverlay(null);
+      await openAppPanel(args); guard(); assertContext(essayId);
       return envelope({ changed: true }, essayId);
     }
     const value = boardSurface ? handleBoardTool(name, args) : handleDocumentTool(name, args);
@@ -189,14 +228,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
   if (name === "apply_review_results") validateReviewApplication(args as Parameters<typeof validateReviewApplication>[0]);
   if (name === "update_essay" && args.reviewerProfile !== undefined && !REVIEWER_PROFILES.some(profile => profile.id === args.reviewerProfile)) throw new ToolError("INVALID_ARGUMENTS", "Unknown reviewer profile.");
   checkRevision(args.revision);
-  const thisBatch = `${requestSession}:${essayId}`;
-  if (batchKey !== thisBatch) {
-    await flushDurable(essayId); guard(); checkRevision(args.revision);
-    const essay = structuredClone(useStore.getState().current!);
-    try { await appendSnapshot({ takenAt: new Date().toISOString(), kind: "manual", essay }); }
-    catch { throw new ToolError("SNAPSHOT_FAILED", "The safety version could not be saved. No edit was applied."); }
-    guard(); assertContext(essayId); checkRevision(args.revision); batchKey = thisBatch;
-  }
+  await safety();
   guard(); assertContext(essayId); checkRevision(args.revision);
   let result: unknown;
   if (name === "restore_version") {
@@ -205,6 +237,7 @@ async function run(request: BridgeRequest, requestSession: string, deadline: num
     result = { restored: true };
   } else if (name === "create_version") { const created = await useStore.getState().snapshotNow("manual"); guard(true); assertContext(essayId); if (!created) throw new ToolError("SNAPSHOT_FAILED", "The version could not be created or the essay changed."); result = { created: true, takenAt: created }; }
   else if (name === "editor_history") result = args.surface === "board" ? applyBoardHistory(args.direction as "undo" | "redo") : handleDocumentTool(name, args);
+  else if (name === "confirm_rubric_proposal") result = await confirmProposalTool(args);
   else if (name === "apply_review_results") result = applyReviewResults(args as Parameters<typeof applyReviewResults>[0]);
   else if (name === "edit_annotations") result = editAnnotations(args as Parameters<typeof editAnnotations>[0]);
   else if (name === "link_note") result = linkNote(args as Parameters<typeof linkNote>[0]);
