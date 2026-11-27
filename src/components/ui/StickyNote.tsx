@@ -29,6 +29,8 @@ type StickyNoteProps = {
   width?: number;
   /** testid on the author row (icon and name). */
   authorTestId?: string;
+  /** Reading size: Newsreader 20/30 body and 24/30 title, roomier padding. */
+  reading?: boolean;
   children: ReactNode;
 };
 
@@ -44,6 +46,7 @@ export function StickyNote({
   tape = true,
   width = NOTE_WIDTH,
   authorTestId,
+  reading = false,
   children,
 }: StickyNoteProps) {
   const id = identityOf(author, record);
@@ -53,10 +56,10 @@ export function StickyNote({
     background: id.note,
     borderRadius: 3,
     boxShadow: "#3C2D0A14 0 1px 1px, #3C2D0A4D 0 10px 20px -8px",
-    padding: "22px 18px 20px",
+    padding: reading ? "34px 32px 32px" : "22px 18px 20px",
     display: "flex",
     flexDirection: "column",
-    gap: 10,
+    gap: reading ? 14 : 10,
     position: "relative",
     rotate: `${tilt}deg`,
     transformOrigin: "50% 50%",
@@ -70,9 +73,9 @@ export function StickyNote({
         <span className="font-sans text-[12px] font-semibold leading-[16px]">{id.name}</span>
       </div>
       {title ? (
-        <div className="font-serif text-[17px] font-medium leading-[23px]">{title}</div>
+        <div className={`font-serif font-medium ${reading ? "text-[24px] leading-[30px]" : "text-[17px] leading-[23px]"}`}>{title}</div>
       ) : null}
-      <div className="font-serif text-[17px] leading-[23px]">{children}</div>
+      <div className={`font-serif ${reading ? "text-[20px] leading-[30px]" : "text-[17px] leading-[23px]"}`}>{children}</div>
       {tape ? (
         <div
           aria-hidden="true"

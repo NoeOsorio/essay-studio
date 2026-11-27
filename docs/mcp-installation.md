@@ -297,3 +297,24 @@ no están en el ensayo ni en sus fuentes se descarta (la corrección se queda).
 Un solo deshacer quita los subrayados de toda la llamada. Para consultar,
 aplicar, descartar o limpiar usa `list_annotations` (filtro `sage: "as"`) y
 `edit_annotations`.
+
+### Poner una referencia en una nota y vincularla a una corrección
+
+Cuando una corrección necesita más contexto del que cabe en la tarjeta (una
+cita larga, una fuente, un ejemplo), déjalo en una nota del tablero y vincula la
+corrección a esa nota. La tarjeta muestra entonces «Ver nota», que abre el
+tablero centrado en la nota y su vista de lectura.
+
+1. Crea la nota con `create_note` (`text`, `title` si quieres, `x`, `y`,
+   `author: "tu"` o el que corresponda). La respuesta trae el id de la nota en `changedIds`
+   (por ejemplo `shape:abc`); también lo devuelve `get_board`.
+2. Vincúlala al enviar la corrección: en `add_findings`, el elemento lleva
+   `noteId` con ese `id`. Si no es una nota del tablero de este ensayo, ese
+   elemento viene en `rejected` con el motivo y el resto se escribe.
+3. Para vincular o desvincular una corrección que ya existe usa `link_note`:
+   `essayId`, `revision`, `operationId`, `findingId` y `noteId` (el id de la
+   nota, o `null` para quitar el vínculo). Un solo deshacer revierte el cambio.
+
+`get_annotation` y `list_annotations` devuelven `noteId` (o `null`). Si la nota se
+borra, la tarjeta deja de mostrar «Ver nota» y `noteId` vuelve como `null`. La
+versión de capacidades es la 5.

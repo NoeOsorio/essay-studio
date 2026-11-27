@@ -74,6 +74,10 @@ finding and the evaluation. Applying a job replaces the open findings of the
 passes it covers. Questions from an interrogation job land as notes on the board,
 in one column per reviewer, the same way the questions panel places them.
 
+Capability version 5 adds `link_note` and an optional `noteId` on each `add_findings`
+item: a correction can point at a note on the board (the card then offers «Ver nota»).
+`get_annotation` and `list_annotations` return `noteId`; a deleted note reads as `null`.
+
 Capability version 3 adds native grouping and page management, explicit title
 history and static SVG image import. The title uses its own existing TipTap history,
 so undo never targets the body or an overlay. SVG is a validated image subset:

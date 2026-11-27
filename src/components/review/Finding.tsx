@@ -18,6 +18,7 @@ import {
 } from "@/lib/review/actions";
 import type { FindingView, SentenceCard } from "@/lib/review/findings";
 import { useStore } from "@/lib/store";
+import { liveNoteId } from "@/lib/board-notes";
 import type { BuiltinPase, Severidad } from "@/lib/storage/types";
 
 export type FindingProps = {
@@ -56,6 +57,40 @@ function CopyIcon() {
       <rect x="4.5" y="4.5" width="7.5" height="7.5" rx="1.5" fill="none" stroke="var(--color-ink-2)" strokeWidth="1.3" />
       <path d="M9.5 2.5H3.5a1 1 0 0 0-1 1v6" fill="none" stroke="var(--color-ink-2)" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/** Ver nota when the correction points at a note that still exists; otherwise Vincular nota while it is open. */
+function NoteLink({ finding, row }: { finding: FindingView; row?: boolean }) {
+  const noteId = useStore((s) => liveNoteId(s.current?.board, finding.noteId));
+  const linking = useStore((s) => s.linkingFindingId === finding.id);
+  const cls =
+    "cursor-pointer text-[13px] font-medium leading-[16px] text-ink-2 transition-colors duration-[120ms] hover:text-ink-1";
+  const wrap = (button: React.ReactNode) =>
+    row ? <div className="flex items-center px-[2px]">{button}</div> : button;
+  if (noteId) {
+    return wrap(
+      <button
+        type="button"
+        data-testid="finding-note-view"
+        onClick={() => useStore.getState().openNote(noteId, { focus: true })}
+        className={cls}
+      >
+        Ver nota
+      </button>,
+    );
+  }
+  if (finding.status === "resolved") return null;
+  return wrap(
+    <button
+      type="button"
+      data-testid="finding-note-link"
+      aria-pressed={linking}
+      onClick={() => useStore.getState().setLinkingFinding(linking ? null : finding.id)}
+      className={cls}
+    >
+      Vincular nota
+    </button>,
   );
 }
 
@@ -205,7 +240,7 @@ function Part({
         />
       ) : null}
 
-      {footer}
+      {footer ?? <NoteLink finding={finding} row />}
     </div>
   );
 }
@@ -221,6 +256,7 @@ export function Finding({ card, surface }: FindingProps) {
   const ids = card.findings.map((f) => f.id);
   const openIds = card.findings.filter((f) => f.status === "open").map((f) => f.id);
 
+  const last = card.parts[card.parts.length - 1];
   const footer = (
     <div className="flex items-center justify-between px-[2px] pt-[2px]">
       <button
@@ -241,16 +277,19 @@ export function Finding({ card, surface }: FindingProps) {
         )}
         Ya lo resolví
       </button>
-      {!resolved ? (
-        <button
-          type="button"
-          data-testid="finding-not-applicable"
-          onClick={() => markCardNotApplicable(openIds)}
-          className="cursor-pointer text-[13px] font-medium leading-[16px] text-ink-3"
-        >
-          No aplica
-        </button>
-      ) : null}
+      <div className="flex items-center gap-[14px]">
+        <NoteLink finding={last} />
+        {!resolved ? (
+          <button
+            type="button"
+            data-testid="finding-not-applicable"
+            onClick={() => markCardNotApplicable(openIds)}
+            className="cursor-pointer text-[13px] font-medium leading-[16px] text-ink-3"
+          >
+            No aplica
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 

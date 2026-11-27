@@ -1,7 +1,8 @@
 "use client";
 
 // Board tools (Paper R2.1): bottom-left, icons only plus fit. Tooltips carry
-// the names and keys. Zoom has no buttons; the wheel and the keyboard remain.
+// the names and keys. Zoom steps with the two buttons; the wheel, pinch and
+// the keyboard remain.
 
 import type { ReactNode } from "react";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -12,6 +13,8 @@ type ToolbarProps = {
   active: BoardTool;
   onTool: (t: BoardTool) => void;
   onFit: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
 };
 
 const STROKE = "var(--color-ink-2)";
@@ -42,6 +45,14 @@ function ArrowGlyph({ on }: { on: boolean }) {
   );
 }
 
+function ZoomGlyph({ plus }: { plus: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="flex-none">
+      <path d={plus ? "M3.5 8h9M8 3.5v9" : "M3.5 8h9"} fill="none" stroke={STROKE} strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function FitGlyph() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="flex-none">
@@ -50,7 +61,7 @@ function FitGlyph() {
   );
 }
 
-export function BoardToolbar({ active, onTool, onFit }: ToolbarProps) {
+export function BoardToolbar({ active, onTool, onFit, onZoomIn, onZoomOut }: ToolbarProps) {
   return (
     <div
       className="absolute left-[16px] bottom-[16px] z-[3] flex items-center gap-[2px] p-[4px] rounded-[12px] bg-sheet shadow-[0_0_0_1px_#1D1B1814,0_4px_14px_-4px_#1D1B182E]"
@@ -66,6 +77,12 @@ export function BoardToolbar({ active, onTool, onFit }: ToolbarProps) {
         <ArrowGlyph on={active === "arrow"} />
       </ToolButton>
       <div aria-hidden="true" className="flex-none h-[18px] w-[1px] mx-[4px] bg-[#1D1B181A]" />
+      <ToolButton testId="board-tool-zoom-out" label="Alejar" shortcut="⌘−" active={false} onClick={onZoomOut}>
+        <ZoomGlyph plus={false} />
+      </ToolButton>
+      <ToolButton testId="board-tool-zoom-in" label="Acercar" shortcut="⌘+" active={false} onClick={onZoomIn}>
+        <ZoomGlyph plus />
+      </ToolButton>
       <ToolButton testId="board-tool-fit" label="Ver todo" shortcut="⇧1" active={false} onClick={onFit}>
         <FitGlyph />
       </ToolButton>

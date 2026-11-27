@@ -217,6 +217,15 @@ type State = {
   /** Whether the right-hand board pane is visible. Hidden = editor
    *  takes the full main column, centered. */
   boardOpen: boolean;
+  /** Reading view of a note, or null. `focus` asks the board to center and
+   *  select the note first (Ver nota from a card). Session only. */
+  noteView: { id: string; focus: boolean } | null;
+  /** Show the board if hidden and open this note large. */
+  openNote: (id: string, opts?: { focus?: boolean }) => void;
+  closeNote: () => void;
+  /** The finding waiting for the writer to pick a note on the board, or null. */
+  linkingFindingId: string | null;
+  setLinkingFinding: (id: string | null) => void;
   /** The one agent the panel opens with (selection bubble), or null when
    *  the agents default to the essay type. */
   lecturaSage: Sage | null;
@@ -422,6 +431,8 @@ export const useStore = create<State>((set, get) => ({
   overlay: null,
   overlayInstant: false,
   boardOpen: true,
+  noteView: null,
+  linkingFindingId: null,
   lecturaSage: null,
   questionRun: null,
   lecturaPrefill: "",
@@ -1063,12 +1074,25 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 
+  openNote(id, opts) {
+    set({ boardOpen: true, noteView: { id, focus: opts?.focus ?? false } });
+  },
+
+  closeNote() {
+    set({ noteView: null });
+  },
+
+  setLinkingFinding(id) {
+    // Picking happens on the board, so make sure it is there.
+    set(id ? { linkingFindingId: id, boardOpen: true } : { linkingFindingId: null });
+  },
+
   toggleBoard() {
     const next = !get().boardOpen;
     // When hiding, force-flush any pending autosave so nothing
     // in-flight gets dropped when BoardPane unmounts.
     if (!next) void get().flush();
-    set({ boardOpen: next });
+    set({ boardOpen: next, ...(next ? {} : { linkingFindingId: null, noteView: null }) });
   },
 
   openHistory(opts) {

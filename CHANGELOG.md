@@ -1,5 +1,12 @@
 # Cambios
 
+## 0.8.0
+
+- Tu asistente (Claude, Codex u otro conectado por MCP) puede escribir correcciones con subrayado y tarjeta, firmadas como «Tu asistente», y cuentan en la nota.
+- Vincula una nota del tablero a una corrección: «Vincular nota» en la tarjeta y luego «Ver nota» te lleva a ella. Tu asistente también puede vincularlas.
+- Doble clic en una nota la abre en grande para leerla completa.
+- Botones para acercar y alejar el tablero.
+
 ## 0.7.1
 
 - El texto «Título» desaparece en cuanto escribes el título de un ensayo nuevo; antes se quedaba encima de tu texto.

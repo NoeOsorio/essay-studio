@@ -43,7 +43,12 @@ function recordFrom(
   existing: FindingRecord | undefined,
   occurrence: number | undefined,
 ): FindingRecord {
-  if (existing) return { ...existing, ...(occurrence !== undefined ? { occurrence } : {}) };
+  if (existing) {
+    // The view is the authority for the link (the mark decides while it exists, so undo is exact).
+    const { noteId: _stale, ...rest } = existing;
+    void _stale;
+    return { ...rest, ...(view.noteId ? { noteId: view.noteId } : {}), ...(occurrence !== undefined ? { occurrence } : {}) };
+  }
   return {
     id: view.id,
     sage: view.sage,
@@ -53,6 +58,7 @@ function recordFrom(
     mensaje: view.mensaje,
     ...(view.reemplazo ? { reemplazo: view.reemplazo } : {}),
     ...(view.criterioId ? { criterioId: view.criterioId } : {}),
+    ...(view.noteId ? { noteId: view.noteId } : {}),
     ...(view.evidence ? { evidence: view.evidence } : {}),
     ...(view.provenance ? { provenance: view.provenance } : {}),
     generadoEn: view.generadoEn ?? nowIso(),
@@ -160,6 +166,7 @@ export function reopenCard(ids: string[]): void {
         mensaje: rec.mensaje,
         reemplazo: rec.reemplazo ?? null,
         criterioId: rec.criterioId ?? null,
+        noteId: rec.noteId ?? null,
         ...(rec.agentColor ? { agentColor: rec.agentColor } : {}),
         evidence: rec.evidence ?? null,
         provenance: rec.provenance ?? null,
@@ -247,4 +254,30 @@ export function revealFinding(id: string): void {
   el.scrollIntoView({ block: "center", behavior: "smooth" });
   el.classList.add("anno-flash");
   window.setTimeout(() => el.classList.remove("anno-flash"), 1700);
+}
+
+/**
+ * Point a correction at a board note, or clear the link. One undo step while
+ * the correction is underlined (the mark carries the link); a card with no
+ * underline keeps it in its record only. Returns false when nothing changed.
+ */
+export function linkFindingNote(id: string, noteId: string | null): boolean {
+  const hit = currentView(id);
+  if (!hit) return false;
+  const { essayId, view } = hit;
+  if ((view.noteId ?? null) === noteId) return false;
+  setUndoSurface("document");
+  let occurrence = view.occurrence;
+  if (view.located) {
+    const editor = getDocumentEditor(essayId);
+    occurrence = occurrenceOf(editor, view);
+    if (!editor.commands.setAnnotationNote(id, noteId)) return false;
+  }
+  const fresh = useStore.getState().current?.findings?.find((r) => r.id === id);
+  const base = recordFrom(view, fresh, occurrence);
+  const { noteId: _old, ...rest } = base;
+  void _old;
+  const record: FindingRecord = { ...rest, ...(noteId ? { noteId } : {}) };
+  useStore.getState().commitFindings((prev) => upsert(prev, record));
+  return true;
 }

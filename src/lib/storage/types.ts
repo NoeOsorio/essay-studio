@@ -172,6 +172,8 @@ export type FindingRecord = {
   closedAt?: string;
   closedBy?: "check" | "replacement";
   occurrence?: number;
+  /** Board note this correction points at. A note that no longer exists counts as no link. */
+  noteId?: string;
   /** Custom agents only: name and color key saved at creation, so the card survives deleting the agent. */
   agentName?: string;
   agentColor?: AgentColorKey;
@@ -211,6 +213,8 @@ export type Anotacion = {
   reemplazo?: string;
   /** Optional id of the rubric criterio this annotation maps to. */
   criterioId?: string;
+  /** Board note it points at (assistant corrections only). */
+  noteId?: string;
   /** ISO 8601 timestamp. */
   generadoEn: string;
 };

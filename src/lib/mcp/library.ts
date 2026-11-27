@@ -1,6 +1,7 @@
 import { useStore } from "@/lib/store";
 import { listHistory, readSnapshot } from "@/lib/storage";
 import type { Criterio, Fuente } from "@/lib/storage/types";
+import { liveNoteId } from "@/lib/board-notes";
 import { deriveFindings, type FindingView } from "@/lib/review/findings";
 import { ToolError, type JsonObject } from "../../../shared/mcp";
 import { matches, page, textRange } from "./collections";
@@ -41,10 +42,10 @@ export function readLibrary(name: string, args: JsonObject): JsonObject | Promis
     if (name === "get_annotation") {
       const found = all.find(item => item.id === args.id);
       if (!found) throw new ToolError("NOT_FOUND", "The annotation does not exist.");
-      return { id: found.id, ...textRange(JSON.stringify(found), args), ...referenceWarnings() };
+      return { id: found.id, noteId: liveNoteId(essay.board, found.noteId) ?? null, ...textRange(JSON.stringify(found), args), ...referenceWarnings() };
     }
     const result = page(all.filter(item => matches(args.query, item.mensaje, item.quote) && (!args.pase || item.pase === args.pase) && (!args.sage || item.sage === args.sage) && (!args.severity || item.severidad === args.severity) && (!args.status || item.status === args.status)), args);
-    return { ...result, items: result.items.map(item => ({ id: item.id, from: item.from, to: item.to, located: item.located, status: item.status, pase: item.pase, sage: item.sage, severity: item.severidad, message: item.mensaje.slice(0, 512), quote: item.quote.slice(0, 512) })), ...referenceWarnings() };
+    return { ...result, items: result.items.map(item => ({ id: item.id, from: item.from, to: item.to, located: item.located, status: item.status, pase: item.pase, sage: item.sage, severity: item.severidad, message: item.mensaje.slice(0, 512), quote: item.quote.slice(0, 512), noteId: liveNoteId(essay.board, item.noteId) ?? null })), ...referenceWarnings() };
   }
   if (name === "list_sources") {
     const result = page((essay.fuentes ?? []).filter(source => matches(args.query, source.nombre, source.cita) && (!args.origin || source.origen === args.origin)), args);

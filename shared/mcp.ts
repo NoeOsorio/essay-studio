@@ -1,6 +1,6 @@
 /** Shared wire contract: MCP adapter and live renderer use one tool registry. */
 export const PROTOCOL_VERSION = 1;
-export const CAPABILITY_VERSION = 4;
+export const CAPABILITY_VERSION = 5;
 export const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 export type JsonObject = Record<string, unknown>;
 export type BridgeRequest = { requestId: string; name: string; args: JsonObject };
@@ -32,6 +32,7 @@ const findingItem = { type: "object", additionalProperties: true, properties: {
   severidad: { type: "string", description: "Importance: alta, media or baja." },
   reemplazo: { type: "string", description: "Optional. Literal text that would replace the quote when the writer presses Usar este texto. Plain prose with no prefix such as \"Rewrite:\". Dropped if it carries a number or a proper name found neither in the essay nor in its sources." },
   criterioId: { type: "string", description: "Optional id of a rubric criterion (from get_rubric). An unknown id is ignored." },
+  noteId: { type: "string", description: "Optional id of a note on this essay's board (from create_note or get_board). The card then offers Ver nota. A missing or non-note id rejects the item." },
   occurrence: { type: "integer", minimum: 0, description: "Optional. Which repeated occurrence of the quote to underline, counting from 0. Default: the first one." },
 } };
 export type ToolEffect = "read" | "view" | "content" | "destructive" | "model" | "job" | "save";
@@ -92,7 +93,8 @@ export const TOOL_DEFINITIONS = [
   tool("cancel_review_job", "job", "review", "Cancel a job and its underlying generation. Already consumed usage cannot be undone.", { ...context, jobId: id }, [...contextRequired, "jobId"]),
   tool("apply_review_results", "content", "review", "Write selected results: findings go through the same path as the review panel (cards, underlines, coverage and score), questions land as notes on the board. Reject obsolete inputs and never rerun inference.", { ...mutation, jobId: id, annotationIds: ids, questionIds: ids }, [...mutationRequired, "jobId"]),
   tool("edit_annotations", "content", "review", "Apply the replacement of selected open findings (closed as resolved), discard them (closed as not applicable), or clear the whole evaluation. Same actions as the finding cards, with the same undo.", { ...mutation, operation: { enum: ["apply", "discard", "clear"] }, ids }, [...mutationRequired, "operation"]),
-  tool("add_findings", "content", "review", "Add your own corrections to the open essay, shown as underlines and cards in Correcciones under the name Tu asistente, and counted in the score. Does not start any model run. Read the essay first with get_document, quote literal text from it, and send one finding per problem. Each item is checked on its own: invalid items come back in `rejected` with a reason and the rest are written. A quote not found in the text is kept as a card with no underline (located: false). Findings are added to what the assistant sent before; set replaceOwn to true to replace only the assistant's earlier open findings. Send at most 100 per call. One undo removes the whole call.", { ...mutation, findings: { type: "array", minItems: 1, maxItems: 100, items: findingItem }, replaceOwn: bool }, [...mutationRequired, "operationId", "findings"]),
+  tool("add_findings", "content", "review", "Add your own corrections to the open essay, shown as underlines and cards in Correcciones under the name Tu asistente, and counted in the score. Does not start any model run. Read the essay first with get_document, quote literal text from it, and send one finding per problem. Each item is checked on its own: invalid items come back in `rejected` with a reason and the rest are written. A quote not found in the text is kept as a card with no underline (located: false). Findings are added to what the assistant sent before; set replaceOwn to true to replace only the assistant's earlier open findings. Send at most 100 per call. An item may carry noteId to link a board note. One undo removes the whole call.", { ...mutation, findings: { type: "array", minItems: 1, maxItems: 100, items: findingItem }, replaceOwn: bool }, [...mutationRequired, "operationId", "findings"]),
+  tool("link_note", "content", "review", "Point a correction at a board note, or clear the link with noteId null. The card then shows Ver nota, which opens the board on that note. The finding id comes from list_annotations or add_findings; the note id from create_note or get_board. One native undo step.", { ...mutation, findingId: id, noteId: {} }, [...mutationRequired, "operationId", "findingId", "noteId"]),
   tool("finish_work", "save", "app", "Flush pending saves and end the editing batch. Never claim saved on errors.", context, contextRequired),
 ];
 export type ToolName = typeof TOOL_DEFINITIONS[number]["name"];

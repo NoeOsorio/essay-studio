@@ -20,6 +20,7 @@
 // must not be undoable, is `applyReview`, kept out of history.
 
 import { Mark, mergeAttributes } from "@tiptap/core";
+import type { Mark as PMMark } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -37,6 +38,8 @@ export type AnnotationAttrs = {
   reemplazo: string | null;
   /** Optional id of the rubric criterio this annotation maps to. */
   criterioId: string | null;
+  /** Board note this correction points at (the record keeps it too; the mark makes the link undoable). */
+  noteId?: string | null;
   /** Custom agents: color key saved with the mark, so its underline keeps the color. */
   agentColor?: AgentColorKey | null;
 };
@@ -76,6 +79,11 @@ declare module "@tiptap/core" {
        * multiple block nodes — those cases need manual editing.
        */
       applyAnnotationReemplazo: (id: string, reemplazo: string) => ReturnType;
+      /**
+       * Set or clear the board note a correction points at, as one history
+       * step, so Cmd Z undoes exactly the link change.
+       */
+      setAnnotationNote: (id: string, noteId: string | null) => ReturnType;
       /** Strip every annotation mark from the document. */
       clearAllAnnotations: () => ReturnType;
       /**
@@ -172,6 +180,11 @@ export const Annotation = Mark.create({
         parseHTML: (el) => el.getAttribute("data-color"),
         renderHTML: (attrs) =>
           attrs.agentColor ? { "data-color": String(attrs.agentColor) } : {},
+      },
+      noteId: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-note-id"),
+        renderHTML: (attrs) => (attrs.noteId ? { "data-note-id": String(attrs.noteId) } : {}),
       },
       criterioId: {
         default: null,
@@ -370,6 +383,29 @@ export const Annotation = Mark.create({
               firstFrom + reemplazo.length,
               this.type,
             );
+            dispatch(closeHistory(tr));
+          }
+          return true;
+        },
+      setAnnotationNote:
+        (id, noteId) =>
+        ({ tr, dispatch, state }) => {
+          const hits: { from: number; to: number; attrs: Record<string, unknown>; mark: PMMark }[] = [];
+          state.doc.descendants((node, pos) => {
+            for (const m of node.marks) {
+              if (m.type.name === "annotation" && m.attrs.id === id) {
+                hits.push({ from: pos, to: pos + node.nodeSize, attrs: m.attrs, mark: m });
+              }
+            }
+            return true;
+          });
+          if (hits.length === 0) return false;
+          if (dispatch) {
+            closeHistory(tr);
+            for (const h of hits) {
+              tr.removeMark(h.from, h.to, h.mark);
+              tr.addMark(h.from, h.to, this.type.create({ ...h.attrs, noteId }));
+            }
             dispatch(closeHistory(tr));
           }
           return true;

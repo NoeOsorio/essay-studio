@@ -502,6 +502,26 @@ html, body {
   animation: sheet-in var(--dur-settle) var(--ease-out) both;
 }
 
+/* Reading sheet of a note: veil fades, the sheet scales from 0.97 (under 320 ms).
+   Closing is instant: Esc and the veil are keyboard and quick-dismiss paths. */
+@keyframes reading-veil-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes reading-sheet-in {
+  0%   { opacity: 0; transform: scale(0.97); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.reading-veil { animation: reading-veil-in 200ms var(--ease-out) both; }
+.reading-sheet { animation: reading-sheet-in 240ms var(--ease-out) both; }
+
+/* Picking a note for a correction: the panel steps aside so the whole board can be pressed. */
+[data-testid="corrections-panel"] { transition: opacity 160ms var(--ease-out); }
+html[data-picking-note] [data-testid="corrections-panel"] { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  [data-testid="corrections-panel"] { transition: none; }
+}
+
 /* Tooltip entrance. */
 @keyframes tooltip-in {
   0%   { opacity: 0; transform: translateY(4px); }
@@ -525,6 +545,7 @@ html, body {
   .note-peel-shadow { animation: peel-shadow var(--dur-peel) var(--ease-standard) both; }
   .board-empty-loop { animation: none; opacity: 0.7; }
   .sheet-in   { animation: fade-in var(--dur-settle) var(--ease-standard) both; }
+  .reading-veil, .reading-sheet { animation: none; }
   .tooltip-in { animation: fade-in var(--dur-tooltip) var(--ease-standard) both; }
   .sage-pulse { animation: none; }
 }

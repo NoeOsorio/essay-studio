@@ -4,11 +4,12 @@ import { findCitaRange } from "@/lib/editor/findCita";
 import { getDocumentEditor } from "@/lib/mcp/document";
 import { liveBoardEditor } from "@/lib/mcp/board";
 import { openLanding, placeNote, endLanding } from "@/lib/questions/landing";
-import { markCardNotApplicable, useReplacement as replaceWithSuggestion } from "@/lib/review/actions";
+import { linkFindingNote, markCardNotApplicable, useReplacement as replaceWithSuggestion } from "@/lib/review/actions";
 import { deriveFindings } from "@/lib/review/findings";
 import { reviewFingerprint } from "@/lib/review/fingerprint";
 import { matchFirstLetterCase, replacementIsGrounded, reviewCorpus, writeReviewFindings } from "@/lib/review/run";
 import { buildAnotacion } from "@/lib/agents";
+import { boardNoteIds } from "@/lib/board-notes";
 import { useStore } from "@/lib/store";
 import { ToolError } from "../../../shared/mcp";
 import type { Anotacion, Interrogatorio, Sage } from "@/lib/storage/types";
@@ -118,7 +119,7 @@ export function editAnnotations(args: { essayId: string; operation: "apply" | "d
   return { changed: true };
 }
 
-const FINDING_KEYS = new Set(["cita", "mensaje", "severidad", "reemplazo", "criterioId", "occurrence"]);
+const FINDING_KEYS = new Set(["cita", "mensaje", "severidad", "reemplazo", "criterioId", "noteId", "occurrence"]);
 
 /**
  * Corrections written by the writer's own assistant: the same records,
@@ -139,6 +140,7 @@ export function addFindings(args: { essayId: string; findings: unknown[]; replac
   const generadoEn = new Date().toISOString();
   const corpus = reviewCorpus(essay.content, essay.fuentes);
   const rejected: { index: number; reason: string }[] = [];
+  const boardNotes = boardNoteIds(essay.board);
   const anotaciones: Anotacion[] = [];
   const indexOf = new Map<string, number>();
   const occurrences = new Map<string, number>();
@@ -147,7 +149,7 @@ export function addFindings(args: { essayId: string; findings: unknown[]; replac
     const reject = (reason: string) => { rejected.push({ index, reason }); };
     if (!item || typeof item !== "object" || Array.isArray(item)) return reject("The finding must be an object.");
     const f = item as Record<string, unknown>;
-    if (Object.keys(f).some((key) => !FINDING_KEYS.has(key))) return reject("Unknown field. Use cita, mensaje, severidad, reemplazo, criterioId and occurrence.");
+    if (Object.keys(f).some((key) => !FINDING_KEYS.has(key))) return reject("Unknown field. Use cita, mensaje, severidad, reemplazo, criterioId, noteId and occurrence.");
     if (typeof f.cita !== "string" || !f.cita.trim()) return reject("cita is required: literal text from the essay.");
     if (f.cita.length > 2000) return reject("cita is longer than 2000 characters.");
     if (typeof f.mensaje !== "string" || !f.mensaje.trim()) return reject("mensaje is required.");
@@ -155,11 +157,16 @@ export function addFindings(args: { essayId: string; findings: unknown[]; replac
     if (f.severidad !== "alta" && f.severidad !== "media" && f.severidad !== "baja") return reject("severidad must be alta, media or baja.");
     if (f.reemplazo !== undefined && (typeof f.reemplazo !== "string" || f.reemplazo.length > 2000)) return reject("reemplazo must be text of at most 2000 characters.");
     if (f.criterioId !== undefined && typeof f.criterioId !== "string") return reject("criterioId must be a rubric criterion id.");
+    if (f.noteId !== undefined) {
+      if (typeof f.noteId !== "string" || !f.noteId) return reject("noteId must be the id of a note on this essay's board.");
+      if (!boardNotes.has(f.noteId)) return reject("noteId is not a note on this essay's board.");
+    }
     if (f.occurrence !== undefined && (typeof f.occurrence !== "number" || !Number.isSafeInteger(f.occurrence) || f.occurrence < 0)) return reject("occurrence must be an integer of 0 or more.");
     const a = buildAnotacion(
       { cita: f.cita, mensaje: f.mensaje.trim(), severidad: f.severidad, ...(typeof f.reemplazo === "string" && f.reemplazo.trim() ? { reemplazo: f.reemplazo.trim() } : {}), ...(typeof f.criterioId === "string" ? { criterioId: f.criterioId } : {}) },
       "as", "asistente", generadoEn, essay.rubrica?.criterios,
     );
+    if (typeof f.noteId === "string") a.noteId = f.noteId;
     // The same guards as the agents: the replacement keeps the first-letter case and brings nothing the essay and its sources do not have.
     if (a.reemplazo) {
       if (replacementIsGrounded(a.reemplazo, corpus)) a.reemplazo = matchFirstLetterCase(a.reemplazo, a.cita);
@@ -183,4 +190,16 @@ export function addFindings(args: { essayId: string; findings: unknown[]; replac
   }
   rejected.sort((x, y) => x.index - y.index);
   return { added: written.map((w) => ({ ...w, ...(dropped.has(w.id) ? { replacementDropped: true } : {}) })), rejected };
+}
+
+/** Point a correction at a board note, or clear the link. Same action as the cards' Vincular nota. */
+export function linkNote(args: { essayId: string; findingId: string; noteId: string | null }): { changed: boolean; noteId: string | null } {
+  const editor = getDocumentEditor(args.essayId);
+  assertReviewDocumentEditable(editor);
+  const essay = useStore.getState().current;
+  if (!essay || essay.id !== args.essayId) throw new ToolError("ESSAY_CHANGED", "The requested essay is not open.");
+  if (args.noteId !== null && (typeof args.noteId !== "string" || !boardNoteIds(essay.board).has(args.noteId))) throw new ToolError("NOTE_NOT_FOUND", "noteId is not a note on this essay's board.");
+  const exists = deriveFindings(essay.content, essay.findings).some((view) => view.id === args.findingId);
+  if (!exists) throw new ToolError("ANNOTATION_NOT_FOUND", "The finding does not exist in the current document.");
+  return { changed: linkFindingNote(args.findingId, args.noteId), noteId: args.noteId };
 }

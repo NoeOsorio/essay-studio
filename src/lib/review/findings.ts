@@ -34,6 +34,8 @@ export type FindingView = {
   mensaje: string;
   reemplazo?: string;
   criterioId?: string;
+  /** Linked board note. Located: the mark decides (so undo is exact); otherwise the record. */
+  noteId?: string;
   evidence?: FindingRecord["evidence"];
   provenance?: FindingRecord["provenance"];
   generadoEn?: string;
@@ -215,6 +217,7 @@ export function deriveFindings(
       mensaje: rec?.mensaje ?? str(a.mensaje) ?? "",
       reemplazo: rec?.reemplazo ?? str(a.reemplazo) ?? str(a.sugerencia),
       criterioId: rec?.criterioId ?? str(a.criterioId),
+      noteId: str(a.noteId),
       evidence: rec?.evidence ?? (Array.isArray(a.evidence) ? (a.evidence as FindingView["evidence"]) : undefined),
       provenance: rec?.provenance ?? (a.provenance && typeof a.provenance === "object" ? (a.provenance as FindingView["provenance"]) : undefined),
       generadoEn: rec?.generadoEn,
@@ -258,6 +261,7 @@ export function deriveFindings(
       mensaje: r.mensaje ?? "",
       reemplazo: r.reemplazo,
       criterioId: r.criterioId,
+      noteId: r.noteId,
       evidence: r.evidence,
       provenance: r.provenance,
       generadoEn: r.generadoEn,

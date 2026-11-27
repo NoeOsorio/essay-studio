@@ -1,13 +1,17 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   loadSnapshot,
+  type TLShapeId,
   ShapeIndicatorOverlayUtil,
   toRichText,
   type Editor,
+  type TLClickEventInfo,
   type TLComponents,
+  type TLPointerEventInfo,
+  type TLShape,
   type TLStoreSnapshot,
 } from "tldraw";
 import "tldraw/tldraw.css";
@@ -17,6 +21,8 @@ import { boardHasNotes } from "@/lib/board-empty";
 import { registerPointerLanding } from "@/lib/canvas/note-motion";
 import { PergaminoNoteShapeUtil } from "./note-shape";
 import { NoteBar } from "./NoteBar";
+import { NoteReading } from "./NoteReading";
+import { linkFindingNote } from "@/lib/review/actions";
 import { BoardEmpty } from "./BoardEmpty";
 import { BoardToolbar, type BoardTool } from "./BoardToolbar";
 import { persistBoardSnapshot, registerBoard } from "@/lib/mcp/board";
@@ -68,6 +74,13 @@ const COMPONENTS: TLComponents = {
 export function BoardPane() {
   const current = useStore((s) => s.current);
   const essayId = current?.id ?? "none";
+  // A pick that was waiting belongs to the essay it started in.
+  const seenEssay = useRef(essayId);
+  useEffect(() => {
+    if (seenEssay.current === essayId) return;
+    seenEssay.current = essayId;
+    useStore.getState().setLinkingFinding(null);
+  }, [essayId]);
   // Re-mount the canvas on essay switch — tldraw's local store is per
   // canvas, so we hydrate fresh from the new essay's snapshot.
   return <BoardPaneInner key={essayId} essayId={essayId} />;
@@ -86,10 +99,59 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
   // editor's signals via useValue. Set once on mount.
   const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+
+  const linking = useStore((s) => s.linkingFindingId !== null);
+  const focusNote = useStore((s) => (s.noteView?.focus ? s.noteView.id : null));
+
+  // Pick mode: the next press on a note links it; anywhere else, or Esc,
+  // cancels. Capture phase, so the board never sees the press.
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!linking || !surface || !editor) return;
+    document.documentElement.setAttribute("data-picking-note", "");
+    const cancel = () => useStore.getState().setLinkingFinding(null);
+    const onDown = (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const findingId = useStore.getState().linkingFindingId;
+      const point = editor.screenToPage({ x: e.clientX, y: e.clientY });
+      const hit = editor.getShapeAtPoint(point, { hitInside: true, margin: 6 / editor.getZoomLevel() });
+      cancel();
+      if (hit && hit.type === "note" && findingId) linkFindingNote(findingId, hit.id);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cancel();
+    };
+    surface.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.documentElement.removeAttribute("data-picking-note");
+      surface.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [linking, editor]);
+
+  // Ver nota from a card: center and select the note, then its reading view opens (NoteReading).
+  useEffect(() => {
+    if (!focusNote || !editor) return;
+    const shape = editor.getShape(focusNote as TLShapeId);
+    if (!shape) return;
+    editor.select(shape.id);
+    const bounds = editor.getShapePageBounds(shape.id);
+    if (bounds) editor.centerOnPoint(bounds.center, { animation: { duration: editor.options.animationMediumMs } });
+  }, [focusNote, editor]);
 
   return (
     <div className="board-grid relative h-full overflow-hidden" data-board-surface>
-      <div className="absolute inset-0">
+      <div
+        ref={surfaceRef}
+        className="absolute inset-0"
+        style={linking ? { cursor: "pointer" } : undefined}
+      >
         <Tldraw
           shapeUtils={SHAPE_UTILS}
           overlayUtils={OVERLAY_UTILS}
@@ -117,6 +179,70 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
 
             // A dropped file must not become an asset inside the essay JSON.
             editor.registerExternalContentHandler("files", null);
+
+            // Double-click on a note opens its reading view, not the text
+            // editor. Editing stays on Editar (reading view), Enter and a new
+            // note. A double-click lands in one of two select states: idle
+            // (note not yet selected, or the press came from the selection
+            // box) and pointing_shape (the second press of a click pair on a
+            // note), so both are covered.
+            const openReading = (shape: TLShape | undefined | null): boolean => {
+              if (!shape || shape.type !== "note" || editor.getIsReadonly()) return false;
+              editor.select(shape.id);
+              useStore.getState().openNote(shape.id);
+              return true;
+            };
+            const idle = editor.getStateDescendant("select.idle") as unknown as {
+              onDoubleClick: (info: TLClickEventInfo) => void;
+            } | undefined;
+            if (idle) {
+              const original = idle.onDoubleClick.bind(idle);
+              idle.onDoubleClick = (info) => {
+                if (info.phase === "up" && !info.shiftKey && !info.ctrlKey) {
+                  let shape: TLShape | undefined;
+                  if (info.target === "shape") shape = info.shape;
+                  else if (info.target === "selection") shape = editor.getOnlySelectedShape() ?? undefined;
+                  else if (info.target === "canvas") {
+                    const p = editor.inputs.getCurrentPagePoint();
+                    shape =
+                      editor.getHoveredShape() ??
+                      editor.getSelectedShapeAtPoint(p) ??
+                      editor.getShapeAtPoint(p, { margin: editor.options.hitTestMargin / editor.getZoomLevel(), hitInside: false });
+                  }
+                  if (openReading(shape)) return;
+                }
+                original(info);
+              };
+            }
+            const pointing = editor.getStateDescendant("select.pointing_shape") as unknown as {
+              onDoubleClick: (info: TLClickEventInfo) => void;
+              onPointerUp: (info: TLPointerEventInfo) => void;
+              hitShape?: TLShape;
+              parent: { transition: (id: string, info?: unknown) => void };
+            } | undefined;
+            if (pointing) {
+              const original = pointing.onDoubleClick.bind(pointing);
+              // A press on the note that is already selected used to start
+              // text editing, which would swallow the first click of a
+              // double-click. It now only keeps the selection.
+              const originalUp = pointing.onPointerUp.bind(pointing);
+              pointing.onPointerUp = (info) => {
+                const hit = pointing.hitShape;
+                const alone = hit ? editor.getOnlySelectedShapeId() === hit.id : false;
+                if (hit && hit.type === "note" && alone && !info.shiftKey && !info.ctrlKey && !info.accelKey) {
+                  pointing.parent.transition("idle", info);
+                  return;
+                }
+                originalUp(info);
+              };
+              pointing.onDoubleClick = (info) => {
+                if (!info.shiftKey && !info.ctrlKey && openReading(pointing.hitShape)) {
+                  pointing.parent.transition("idle", info);
+                  return;
+                }
+                original(info);
+              };
+            }
 
             const unregisterBoard = registerBoard(editor, essayId);
             const unregisterLanding = registerPointerLanding(editor);
@@ -190,6 +316,16 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
           else if (t === "arrow") editor.setCurrentTool("arrow");
           else editor.setCurrentTool("select");
         }}
+        onZoomIn={() => {
+          markWriterMovedCamera();
+          const ed = editorRef.current;
+          ed?.zoomIn(undefined, { animation: { duration: ed.options.animationMediumMs } });
+        }}
+        onZoomOut={() => {
+          markWriterMovedCamera();
+          const ed = editorRef.current;
+          ed?.zoomOut(undefined, { animation: { duration: ed.options.animationMediumMs } });
+        }}
         onFit={() => {
           // Ver todo is the writer's move: a running question run stops following.
           markWriterMovedCamera();
@@ -197,7 +333,17 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
         }}
       />
 
+      {linking ? (
+        <div
+          role="status"
+          data-testid="note-pick-pill"
+          className="pointer-events-none absolute left-1/2 top-[16px] z-[3] -translate-x-1/2 rounded-full bg-sheet px-[14px] py-[8px] font-sans text-[13px] font-medium leading-[16px] text-ink-1 shadow-[0_0_0_1px_#1D1B1814,0_4px_14px_-4px_#1D1B182E]"
+        >
+          Elige una nota
+        </div>
+      ) : null}
       {editor ? <NoteBar editor={editor} /> : null}
+      {editor ? <NoteReading editor={editor} /> : null}
       {editor ? <AgentRunChips editor={editor} /> : null}
       {editor ? <LandedNoteActions editor={editor} /> : null}
     </div>

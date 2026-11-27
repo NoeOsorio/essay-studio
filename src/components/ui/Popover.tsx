@@ -54,6 +54,8 @@ export function useSheetBehavior(opts: {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // While a note is being picked on the board, Esc belongs to that (it cancels the pick).
+      if (document.documentElement.hasAttribute("data-picking-note")) return;
       if (openSheets[openSheets.length - 1] !== token) return;
       e.preventDefault();
       e.stopImmediatePropagation();
