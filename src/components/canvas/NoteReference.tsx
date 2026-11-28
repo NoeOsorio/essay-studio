@@ -37,7 +37,7 @@ const BUTTON =
 const PRIMARY =
   "h-[28px] px-[12px] rounded-[8px] bg-ink-1 font-sans text-[13px] font-medium leading-[16px] text-white cursor-pointer whitespace-nowrap transition-colors duration-[120ms] hover:bg-[#3A3631] disabled:cursor-default disabled:bg-[#B9B3A8] press";
 const LINK =
-  "ml-auto flex h-[28px] items-center gap-[4px] font-sans text-[13px] font-medium leading-[16px] text-ink-2 cursor-pointer whitespace-nowrap hover:text-ink-1";
+  "flex h-[20px] items-center gap-[4px] font-sans text-[13px] font-medium leading-[16px] text-ink-2 cursor-pointer whitespace-nowrap hover:text-ink-1";
 
 function Copied() {
   return (
@@ -53,14 +53,8 @@ export function useResolvedReference(reference: NoteReference): ResolvedReferenc
   return useMemo(() => resolveReference(reference, fuentes), [reference, fuentes]);
 }
 
-/** Three actions: copy the reference, copy the in-text citation, open the source. */
-export function ReferenceActions({
-  resolved,
-  onOpenSource,
-}: {
-  resolved: ResolvedReference;
-  onOpenSource?: () => void;
-}) {
+/** Copy actions for a reference: the full entry (primary) and the in-text citation. */
+export function ReferenceActions({ resolved, size = "sm" }: { resolved: ResolvedReference; size?: "sm" | "md" }) {
   const [copied, setCopied] = useState<"apa" | "inText" | null>(null);
   const timer = useRef<number | null>(null);
   useEffect(
@@ -77,22 +71,32 @@ export function ReferenceActions({
       timer.current = window.setTimeout(() => setCopied(null), CONFIRM_MS);
     });
   };
+  const h = size === "md" ? " h-[32px]" : "";
   return (
-    <div className="flex flex-wrap items-center gap-[6px]">
+    <div className="flex flex-wrap items-center gap-[8px]">
       {copied === "apa" ? (
         <Copied />
       ) : (
-        <button type="button" data-testid="reference-copy-apa" className={PRIMARY} onClick={() => copy("apa")}>
+        <button type="button" data-testid="reference-copy-apa" className={PRIMARY + h} onClick={() => copy("apa")}>
           Copiar referencia completa
         </button>
       )}
       {copied === "inText" ? (
         <Copied />
       ) : (
-        <button type="button" data-testid="reference-copy-intext" className={BUTTON} onClick={() => copy("inText")}>
+        <button type="button" data-testid="reference-copy-intext" className={BUTTON + h} onClick={() => copy("inText")}>
           Copiar cita en el texto
         </button>
       )}
+    </div>
+  );
+}
+
+/** «Referencia» label with «Ver en Fuentes» on the same line, right-aligned. */
+function ReferenceHeader({ resolved, onOpenSource }: { resolved: ResolvedReference; onOpenSource?: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-[12px]">
+      <h3 className="m-0 font-sans text-[12px] font-semibold leading-[16px] opacity-70">Referencia</h3>
       {resolved.source && onOpenSource ? (
         <button type="button" data-testid="reference-open-source" className={LINK} onClick={onOpenSource}>
           Ver en Fuentes
@@ -106,11 +110,12 @@ export function ReferenceActions({
 /** Full reference in Newsreader with its actions. Used by the popover. */
 function ReferenceCard({ resolved, onOpenSource }: { resolved: ResolvedReference; onOpenSource: () => void }) {
   return (
-    <div className="flex flex-col gap-[12px] p-[14px]">
-      <p data-testid="reference-apa" className="m-0 font-serif text-[15px] leading-[22px] text-ink-1">
+    <div className="flex flex-col gap-[10px] p-[14px]">
+      <ReferenceHeader resolved={resolved} onOpenSource={onOpenSource} />
+      <p data-testid="reference-apa" className="m-0 font-serif text-[15px] leading-[22px] text-ink-1 [overflow-wrap:anywhere]">
         {resolved.apa}
       </p>
-      <ReferenceActions resolved={resolved} onOpenSource={onOpenSource} />
+      <ReferenceActions resolved={resolved} />
     </div>
   );
 }
@@ -119,12 +124,12 @@ function ReferenceCard({ resolved, onOpenSource }: { resolved: ResolvedReference
 export function ReferenceSection({ reference, onOpenSource }: { reference: NoteReference; onOpenSource: () => void }) {
   const resolved = useResolvedReference(reference);
   return (
-    <section data-testid="note-reading-reference" className="mt-[18px] flex flex-col gap-[8px]">
-      <h3 className="m-0 font-sans text-[12px] font-semibold leading-[16px] opacity-70">Referencia</h3>
-      <p data-testid="reference-apa" className="m-0 font-serif text-[17px] leading-[26px]">
+    <section data-testid="note-reading-reference" className="mt-[24px] flex flex-col gap-[10px]">
+      <ReferenceHeader resolved={resolved} onOpenSource={onOpenSource} />
+      <p data-testid="reference-apa" className="m-0 font-serif text-[17px] leading-[26px] [overflow-wrap:anywhere]">
         {resolved.apa}
       </p>
-      <ReferenceActions resolved={resolved} onOpenSource={onOpenSource} />
+      <ReferenceActions resolved={resolved} size="md" />
     </section>
   );
 }

@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.10.3
+
+- La nota en grande ya no se desborda con URLs largas, y sus botones quedan alineados: «Ver en Fuentes» junto al título «Referencia», los dos botones de copiar juntos y «Editar» aparte.
+
 ## 0.10.2
 
 - Las notas largas ya no se estiran en el tablero: muestran 8 líneas que se desvanecen y la referencia al pie; con doble clic se leen completas.

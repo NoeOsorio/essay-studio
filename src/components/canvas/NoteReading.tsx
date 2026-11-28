@@ -95,7 +95,7 @@ function Sheet({ editor, note }: { editor: Editor; note: TLNoteShape }) {
         className="reading-sheet flex max-h-full flex-col gap-[14px] outline-none"
         style={{ width: 560, maxWidth: "100%" }}
       >
-        <div className="min-h-0 overflow-auto rounded-[3px] pt-[12px]" data-testid="note-reading-scroll">
+        <div className="min-h-0 overflow-y-auto overflow-x-hidden rounded-[3px] pt-[12px]" data-testid="note-reading-scroll">
           <StickyNote
             reading
             author={id.id}
@@ -104,7 +104,7 @@ function Sheet({ editor, note }: { editor: Editor; note: TLNoteShape }) {
             width={560}
             authorTestId="note-reading-author"
           >
-            <div className="whitespace-pre-wrap" data-testid="note-reading-text">
+            <div className="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="note-reading-text">
               {text}
             </div>
             {reference ? (
@@ -117,7 +117,7 @@ function Sheet({ editor, note }: { editor: Editor; note: TLNoteShape }) {
                 }}
               />
             ) : null}
-            <div className="mt-[20px] flex items-center gap-[16px] font-sans" data-testid="note-reading-actions">
+            <div className="mt-[24px] flex items-center gap-[16px] font-sans" data-testid="note-reading-actions">
               <button type="button" className={EDIT} data-testid="note-reading-edit" onClick={edit}>
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M9.6 2.4l2 2L5 11H3v-2z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>
                 Editar
