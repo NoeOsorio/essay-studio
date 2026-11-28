@@ -402,3 +402,7 @@ La versión de capacidades es la 6.
   (`noteId`, lectura grande), `version` (`takenAt`, vista previa en Historial) e
   `interrogation` con `sages`, `sourceId` o `text` ya elegidos. `get_basic_info.appView`
   dice cuáles están abiertas.
+
+## Skill para asistentes
+
+`skills/essay-studio/SKILL.md` le enseña a Claude, Codex u otro asistente a trabajar bien en Essay Studio: revisar con correcciones que ofrecen «Usar este texto», poner referencias en su apartado de cada nota, vincular notas y correcciones, y editar mientras escribes. Para instalarla, copia la carpeta `skills/essay-studio` a `~/.claude/skills/` (Claude Code), `~/.codex/skills/` (Codex) o `~/.agents/skills/`. Si cambias las herramientas del MCP, actualiza también la skill.
