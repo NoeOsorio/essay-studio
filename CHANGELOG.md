@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.10.4
+
+- Al abrir una nota con doble clic ya puedes escribir: el título y el texto se editan ahí mismo y se guardan solos. Ya no hay botón «Editar» ni te regresa a la nota alargada del tablero. Un solo Cmd+Z deshace toda la edición.
+
 ## 0.10.3
 
 - La nota en grande ya no se desborda con URLs largas, y sus botones quedan alineados: «Ver en Fuentes» junto al título «Referencia», los dos botones de copiar juntos y «Editar» aparte.

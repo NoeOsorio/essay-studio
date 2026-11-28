@@ -181,8 +181,8 @@ function BoardPaneInner({ essayId }: { essayId: string }) {
             editor.registerExternalContentHandler("files", null);
 
             // Double-click on a note opens its reading view, not the text
-            // editor. Editing stays on Editar (reading view), Enter and a new
-            // note. A double-click lands in one of two select states: idle
+            // editor. The reading view edits in place; Enter and a new note
+            // still edit on the board. A double-click lands in one of two select states: idle
             // (note not yet selected, or the press came from the selection
             // box) and pointing_shape (the second press of a click pair on a
             // note), so both are covered.
