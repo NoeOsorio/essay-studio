@@ -1,5 +1,10 @@
 # Cambios
 
+## 0.10.2
+
+- Las notas largas ya no se estiran en el tablero: muestran 8 líneas que se desvanecen y la referencia al pie; con doble clic se leen completas.
+- Los botones de la referencia ahora dicen «Copiar referencia completa» y «Copiar cita en el texto».
+
 ## 0.10.1
 
 - Los botones de la referencia y de la nota en grande tienen jerarquía: una acción principal, las demás más discretas, y «Copiada» aparece como estado, no como botón.

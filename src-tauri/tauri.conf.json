@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Essay Studio",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "identifier": "com.noeosorio.essaystudio",
   "build": {
     "frontendDist": "../out",

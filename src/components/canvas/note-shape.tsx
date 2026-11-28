@@ -65,6 +65,9 @@ const HEADER = 16;
 const GAP = 10;
 const TITLE_GAP = 2;
 const LINE = 23;
+/** On the board a long body shows this many lines and fades out; double-click reads it whole. */
+const MAX_BODY_LINES = 8;
+const MAX_BODY = MAX_BODY_LINES * LINE;
 const FONT_SIZE = 17;
 const TEXT_WIDTH = NOTE_WIDTH - PAD_SIDE * 2;
 /** Room for a title line and a body line, so an empty note does not jump when editing starts. */
@@ -111,11 +114,14 @@ export function measureNote(editor: Editor, shape: TLNoteShape) {
   });
   const editing = editor.getEditingShapeId() === shape.id;
   const title = measured.title > 0 ? measured.title : editing ? LINE : 0;
-  const text = title + (title > 0 ? TITLE_GAP : 0) + measured.body;
+  // Editing shows the whole body; at rest a long one is capped (clipped).
+  const clipped = !editing && measured.body > MAX_BODY;
+  const body = clipped ? MAX_BODY : measured.body;
+  const text = title + (title > 0 ? TITLE_GAP : 0) + body;
   // One quiet line under the text when the note has a reference.
   const reference = hasReference(shape.meta) ? GAP + REFERENCE_LINE : 0;
   const height = Math.max(MIN_HEIGHT, PAD_TOP + HEADER + GAP + text + reference + PAD_BOTTOM);
-  return { header: HEADER, title, body: measured.body, reference, height };
+  return { header: HEADER, title, body, clipped, reference, height };
 }
 
 /** The tilted outline of a note, in shape space. */
@@ -258,7 +264,7 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
     };
     const serif = style.getPropertyValue("--font-serif").trim() || "serif";
     const sans = style.getPropertyValue("--font-sans").trim() || "sans-serif";
-    const { title: titleHeight, body, height, reference } = measureNote(this.editor, shape);
+    const { title: titleHeight, body, height, reference, clipped } = measureNote(this.editor, shape);
     const ref = referenceOf(shape.meta);
     const refLabel = ref ? resolveReference(ref, useStore.getState().current?.fuentes).label : "";
     const tilt = shape.rotation === 0 ? tiltOf(shape.id) : 0;
@@ -286,12 +292,19 @@ export class PergaminoNoteShapeUtil extends NoteShapeUtil {
             bounds={new Box(PAD_SIDE, textTop, TEXT_WIDTH, titleHeight)}
           />
         ) : null}
-        <RichTextSVG
-          fontSize={FONT_SIZE} fontFamily={serif} lineHeight={LINE / FONT_SIZE}
-          textAlign="start" verticalAlign="start" wrap richText={shape.props.richText}
-          labelColor={resolve(id.text)} padding={0} showTextOutline={false}
-          bounds={new Box(PAD_SIDE, textTop + (titleHeight > 0 ? titleHeight + TITLE_GAP : 0), TEXT_WIDTH, body)}
-        />
+        {clipped ? (
+          <clipPath id={`${filterId}-body`}>
+            <rect x={PAD_SIDE} y={textTop + (titleHeight > 0 ? titleHeight + TITLE_GAP : 0)} width={TEXT_WIDTH} height={body} />
+          </clipPath>
+        ) : null}
+        <g clipPath={clipped ? `url(#${filterId}-body)` : undefined}>
+          <RichTextSVG
+            fontSize={FONT_SIZE} fontFamily={serif} lineHeight={LINE / FONT_SIZE}
+            textAlign="start" verticalAlign="start" wrap richText={shape.props.richText}
+            labelColor={resolve(id.text)} padding={0} showTextOutline={false}
+            bounds={new Box(PAD_SIDE, textTop + (titleHeight > 0 ? titleHeight + TITLE_GAP : 0), TEXT_WIDTH, body)}
+          />
+        </g>
         {reference > 0 ? (
           <g transform={`translate(${PAD_SIDE} ${height - PAD_BOTTOM - REFERENCE_LINE})`} color={resolve("var(--color-ink-3)")}>
             <GlyphLibro size={14} />
@@ -339,6 +352,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
     () => measureNote(editor, shape).height,
     [editor, shape],
   );
+  const clipped = useValue("note clipped", () => measureNote(editor, shape).clipped, [editor, shape]);
 
   const id = identityOf((shape.meta as PostItMeta).author, shape.meta as PostItMeta);
   const title = titleOf(shape);
@@ -399,6 +413,15 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
               </div>
             ) : null}
             {bodyVisible ? (
+              <div
+                data-testid={clipped ? "note-body-clipped" : undefined}
+                style={clipped ? {
+                  maxHeight: MAX_BODY,
+                  overflow: "hidden",
+                  WebkitMaskImage: `linear-gradient(to bottom, #000 ${MAX_BODY - LINE * 2}px, transparent ${MAX_BODY}px)`,
+                  maskImage: `linear-gradient(to bottom, #000 ${MAX_BODY - LINE * 2}px, transparent ${MAX_BODY}px)`,
+                } : undefined}
+              >
               <RichTextLabel
                 shapeId={shape.id}
                 type="note"
@@ -417,6 +440,7 @@ function PergaminoNoteRenderer({ shape }: { shape: TLNoteShape }) {
                 onKeyDown={bodyKeyDown}
                 style={{ position: "relative", inset: "auto", width: "100%", height: "auto" }}
               />
+              </div>
             ) : null}
             {reference ? <ReferenceLine editor={editor} reference={reference} /> : null}
           </div>
